@@ -646,7 +646,7 @@ export function NewResearch({
         model: inner.model,
         fe: inner.fe === "rich",
         inner_loop: inner,
-        agent_cli: inner.agent_cli ?? null,
+        agent_cli: inner.mode === "agent" ? (inner.agent_cli ?? null) : null,
       };
       const r = await launchBenchmarkTask(selected.task_id, payload);
       // Agent-mode launch with no remote agent configured ends as a clear FAILED run

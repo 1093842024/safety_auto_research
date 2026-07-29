@@ -60,12 +60,23 @@ class Repository:
             return
         for coll_name, (model_name, key) in _PERSIST_COLLECTIONS.items():
             coll = getattr(self, coll_name)
+            success_count = 0
+            total_count = 0
             for item in raw.get(coll_name, []) or []:
+                total_count += 1
                 try:
                     obj = _MODEL_BY_NAME[model_name](**item["data"])
                     coll[getattr(obj, key)] = obj
+                    success_count += 1
                 except Exception:
                     continue
+            if total_count > 0:
+                logging.warning(
+                    "Loaded %d/%d records from collection '%s'",
+                    success_count,
+                    total_count,
+                    coll_name,
+                )
         self.metrics = raw.get("metrics", {}) or {}
         if not isinstance(self.metrics, dict):
             self.metrics = {}

@@ -57,13 +57,27 @@ export function Leaderboard({ onOpenRun, onNewResearch, taskName }: Props) {
   }, [load]);
 
   const sorted = useMemo(() => {
-    // global: data already ranked; task: sort by score & direction.
-    if (mode === "global") return records;
+    // global: data already ranked; task: sort by score & direction only when a specific task is selected.
+    if (mode === "global" || !filterTask) return records;
     return [...records].sort((a, b) => {
       const dir = a.direction === "lower" ? -1 : 1;
       return (a.score - b.score) * dir;
     });
-  }, [records, mode]);
+  }, [records, mode, filterTask]);
+
+  const rankInTask = useMemo(() => {
+    const map: Record<string, number> = {};
+    let lastTask = "";
+    let rank = 0;
+    for (const rec of sorted) {
+      if (rec.task_id !== lastTask) {
+        lastTask = rec.task_id;
+        rank = 0;
+      }
+      map[rec.record_id] = rank++;
+    }
+    return map;
+  }, [sorted]);
 
   const handleReproduce = async (rec: ResearchRecord) => {
     setBusyId(rec.record_id);
@@ -164,9 +178,9 @@ export function Leaderboard({ onOpenRun, onNewResearch, taskName }: Props) {
               <tr key={rec.record_id} className={rec.is_top3 ? "top3" : ""}>
                 <td>
                   {rec.is_top3 ? (
-                    <span className="medal">{["🥇", "🥈", "🥉"][i] || "★"}</span>
+                    <span className="medal">{["🥇", "🥈", "🥉"][rankInTask[rec.record_id]] || "★"}</span>
                   ) : (
-                    <span className="muted">{i + 1}</span>
+                    <span className="muted">{(rankInTask[rec.record_id] ?? i) + 1}</span>
                   )}
                 </td>
                 <td>

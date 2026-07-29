@@ -178,7 +178,10 @@ def embedding_retrieval_eval(
         if gold == "" or ranked is None:
             continue
         if isinstance(ranked, str):
-            ranked = json.loads(ranked) if ranked.strip().startswith("[") else [ranked]
+            try:
+                ranked = json.loads(ranked) if ranked.strip().startswith("[") else [ranked]
+            except (json.JSONDecodeError, TypeError):
+                ranked = [ranked]
         ranked = list(ranked)
         n += 1
         for k in ks:

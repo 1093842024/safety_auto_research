@@ -111,7 +111,10 @@ export function DualLoopLive({ runId }: { runId: string }) {
             <span className="mono">
               {(() => {
                 const ev = events.filter((e) => e.event_type === "eval_completed").pop();
-                return ev ? `acc=${ev.metrics?.accuracy} gate=${ev.gate_passed}` : "—";
+                if (!ev) return "—";
+                const metrics = ev.metrics ?? {};
+                const parts = Object.entries(metrics).map(([k, v]) => `${k}=${v}`);
+                return `${parts.length ? parts.join(" ") + " " : ""}gate=${ev.gate_passed}`;
               })()}
             </span>
           </div>

@@ -182,7 +182,11 @@ class SubprocessTransport(Transport):
             proc.stdout.close()
         except Exception:
             pass
-        proc.wait()
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
         if terminal is None:
             raise RuntimeError(
                 f"agent {self.agent_command!r} returned no terminal message"

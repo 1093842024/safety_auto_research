@@ -51,12 +51,14 @@ const DECISION_LABEL: Record<string, string> = {
   revisit: "REFINE · 复核",
   restart: "RESTART · 重启",
   exit_success: "EXIT_SUCCESS",
+  continue: "继续",
 };
 const DECISION_CLASS: Record<string, string> = {
   accept: "ok",
   revisit: "warn",
   restart: "bad",
   exit_success: "ok",
+  continue: "accent",
 };
 
 export function RunDashboard({ runId }: { runId: string }) {

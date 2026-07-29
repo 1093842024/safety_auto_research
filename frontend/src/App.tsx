@@ -88,7 +88,9 @@ export function App() {
         for (const t of ts) m[t.task_id] = t;
         setTaskMap(m);
       })
-      .catch(() => {});
+      .catch((err: any) => {
+        console.warn("[App] Failed to load benchmark tasks:", err);
+      });
     return () => clearInterval(t);
   }, []);
 
