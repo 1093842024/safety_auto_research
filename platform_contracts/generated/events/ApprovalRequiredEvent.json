@@ -1,0 +1,96 @@
+{
+  "$defs": {
+    "EventType": {
+      "enum": [
+        "program_created",
+        "workflow_requested",
+        "workflow_started",
+        "stage_queued",
+        "stage_started",
+        "artifact_published",
+        "gate_passed",
+        "gate_failed",
+        "eval_completed",
+        "attack_completed",
+        "decision_issued",
+        "lesson_promoted",
+        "approval_required",
+        "approval_resolved",
+        "workflow_finished",
+        "stage_cancelled"
+      ],
+      "title": "EventType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A HITL gate was opened. Carries the policy/role context for the approval.\n\nEmitted in addition to the workflow/stage status-change event when a run\nenters ``waiting_approval`` (see ``WorkflowStatusChangedEvent`` /\n``StageStatusChangedEvent``), so the control plane can route it to reviewers.",
+  "properties": {
+    "approval_id": {
+      "title": "Approval Id",
+      "type": "string"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "$ref": "#/$defs/EventType",
+      "default": "approval_required"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "policy_ref": {
+      "title": "Policy Ref",
+      "type": "string"
+    },
+    "reason": {
+      "title": "Reason",
+      "type": "string"
+    },
+    "required_roles": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Required Roles",
+      "type": "array"
+    },
+    "risk_tier": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Risk Tier"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "subject_ref": {
+      "title": "Subject Ref",
+      "type": "string"
+    },
+    "subject_type": {
+      "title": "Subject Type",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "approval_id",
+    "subject_type",
+    "subject_ref",
+    "reason",
+    "policy_ref"
+  ],
+  "title": "ApprovalRequiredEvent",
+  "type": "object"
+}

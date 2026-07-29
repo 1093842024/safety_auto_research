@@ -1,0 +1,75 @@
+import React, { useEffect, useState } from "react";
+import { getEvents } from "../api/client";
+
+/** HITL approval console: resolve open approval gates (risk-tiered). */
+export function ApprovalConsole({ runId }: { runId: string }) {
+  const [approvals, setApprovals] = useState<Array<Record<string, any>>>([]);
+  const [busy, setBusy] = useState<string>("");
+
+  const load = async () => {
+    try {
+      const evs = await getEvents(runId);
+      setApprovals(evs.filter((e) => e.event_type === "approval_required"));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 3000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId]);
+
+  const resolve = async (approvalId: string, resolution: "approved" | "rejected") => {
+    setBusy(approvalId);
+    try {
+      await fetch(`/api/workflow-runs/${runId}/resolve-approval`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resolution, resolved_by: "frontend_user" }),
+      });
+      await load();
+    } catch {
+      /* ignore */
+    } finally {
+      setBusy("");
+    }
+  };
+
+  if (!approvals.length)
+    return <div className="card muted">无待审批项（HITL 门未触发）。</div>;
+
+  return (
+    <div className="card">
+      <h2>HITL 审批台</h2>
+      {approvals.map((a) => (
+        <div key={a.approval_id} style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
+          <div className="row">
+            <span className="pill warn">{a.risk_tier || "risk?"}</span>
+            <span className="mono">{a.approval_id}</span>
+          </div>
+          <div className="muted">{a.reason}</div>
+          {a.policy_ref && <div className="mono muted">policy: {a.policy_ref}</div>}
+          <div className="row" style={{ marginTop: 6 }}>
+            <button
+              className="btn primary"
+              disabled={busy === a.approval_id}
+              onClick={() => resolve(a.approval_id, "approved")}
+            >
+              批准
+            </button>
+            <button
+              className="btn"
+              disabled={busy === a.approval_id}
+              onClick={() => resolve(a.approval_id, "rejected")}
+            >
+              拒绝
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

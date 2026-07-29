@@ -1,0 +1,72 @@
+{
+  "$defs": {
+    "Modality": {
+      "enum": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "code",
+        "multimodal"
+      ],
+      "title": "Modality",
+      "type": "string"
+    },
+    "TargetType": {
+      "enum": [
+        "classifier",
+        "judge",
+        "router",
+        "rag_guard",
+        "agent_guard",
+        "multimodal_detector"
+      ],
+      "title": "TargetType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "acceptance_policy_ref": {
+      "title": "Acceptance Policy Ref",
+      "type": "string"
+    },
+    "capabilities": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Capabilities",
+      "type": "array"
+    },
+    "modality": {
+      "$ref": "#/$defs/Modality"
+    },
+    "target_id": {
+      "title": "Target Id",
+      "type": "string"
+    },
+    "target_type": {
+      "$ref": "#/$defs/TargetType"
+    },
+    "task_family": {
+      "title": "Task Family",
+      "type": "string"
+    },
+    "threat_model_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Threat Model Refs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "target_id",
+    "target_type",
+    "modality",
+    "task_family",
+    "acceptance_policy_ref"
+  ],
+  "title": "SafetyTarget",
+  "type": "object"
+}

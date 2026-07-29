@@ -1,0 +1,72 @@
+{
+  "$defs": {
+    "DecisionType": {
+      "enum": [
+        "continue",
+        "revisit",
+        "exit_success",
+        "exit_budget",
+        "exit_converged",
+        "hitl_required"
+      ],
+      "title": "DecisionType",
+      "type": "string"
+    },
+    "EventType": {
+      "enum": [
+        "program_created",
+        "workflow_requested",
+        "workflow_started",
+        "stage_queued",
+        "stage_started",
+        "artifact_published",
+        "gate_passed",
+        "gate_failed",
+        "eval_completed",
+        "attack_completed",
+        "decision_issued",
+        "lesson_promoted",
+        "approval_required",
+        "approval_resolved",
+        "workflow_finished",
+        "stage_cancelled"
+      ],
+      "title": "EventType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "decision_id": {
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "decision_type": {
+      "$ref": "#/$defs/DecisionType"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "$ref": "#/$defs/EventType",
+      "default": "decision_issued"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "decision_id",
+    "decision_type"
+  ],
+  "title": "DecisionRecordedEvent",
+  "type": "object"
+}

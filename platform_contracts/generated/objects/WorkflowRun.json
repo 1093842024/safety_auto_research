@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "RunType": {
+      "enum": [
+        "standard_research",
+        "badcase_retrain",
+        "adversarial_hardening"
+      ],
+      "title": "RunType",
+      "type": "string"
+    },
+    "WorkflowStatus": {
+      "enum": [
+        "requested",
+        "running",
+        "waiting_approval",
+        "succeeded",
+        "failed",
+        "exited_budget",
+        "exited_converged",
+        "cancelled"
+      ],
+      "title": "WorkflowStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "ended_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ended At"
+    },
+    "entry_stage": {
+      "title": "Entry Stage",
+      "type": "string"
+    },
+    "objective_snapshot": {
+      "additionalProperties": true,
+      "title": "Objective Snapshot",
+      "type": "object"
+    },
+    "program_id": {
+      "title": "Program Id",
+      "type": "string"
+    },
+    "requested_outcomes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Requested Outcomes",
+      "type": "array"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "run_type": {
+      "$ref": "#/$defs/RunType"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/WorkflowStatus"
+    },
+    "target_id": {
+      "title": "Target Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "program_id",
+    "run_type",
+    "entry_stage",
+    "target_id",
+    "status",
+    "started_at"
+  ],
+  "title": "WorkflowRun",
+  "type": "object"
+}

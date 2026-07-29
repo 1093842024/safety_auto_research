@@ -1,0 +1,64 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "attack_taxonomy_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Attack Taxonomy Refs",
+      "type": "array"
+    },
+    "campaign_id": {
+      "title": "Campaign Id",
+      "type": "string"
+    },
+    "generation_policy_ref": {
+      "title": "Generation Policy Ref",
+      "type": "string"
+    },
+    "replay_buffer_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Replay Buffer Ref"
+    },
+    "risk_controls": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Risk Controls",
+      "type": "array"
+    },
+    "success_metrics": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "title": "Success Metrics",
+      "type": "object"
+    },
+    "target_model_id": {
+      "title": "Target Model Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "campaign_id",
+    "target_model_id",
+    "generation_policy_ref"
+  ],
+  "title": "AttackCampaign",
+  "type": "object"
+}

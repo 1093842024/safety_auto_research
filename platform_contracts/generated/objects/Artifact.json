@@ -1,0 +1,83 @@
+{
+  "$defs": {
+    "ArtifactType": {
+      "enum": [
+        "paper_set",
+        "idea_card",
+        "design_spec",
+        "dataset_release",
+        "code_patch",
+        "model_checkpoint",
+        "eval_report",
+        "attack_report",
+        "lesson_card"
+      ],
+      "title": "ArtifactType",
+      "type": "string"
+    },
+    "Visibility": {
+      "enum": [
+        "private",
+        "restricted",
+        "internal",
+        "public"
+      ],
+      "title": "Visibility",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "artifact_id": {
+      "title": "Artifact Id",
+      "type": "string"
+    },
+    "artifact_type": {
+      "$ref": "#/$defs/ArtifactType"
+    },
+    "compliance_tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Compliance Tags",
+      "type": "array"
+    },
+    "integrity_hash": {
+      "title": "Integrity Hash",
+      "type": "string"
+    },
+    "lineage_parent_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Lineage Parent Ids",
+      "type": "array"
+    },
+    "producer_ref": {
+      "title": "Producer Ref",
+      "type": "string"
+    },
+    "schema_version": {
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "uri": {
+      "title": "Uri",
+      "type": "string"
+    },
+    "visibility": {
+      "$ref": "#/$defs/Visibility"
+    }
+  },
+  "required": [
+    "artifact_id",
+    "artifact_type",
+    "uri",
+    "schema_version",
+    "producer_ref",
+    "integrity_hash",
+    "visibility"
+  ],
+  "title": "Artifact",
+  "type": "object"
+}

@@ -1,0 +1,76 @@
+{
+  "$defs": {
+    "EventType": {
+      "enum": [
+        "program_created",
+        "workflow_requested",
+        "workflow_started",
+        "stage_queued",
+        "stage_started",
+        "artifact_published",
+        "gate_passed",
+        "gate_failed",
+        "eval_completed",
+        "attack_completed",
+        "decision_issued",
+        "lesson_promoted",
+        "approval_required",
+        "approval_resolved",
+        "workflow_finished",
+        "stage_cancelled"
+      ],
+      "title": "EventType",
+      "type": "string"
+    },
+    "StageStatus": {
+      "enum": [
+        "queued",
+        "running",
+        "waiting_approval",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ],
+      "title": "StageStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "$ref": "#/$defs/EventType"
+    },
+    "from_status": {
+      "$ref": "#/$defs/StageStatus"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "stage_run_id": {
+      "title": "Stage Run Id",
+      "type": "string"
+    },
+    "to_status": {
+      "$ref": "#/$defs/StageStatus"
+    }
+  },
+  "required": [
+    "event_type",
+    "run_id",
+    "stage_run_id",
+    "from_status",
+    "to_status"
+  ],
+  "title": "StageStatusChangedEvent",
+  "type": "object"
+}

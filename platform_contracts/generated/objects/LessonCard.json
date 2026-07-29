@@ -1,0 +1,55 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "applicable_stages": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Applicable Stages",
+      "type": "array"
+    },
+    "confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "lesson_id": {
+      "title": "Lesson Id",
+      "type": "string"
+    },
+    "pattern_type": {
+      "title": "Pattern Type",
+      "type": "string"
+    },
+    "payload_ref": {
+      "title": "Payload Ref",
+      "type": "string"
+    },
+    "prm_score": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Prm Score",
+      "type": "number"
+    },
+    "scope": {
+      "title": "Scope",
+      "type": "string"
+    },
+    "source_run_id": {
+      "title": "Source Run Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "lesson_id",
+    "scope",
+    "source_run_id",
+    "pattern_type",
+    "confidence",
+    "payload_ref",
+    "prm_score"
+  ],
+  "title": "LessonCard",
+  "type": "object"
+}

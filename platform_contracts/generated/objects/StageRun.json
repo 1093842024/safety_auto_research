@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "GateResult": {
+      "enum": [
+        "pending",
+        "passed",
+        "failed",
+        "waived"
+      ],
+      "title": "GateResult",
+      "type": "string"
+    },
+    "StageStatus": {
+      "enum": [
+        "queued",
+        "running",
+        "waiting_approval",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ],
+      "title": "StageStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "executor_family": {
+      "title": "Executor Family",
+      "type": "string"
+    },
+    "gate_result": {
+      "$ref": "#/$defs/GateResult"
+    },
+    "input_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Input Refs",
+      "type": "array"
+    },
+    "output_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Output Refs",
+      "type": "array"
+    },
+    "retry_count": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Retry Count",
+      "type": "integer"
+    },
+    "reviewer_family": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reviewer Family"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "stage_code": {
+      "title": "Stage Code",
+      "type": "string"
+    },
+    "stage_run_id": {
+      "title": "Stage Run Id",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/StageStatus"
+    }
+  },
+  "required": [
+    "stage_run_id",
+    "run_id",
+    "stage_code",
+    "executor_family",
+    "gate_result",
+    "status"
+  ],
+  "title": "StageRun",
+  "type": "object"
+}

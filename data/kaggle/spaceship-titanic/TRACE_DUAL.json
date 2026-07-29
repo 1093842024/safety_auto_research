@@ -1,0 +1,512 @@
+{
+  "run_id": "run-2c441e22bc84",
+  "driver": "scripted-dual-loop",
+  "mode": "dual-loop",
+  "competition": "spaceship",
+  "codex_model": null,
+  "objective": {
+    "task": "Kaggle Spaceship Titanic — ML from the Cosmos",
+    "goal": "Research task: the Kaggle 'Spaceship Titanic' competition. Goal: predict whether a passenger was transported to an alternate dimension (binary, target=Transported). Use the run_capability tool to run the 'kaggle_eval' capability, which trains a REAL scikit-learn model on the provided data and 5-fold cross-validates it. Call it with params: {\"preset\":\"spaceship\", \"target\":\"Transported\", \"data_dir\":\"/Users/glennge/work/github/AI_research/safety_auto_research/data/kaggle/spaceship-titanic\", \"threshold\":0.8, \"model\":\"gbm\"}. Try a strong model (gbm / GradientBoosting) and a baseline (logreg / LogisticRegression). Report the cross-validated accuracy and whether it meets the gold target of >= 0.8. Afterwards you MAY also call 'layer_08_result_analysis_experience' to distil a reusable lesson. Then return your final task.run_stage message with event=null and a concise rationale.",
+    "target_metric": "accuracy",
+    "target_threshold": 0.8,
+    "op": "ge",
+    "gold_reference": "Kaggle public leaderboard gold ~= 0.80 accuracy"
+  },
+  "events": [
+    {
+      "event_id": "evt-145967eaa3244a71b44e2d82718e7602",
+      "event_type": "workflow_requested",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:17.255767Z",
+      "from_status": "requested",
+      "to_status": "requested"
+    },
+    {
+      "event_id": "evt-ee9666d6cfe9430fa639fbc0203dfc87",
+      "event_type": "workflow_started",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:17.256101Z",
+      "from_status": "requested",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-e0b2fac604664939aff4c1ef3934eb27",
+      "event_type": "stage_queued",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:17.256171Z",
+      "stage_run_id": "stage-d8c87d017a6b",
+      "from_status": "queued",
+      "to_status": "queued"
+    },
+    {
+      "event_id": "evt-6adb28cdfb194b238a38fad2bf3138e2",
+      "event_type": "stage_started",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:17.256200Z",
+      "stage_run_id": "stage-d8c87d017a6b",
+      "from_status": "queued",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-6002b45e40e4441b86bfabbf547b4a26",
+      "event_type": "eval_completed",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.067202Z",
+      "eval_suite_id": "kaggle-spaceship-Transported",
+      "stage_run_id": "stage-d8c87d017a6b",
+      "passed": false,
+      "metrics": {
+        "accuracy": 0.7966,
+        "accuracy_std": 0.0099,
+        "f1_macro": 0.7959,
+        "cv_folds": 5.0
+      },
+      "gate_passed": false,
+      "report_ref": "kaggle-eval://stage-d8c87d017a6b"
+    },
+    {
+      "event_id": "evt-77270eba3f934a32bf9abd89665c41d2",
+      "event_type": "artifact_published",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.067425Z",
+      "artifact_id": "artifact-8f7e0bf72c27",
+      "artifact_type": "eval_report"
+    },
+    {
+      "event_id": "evt-f161af1ddd3f43ed9198a3f5d1da98ce",
+      "event_type": "gate_passed",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068305Z",
+      "stage_run_id": "stage-d8c87d017a6b",
+      "from_status": "running",
+      "to_status": "succeeded"
+    },
+    {
+      "event_id": "evt-9e109ed8758b44a78fb22ab2fe0f6349",
+      "event_type": "stage_queued",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068472Z",
+      "stage_run_id": "stage-5b72202f434c",
+      "from_status": "queued",
+      "to_status": "queued"
+    },
+    {
+      "event_id": "evt-b3e421f1c86546118f1f66c626e5d966",
+      "event_type": "stage_started",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068492Z",
+      "stage_run_id": "stage-5b72202f434c",
+      "from_status": "queued",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-b559df9a270f491d8daabbe0ce89b6aa",
+      "event_type": "audit_completed",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068573Z",
+      "audit_id": "audit-stage-5b72202f434c",
+      "audited_target": "Research task: the Kaggle 'Spaceship Titanic' competition. Goal: predict whether a passenger was transported to an alternate dimension (binary, target=Transported). Use the run_capability tool to run the 'kaggle_eval' capability, which trains a REAL scikit-learn model on the provided data and 5-fold cross-validates it. Call it with params: {\"preset\":\"spaceship\", \"target\":\"Transported\", \"data_dir\":\"/Users/glennge/work/github/AI_research/safety_auto_research/data/kaggle/spaceship-titanic\", \"threshold\":0.8, \"model\":\"gbm\"}. Try a strong model (gbm / GradientBoosting) and a baseline (logreg / LogisticRegression). Report the cross-validated accuracy and whether it meets the gold target of >= 0.8. Afterwards you MAY also call 'layer_08_result_analysis_experience' to distil a reusable lesson. Then return your final task.run_stage message with event=null and a concise rationale.",
+      "constraints": [
+        {
+          "id": "primary_metric",
+          "description": "primary metric meets threshold (0.8)",
+          "status": "conflict",
+          "evidence_ref": "kaggle-eval://stage-d8c87d017a6b",
+          "score": 0.3,
+          "note": "cv accuracy=0.7966"
+        },
+        {
+          "id": "eval_is_real",
+          "description": "evaluation is a real (non-mocked) measurement",
+          "status": "verified",
+          "evidence_ref": "kaggle-eval://stage-d8c87d017a6b",
+          "score": 1.0,
+          "note": "report_ref indicates real kaggle/sklearn eval"
+        },
+        {
+          "id": "claims_supported",
+          "description": "inner-loop claims are supported by evidence",
+          "status": "missing",
+          "evidence_ref": "kaggle-eval://stage-d8c87d017a6b",
+          "score": 0.35,
+          "note": "judge(score)=0.35"
+        }
+      ],
+      "unresolved_claims": [
+        "primary metric meets threshold (0.8)",
+        "inner-loop claims are supported by evidence"
+      ],
+      "rejected_candidates": [],
+      "confidence": 0.4875,
+      "recoverable": true,
+      "audit_confidence": 0.9,
+      "gate_passed": false,
+      "report_ref": "audit-report://stage-5b72202f434c"
+    },
+    {
+      "event_id": "evt-461ebbbe75d64de083627a4da7c40743",
+      "event_type": "artifact_published",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068625Z",
+      "artifact_id": "artifact-b5a6c6ef728f",
+      "artifact_type": "audit_report"
+    },
+    {
+      "event_id": "evt-853c2e46eb7745a98b4ca4d4887c513d",
+      "event_type": "gate_passed",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068645Z",
+      "stage_run_id": "stage-5b72202f434c",
+      "from_status": "running",
+      "to_status": "succeeded"
+    },
+    {
+      "event_id": "evt-67b33ddb096a4bd9bb9a43aae7eab147",
+      "event_type": "decision_issued",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068727Z",
+      "decision_id": "decision-d6f5823afcf9",
+      "decision_type": "revisit"
+    },
+    {
+      "event_id": "evt-3eb30fbf2d7f4d16975f96479befab1d",
+      "event_type": "stage_queued",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068829Z",
+      "stage_run_id": "stage-1935af016457",
+      "from_status": "queued",
+      "to_status": "queued"
+    },
+    {
+      "event_id": "evt-8665982ee81b4ef886a83855879cfbf6",
+      "event_type": "stage_started",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068843Z",
+      "stage_run_id": "stage-1935af016457",
+      "from_status": "queued",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-08538f119668466baf35dda364a72351",
+      "event_type": "improvement_applied",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068914Z",
+      "improvement_id": "imp-stage-1935af016457",
+      "target_mechanism": "routing_bias",
+      "proposal_ref": "improvement://stage-1935af016457",
+      "rollback_id": "rb-stage-1935af016457",
+      "validated_heldout": true,
+      "metrics_before": {
+        "best_accuracy": 0.7966
+      },
+      "metrics_after": {
+        "best_accuracy": 0.7966
+      },
+      "reverted": false
+    },
+    {
+      "event_id": "evt-722018e4f4de449d8cf89596c077db83",
+      "event_type": "artifact_published",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068944Z",
+      "artifact_id": "artifact-1858cbcef749",
+      "artifact_type": "improvement_report"
+    },
+    {
+      "event_id": "evt-4fc8feb36ad441e6b8c9190c160927e2",
+      "event_type": "gate_passed",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068960Z",
+      "stage_run_id": "stage-1935af016457",
+      "from_status": "running",
+      "to_status": "succeeded"
+    },
+    {
+      "event_id": "evt-e73d9eee6c524f84b60c97fadca17e3d",
+      "event_type": "stage_queued",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068982Z",
+      "stage_run_id": "stage-1e40c6f36d24",
+      "from_status": "queued",
+      "to_status": "queued"
+    },
+    {
+      "event_id": "evt-75e0446f070e47ff88023fb4016444c8",
+      "event_type": "stage_started",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:25.068993Z",
+      "stage_run_id": "stage-1e40c6f36d24",
+      "from_status": "queued",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-aed8ce0a5bde4b359e504e507cd9b4e2",
+      "event_type": "eval_completed",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:27.234017Z",
+      "eval_suite_id": "kaggle-spaceship-Transported",
+      "stage_run_id": "stage-1e40c6f36d24",
+      "passed": true,
+      "metrics": {
+        "accuracy": 0.8006,
+        "accuracy_std": 0.0138,
+        "f1_macro": 0.8003,
+        "cv_folds": 5.0
+      },
+      "gate_passed": true,
+      "report_ref": "kaggle-eval://stage-1e40c6f36d24"
+    },
+    {
+      "event_id": "evt-ef351a91649a40c3a2d44235072e3f75",
+      "event_type": "artifact_published",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:27.234137Z",
+      "artifact_id": "artifact-6b7ea2a83c4c",
+      "artifact_type": "eval_report"
+    },
+    {
+      "event_id": "evt-d36c4646d7eb43bfbc03afb8ede3fe03",
+      "event_type": "gate_passed",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:27.234693Z",
+      "stage_run_id": "stage-1e40c6f36d24",
+      "from_status": "running",
+      "to_status": "succeeded"
+    },
+    {
+      "event_id": "evt-1f59ac20f6844a15b1456172788726a7",
+      "event_type": "stage_queued",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:27.234790Z",
+      "stage_run_id": "stage-727399e26745",
+      "from_status": "queued",
+      "to_status": "queued"
+    },
+    {
+      "event_id": "evt-8599bfb1050a405797fe66759a1dadc7",
+      "event_type": "stage_started",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:27.234807Z",
+      "stage_run_id": "stage-727399e26745",
+      "from_status": "queued",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-eed28a2fa3174cdcb0e388f6bf3dc8b2",
+      "event_type": "audit_completed",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:27.234888Z",
+      "audit_id": "audit-stage-727399e26745",
+      "audited_target": "Research task: the Kaggle 'Spaceship Titanic' competition. Goal: predict whether a passenger was transported to an alternate dimension (binary, target=Transported). Use the run_capability tool to run the 'kaggle_eval' capability, which trains a REAL scikit-learn model on the provided data and 5-fold cross-validates it. Call it with params: {\"preset\":\"spaceship\", \"target\":\"Transported\", \"data_dir\":\"/Users/glennge/work/github/AI_research/safety_auto_research/data/kaggle/spaceship-titanic\", \"threshold\":0.8, \"model\":\"gbm\"}. Try a strong model (gbm / GradientBoosting) and a baseline (logreg / LogisticRegression). Report the cross-validated accuracy and whether it meets the gold target of >= 0.8. Afterwards you MAY also call 'layer_08_result_analysis_experience' to distil a reusable lesson. Then return your final task.run_stage message with event=null and a concise rationale.\n[REFINE] address: primary metric meets threshold (0.8); inner-loop claims are supported by evidence",
+      "constraints": [
+        {
+          "id": "primary_metric",
+          "description": "primary metric meets threshold (0.8)",
+          "status": "verified",
+          "evidence_ref": "kaggle-eval://stage-1e40c6f36d24",
+          "score": 1.0,
+          "note": "cv accuracy=0.8006"
+        },
+        {
+          "id": "eval_is_real",
+          "description": "evaluation is a real (non-mocked) measurement",
+          "status": "verified",
+          "evidence_ref": "kaggle-eval://stage-1e40c6f36d24",
+          "score": 1.0,
+          "note": "report_ref indicates real kaggle/sklearn eval"
+        },
+        {
+          "id": "claims_supported",
+          "description": "inner-loop claims are supported by evidence",
+          "status": "verified",
+          "evidence_ref": "kaggle-eval://stage-1e40c6f36d24",
+          "score": 0.838,
+          "note": "judge(score)=0.838"
+        }
+      ],
+      "unresolved_claims": [],
+      "rejected_candidates": [],
+      "confidence": 0.9595,
+      "recoverable": true,
+      "audit_confidence": 0.9,
+      "gate_passed": true,
+      "report_ref": "audit-report://stage-727399e26745"
+    },
+    {
+      "event_id": "evt-4a09225af51a4bbf89398e16fa0a4c96",
+      "event_type": "artifact_published",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:27.234936Z",
+      "artifact_id": "artifact-668fb6c84a4b",
+      "artifact_type": "audit_report"
+    },
+    {
+      "event_id": "evt-cc9d94fa07414d638c86a3397574a2c2",
+      "event_type": "gate_passed",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:27.234958Z",
+      "stage_run_id": "stage-727399e26745",
+      "from_status": "running",
+      "to_status": "succeeded"
+    },
+    {
+      "event_id": "evt-dbf170738ce74e8795c7bfb128917664",
+      "event_type": "decision_issued",
+      "run_id": "run-2c441e22bc84",
+      "occurred_at": "2026-07-28T02:31:27.235008Z",
+      "decision_id": "decision-2fdcfdae7aa9",
+      "decision_type": "exit_success"
+    }
+  ],
+  "decisions": [
+    "revisit",
+    "exit_success"
+  ],
+  "stage_runs": [
+    {
+      "stage_run_id": "stage-d8c87d017a6b",
+      "stage_code": "kaggle_eval",
+      "status": "succeeded",
+      "gate_result": "failed"
+    },
+    {
+      "stage_run_id": "stage-5b72202f434c",
+      "stage_code": "layer_11_external_audit",
+      "status": "succeeded",
+      "gate_result": "failed"
+    },
+    {
+      "stage_run_id": "stage-1935af016457",
+      "stage_code": "09_self_iterative_evolution",
+      "status": "succeeded",
+      "gate_result": "passed"
+    },
+    {
+      "stage_run_id": "stage-1e40c6f36d24",
+      "stage_code": "kaggle_eval",
+      "status": "succeeded",
+      "gate_result": "passed"
+    },
+    {
+      "stage_run_id": "stage-727399e26745",
+      "stage_code": "layer_11_external_audit",
+      "status": "succeeded",
+      "gate_result": "passed"
+    }
+  ],
+  "dual_loop_summary": {
+    "run_id": "run-2c441e22bc84",
+    "status": "dual_loop_accepted",
+    "steps": [
+      {
+        "stage": "inner[0]",
+        "stage_run_id": "stage-d8c87d017a6b",
+        "event": "eval_completed",
+        "gate_result": "failed",
+        "decision": null,
+        "target_stage": null,
+        "detail": "Kaggle eval [spaceship/gbm]: accuracy=0.7966±0.0099, f1=0.7959 vs ge 0.8 -> FAIL"
+      },
+      {
+        "stage": "audit[0]",
+        "stage_run_id": "stage-5b72202f434c",
+        "event": "audit_completed",
+        "gate_result": "failed",
+        "decision": "revisit",
+        "target_stage": "00_agent_orchestration",
+        "detail": "external audit: confidence=0.4875 -> REFINE (unresolved=2, recoverable=True)"
+      },
+      {
+        "stage": "self_evo[0]",
+        "stage_run_id": "stage-1935af016457",
+        "event": "improvement_applied",
+        "gate_result": "passed",
+        "decision": null,
+        "target_stage": null,
+        "detail": "self-evolution applied (mechanism=routing_bias, rollback=rb-stage-1935af016457); best cv=0.7966"
+      },
+      {
+        "stage": "inner[1]",
+        "stage_run_id": "stage-1e40c6f36d24",
+        "event": "eval_completed",
+        "gate_result": "passed",
+        "decision": null,
+        "target_stage": null,
+        "detail": "Kaggle eval [spaceship/gbm-strong]: accuracy=0.8006±0.0138, f1=0.8003 vs ge 0.8 -> PASS"
+      },
+      {
+        "stage": "audit[1]",
+        "stage_run_id": "stage-727399e26745",
+        "event": "audit_completed",
+        "gate_result": "passed",
+        "decision": "exit_success",
+        "target_stage": null,
+        "detail": "external audit: confidence=0.9595 -> ACCEPT (unresolved=0, recoverable=True)"
+      }
+    ],
+    "lessons": [],
+    "events": [
+      "workflow_requested",
+      "workflow_started",
+      "stage_queued",
+      "stage_started",
+      "eval_completed",
+      "artifact_published",
+      "gate_passed",
+      "stage_queued",
+      "stage_started",
+      "audit_completed",
+      "artifact_published",
+      "gate_passed",
+      "decision_issued",
+      "stage_queued",
+      "stage_started",
+      "improvement_applied",
+      "artifact_published",
+      "gate_passed",
+      "stage_queued",
+      "stage_started",
+      "eval_completed",
+      "artifact_published",
+      "gate_passed",
+      "stage_queued",
+      "stage_started",
+      "audit_completed",
+      "artifact_published",
+      "gate_passed",
+      "decision_issued"
+    ],
+    "decisions": [
+      "revisit",
+      "exit_success"
+    ]
+  },
+  "hypothesis_tree": [
+    {
+      "node_id": "node-9efc858fb506",
+      "parent_id": null,
+      "hypothesis": "kaggle_eval -> cv accuracy=0.7966",
+      "evidence_refs": [
+        "kaggle-eval://stage-d8c87d017a6b"
+      ],
+      "artifact_ref": null,
+      "insight": "external audit: confidence=0.4875 -> REFINE (unresolved=2, recoverable=True)",
+      "score": 0.4875,
+      "status": "active",
+      "branch": "main"
+    },
+    {
+      "node_id": "node-d77353f74cf1",
+      "parent_id": null,
+      "hypothesis": "kaggle_eval -> cv accuracy=0.8006",
+      "evidence_refs": [
+        "kaggle-eval://stage-1e40c6f36d24"
+      ],
+      "artifact_ref": null,
+      "insight": "accepted by external audit",
+      "score": 0.9595,
+      "status": "merged",
+      "branch": "main"
+    }
+  ]
+}

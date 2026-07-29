@@ -1,0 +1,233 @@
+{
+  "run_id": "run-12264c0713c1",
+  "driver": "codex",
+  "competition": "spaceship",
+  "codex_model": null,
+  "objective": {
+    "task": "Kaggle Spaceship Titanic — ML from the Cosmos",
+    "target_metric": "accuracy",
+    "target_threshold": 0.8,
+    "op": "ge",
+    "gold_reference": "Kaggle public leaderboard gold ~= 0.80 accuracy"
+  },
+  "events": [
+    {
+      "event_id": "evt-47b2ef273199446baa8a6a1f414a7910",
+      "event_type": "workflow_requested",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:28:51.344049Z",
+      "from_status": "requested",
+      "to_status": "requested"
+    },
+    {
+      "event_id": "evt-fe90233fd44c4f14a0291cd81e86167e",
+      "event_type": "workflow_started",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:28:51.344088Z",
+      "from_status": "requested",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-cbff8dfd1b3b4a03807d764d8d98de56",
+      "event_type": "stage_queued",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:28:51.344190Z",
+      "stage_run_id": "stage-4c540e57bfcb",
+      "from_status": "queued",
+      "to_status": "queued"
+    },
+    {
+      "event_id": "evt-1d2d1a47758d4ae89c8f047310615bcd",
+      "event_type": "stage_started",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:28:51.344206Z",
+      "stage_run_id": "stage-4c540e57bfcb",
+      "from_status": "queued",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-9ee94124ef3c4a30b59347aa922d3159",
+      "event_type": "stage_queued",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:14.227386Z",
+      "stage_run_id": "stage-e2f8dfcbfe9b",
+      "from_status": "queued",
+      "to_status": "queued"
+    },
+    {
+      "event_id": "evt-3c778cdf94eb431a8cdf6cf3c9e8082d",
+      "event_type": "stage_started",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:14.227572Z",
+      "stage_run_id": "stage-e2f8dfcbfe9b",
+      "from_status": "queued",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-192e3236227f48908e0ba4019820d69f",
+      "event_type": "eval_completed",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:19.252121Z",
+      "eval_suite_id": "kaggle-spaceship-Transported",
+      "stage_run_id": "stage-e2f8dfcbfe9b",
+      "passed": false,
+      "metrics": {
+        "accuracy": 0.7966,
+        "accuracy_std": 0.0099,
+        "f1_macro": 0.7959,
+        "cv_folds": 5.0
+      },
+      "gate_passed": false,
+      "report_ref": "kaggle-eval://stage-e2f8dfcbfe9b"
+    },
+    {
+      "event_id": "evt-302ea44ccf9f4617a070f6c100752198",
+      "event_type": "artifact_published",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:19.252295Z",
+      "artifact_id": "artifact-48f6f7e55138",
+      "artifact_type": "eval_report"
+    },
+    {
+      "event_id": "evt-381b021dab5d429b91ddf2d658d50289",
+      "event_type": "gate_passed",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:19.252868Z",
+      "stage_run_id": "stage-e2f8dfcbfe9b",
+      "from_status": "running",
+      "to_status": "succeeded"
+    },
+    {
+      "event_id": "evt-d6668db33db74323bec305d45afee5c9",
+      "event_type": "stage_queued",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:34.478655Z",
+      "stage_run_id": "stage-0155bec0a5b0",
+      "from_status": "queued",
+      "to_status": "queued"
+    },
+    {
+      "event_id": "evt-f6d106e64699475d9eae9c15631efb1e",
+      "event_type": "stage_started",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:34.478811Z",
+      "stage_run_id": "stage-0155bec0a5b0",
+      "from_status": "queued",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-d695d5aa9798485faa8dd1d4e63d56dc",
+      "event_type": "eval_completed",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:36.124792Z",
+      "eval_suite_id": "kaggle-spaceship-Transported",
+      "stage_run_id": "stage-0155bec0a5b0",
+      "passed": false,
+      "metrics": {
+        "accuracy": 0.7863,
+        "accuracy_std": 0.007,
+        "f1_macro": 0.786,
+        "cv_folds": 5.0
+      },
+      "gate_passed": false,
+      "report_ref": "kaggle-eval://stage-0155bec0a5b0"
+    },
+    {
+      "event_id": "evt-ef5f3f09ff254a8083146c1ba0894e55",
+      "event_type": "artifact_published",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:36.124897Z",
+      "artifact_id": "artifact-31bbc4717053",
+      "artifact_type": "eval_report"
+    },
+    {
+      "event_id": "evt-18bc075f385a4c9ebc3d1f84f95fa5c4",
+      "event_type": "gate_passed",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:36.125196Z",
+      "stage_run_id": "stage-0155bec0a5b0",
+      "from_status": "running",
+      "to_status": "succeeded"
+    },
+    {
+      "event_id": "evt-f15566e4a3874a8e82978fc2bde7d924",
+      "event_type": "stage_queued",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:59.831220Z",
+      "stage_run_id": "stage-04b5f993a654",
+      "from_status": "queued",
+      "to_status": "queued"
+    },
+    {
+      "event_id": "evt-4f3a93fcf46a463da97a83caff4154d1",
+      "event_type": "stage_started",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:59.831423Z",
+      "stage_run_id": "stage-04b5f993a654",
+      "from_status": "queued",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-4fc94e54ab3e4722aeff488f830cb04b",
+      "event_type": "lesson_promoted",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:59.831757Z",
+      "lesson_id": "lesson-87b73433ea20",
+      "source_run_id": "run-12264c0713c1",
+      "scope": "adversarial_hardening",
+      "pattern_type": "decision_reason",
+      "prm_score": 0.74,
+      "confidence": 0.8,
+      "applicable_stages": [
+        "10_adversarial_data_generation",
+        "05_data_evaluation_cleaning"
+      ],
+      "payload_ref": "lesson-payload://stage-04b5f993a654"
+    },
+    {
+      "event_id": "evt-f6d2fd4b49a2458687c96469015fdc01",
+      "event_type": "gate_passed",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:29:59.831821Z",
+      "stage_run_id": "stage-04b5f993a654",
+      "from_status": "running",
+      "to_status": "succeeded"
+    },
+    {
+      "event_id": "evt-9ad3bfeaae31463da7e6c120ad3ed9f3",
+      "event_type": "gate_passed",
+      "run_id": "run-12264c0713c1",
+      "occurred_at": "2026-07-21T02:30:18.594574Z",
+      "stage_run_id": "stage-4c540e57bfcb",
+      "from_status": "running",
+      "to_status": "succeeded"
+    }
+  ],
+  "decisions": [],
+  "stage_runs": [
+    {
+      "stage_run_id": "stage-4c540e57bfcb",
+      "stage_code": "00_agent_orchestration",
+      "status": "succeeded",
+      "gate_result": "pending"
+    },
+    {
+      "stage_run_id": "stage-e2f8dfcbfe9b",
+      "stage_code": "kaggle_eval",
+      "status": "succeeded",
+      "gate_result": "failed"
+    },
+    {
+      "stage_run_id": "stage-0155bec0a5b0",
+      "stage_code": "kaggle_eval",
+      "status": "succeeded",
+      "gate_result": "failed"
+    },
+    {
+      "stage_run_id": "stage-04b5f993a654",
+      "stage_code": "08_result_analysis_experience",
+      "status": "succeeded",
+      "gate_result": "passed"
+    }
+  ]
+}

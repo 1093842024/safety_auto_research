@@ -1,0 +1,46 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "data_compliance_policy": {
+      "title": "Data Compliance Policy",
+      "type": "string"
+    },
+    "domain": {
+      "title": "Domain",
+      "type": "string"
+    },
+    "model_separation_policy": {
+      "title": "Model Separation Policy",
+      "type": "string"
+    },
+    "policy_pack_id": {
+      "title": "Policy Pack Id",
+      "type": "string"
+    },
+    "redteam_constraints": {
+      "title": "Redteam Constraints",
+      "type": "string"
+    },
+    "required_approvals": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Required Approvals",
+      "type": "array"
+    },
+    "rules": {
+      "additionalProperties": true,
+      "title": "Rules",
+      "type": "object"
+    }
+  },
+  "required": [
+    "policy_pack_id",
+    "domain",
+    "model_separation_policy",
+    "data_compliance_policy",
+    "redteam_constraints"
+  ],
+  "title": "PolicyPack",
+  "type": "object"
+}

@@ -1,0 +1,219 @@
+from __future__ import annotations
+
+import json
+import os
+import threading
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from ..platform_contracts.objects import ALL_CONTRACT_MODELS
+
+# name -> model, used to reconstruct pydantic objects on load.
+_MODEL_BY_NAME = {m.__name__: m for m in ALL_CONTRACT_MODELS}
+
+# Collections that hold pydantic objects and must be reconstructed on load.
+#   coll_name -> (model_name, key_field)
+_PERSIST_COLLECTIONS: dict[str, tuple[str, str]] = {
+    "workflow_runs": ("WorkflowRun", "run_id"),
+    "stage_runs": ("StageRun", "stage_run_id"),
+    "decisions": ("DecisionRecord", "decision_id"),
+    "artifacts": ("Artifact", "artifact_id"),
+    "lessons": ("LessonCard", "lesson_id"),
+}
+
+
+class Repository:
+    """In-memory store for control-plane objects and the platform event log.
+
+    This is intentionally a single-process skeleton. When ``store_path`` is provided
+    the whole store is persisted to a JSON file and reloaded on the next startup, so
+    research records (workflow runs, stages, decisions, events, …) survive a process
+    restart. ``store_path=None`` keeps the original pure in-memory behaviour (used by
+    tests).
+    """
+
+    def __init__(self, store_path: str | Path | None = None) -> None:
+        self.workflow_runs: dict[str, Any] = {}
+        self.stage_runs: dict[str, Any] = {}
+        self.decisions: dict[str, Any] = {}
+        self.artifacts: dict[str, Any] = {}
+        self.lessons: dict[str, Any] = {}
+        self.metrics: dict[str, list[dict[str, Any]]] = {}
+        self.events: list[dict[str, Any]] = []
+        # Autonomous research records (leaderboard): record_id -> dict.
+        self.research_records: dict[str, dict[str, Any]] = {}
+        self._store_path: Path | None = Path(store_path) if store_path else None
+        self._lock = threading.Lock()
+        if self._store_path is not None and self._store_path.exists():
+            self._load()
+
+    # ------------------------------------------------------------------ persistence
+    def _load(self) -> None:
+        assert self._store_path is not None
+        try:
+            raw = json.loads(self._store_path.read_text(encoding="utf-8"))
+        except Exception:
+            # A corrupt store must never crash startup — begin empty instead.
+            return
+        for coll_name, (model_name, key) in _PERSIST_COLLECTIONS.items():
+            coll = getattr(self, coll_name)
+            for item in raw.get(coll_name, []) or []:
+                try:
+                    obj = _MODEL_BY_NAME[model_name](**item["data"])
+                    coll[getattr(obj, key)] = obj
+                except Exception:
+                    continue
+        self.metrics = raw.get("metrics", {}) or {}
+        if not isinstance(self.metrics, dict):
+            self.metrics = {}
+        self.events = raw.get("events", []) or []
+        if not isinstance(self.events, list):
+            self.events = []
+        self.research_records = raw.get("research_records", {}) or {}
+        if not isinstance(self.research_records, dict):
+            self.research_records = {}
+
+    def _persist(self) -> None:
+        """Write the whole store to disk atomically. Caller must hold ``self._lock``."""
+        if self._store_path is None:
+            return
+        payload: dict[str, Any] = {}
+        for coll_name, (model_name, _key) in _PERSIST_COLLECTIONS.items():
+            coll = getattr(self, coll_name)
+            payload[coll_name] = [
+                {"__type__": model_name, "data": obj.model_dump(mode="json")}
+                for obj in coll.values()
+            ]
+        payload["metrics"] = self.metrics
+        payload["events"] = self.events
+        payload["research_records"] = self.research_records
+        self._store_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._store_path.with_name(self._store_path.name + ".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, self._store_path)
+
+    def _save(self) -> None:
+        with self._lock:
+            self._persist()
+
+    def next_id(self, prefix: str) -> str:
+        return f"{prefix}-{uuid4().hex[:12]}"
+
+    # ----- WorkflowRun -----
+    def put_workflow_run(self, run: Any) -> None:
+        with self._lock:
+            self.workflow_runs[run.run_id] = run
+            self._persist()
+
+    def get_workflow_run(self, run_id: str) -> Any | None:
+        return self.workflow_runs.get(run_id)
+
+    def list_workflow_runs(self) -> list[Any]:
+        return list(self.workflow_runs.values())
+
+    # ----- StageRun -----
+    def put_stage_run(self, stage: Any) -> None:
+        with self._lock:
+            self.stage_runs[stage.stage_run_id] = stage
+            self._persist()
+
+    def get_stage_run(self, stage_run_id: str) -> Any | None:
+        return self.stage_runs.get(stage_run_id)
+
+    def list_stage_runs(self, run_id: str) -> list[Any]:
+        return [s for s in self.stage_runs.values() if s.run_id == run_id]
+
+    # ----- DecisionRecord -----
+    def put_decision(self, decision: Any) -> None:
+        with self._lock:
+            self.decisions[decision.decision_id] = decision
+            self._persist()
+
+    def get_decision(self, decision_id: str) -> Any | None:
+        return self.decisions.get(decision_id)
+
+    def list_decisions(self, run_id: str) -> list[Any]:
+        return [d for d in self.decisions.values() if d.run_id == run_id]
+
+    # ----- Artifact (spec §9.4 publish_artifact) -----
+    def put_artifact(self, artifact: Any) -> None:
+        with self._lock:
+            self.artifacts[artifact.artifact_id] = artifact
+            self._persist()
+
+    def get_artifact(self, artifact_id: str) -> Any | None:
+        return self.artifacts.get(artifact_id)
+
+    def list_artifacts(self, run_id: str | None = None) -> list[Any]:
+        if run_id is None:
+            return list(self.artifacts.values())
+        # Artifacts are referenced by stage_run_id via lineage; filter by producer match.
+        return [a for a in self.artifacts.values() if run_id in str(a.producer_ref)]
+
+    # ----- LessonCard (spec §9.4 register_lesson -> reinjection) -----
+    def put_lesson(self, lesson: Any) -> None:
+        with self._lock:
+            self.lessons[lesson.lesson_id] = lesson
+            self._persist()
+
+    def get_lesson(self, lesson_id: str) -> Any | None:
+        return self.lessons.get(lesson_id)
+
+    def list_lessons(self, run_id: str | None = None) -> list[Any]:
+        if run_id is None:
+            return list(self.lessons.values())
+        return [l for l in self.lessons.values() if l.source_run_id == run_id]
+
+    # ----- Metrics (spec §9.4 record_metric) -----
+    def record_metric(self, run_id: str, name: str, value: float, tags: dict[str, Any] | None = None) -> None:
+        with self._lock:
+            self.metrics.setdefault(run_id, []).append(
+                {"name": name, "value": value, "tags": tags or {}}
+            )
+            self._persist()
+
+    def list_metrics(self, run_id: str) -> list[dict[str, Any]]:
+        return list(self.metrics.get(run_id, []))
+
+    # ----- Event log -----
+    def append_event(self, event: Any) -> None:
+        with self._lock:
+            self.events.append(event.model_dump(mode="json"))
+            self._persist()
+
+    def list_events(self, run_id: str | None = None) -> list[dict[str, Any]]:
+        if run_id is None:
+            return list(self.events)
+        return [e for e in self.events if e.get("run_id") == run_id]
+
+    # ----- Research records (leaderboard) -----
+    def put_research_record(self, rec: dict[str, Any]) -> None:
+        with self._lock:
+            self.research_records[rec["record_id"]] = rec
+            self._persist()
+
+    def get_research_record(self, record_id: str) -> dict[str, Any] | None:
+        return self.research_records.get(record_id)
+
+    def list_research_records(self, task_id: str | None = None) -> list[dict[str, Any]]:
+        rs = list(self.research_records.values())
+        if task_id:
+            rs = [r for r in rs if r.get("task_id") == task_id]
+        return rs
+
+    def update_research_record(self, record_id: str, **fields: Any) -> None:
+        with self._lock:
+            rec = self.research_records.get(record_id)
+            if rec is None:
+                return
+            rec.update(fields)
+            self._persist()
+
+    def delete_research_record(self, record_id: str) -> bool:
+        with self._lock:
+            if record_id in self.research_records:
+                del self.research_records[record_id]
+                self._persist()
+                return True
+            return False

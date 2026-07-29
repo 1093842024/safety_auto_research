@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+*.log
+.python-version
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+
+# IDE / Editor
+.DS_Store
+.claude/
+.codegraph/
+.codex/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Runtime data (generated dynamically)
+data/control_plane_store.json
+data/research_state.db
+data/custom_uploads/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+Thumbs.db

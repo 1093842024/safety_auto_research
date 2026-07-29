@@ -1,0 +1,182 @@
+{
+  "run_id": "run-b13afaf1dc8e",
+  "driver": "codex",
+  "codex_model": null,
+  "objective": {
+    "task": "Kaggle Titanic - Machine Learning from Disaster (binary survival)",
+    "target_metric": "accuracy",
+    "target_threshold": 0.82,
+    "op": "ge",
+    "gold_reference": "public leaderboard gold ~= 0.82 accuracy"
+  },
+  "events": [
+    {
+      "event_id": "evt-d38023eb594446c2a77c9c09fa1ecac4",
+      "event_type": "workflow_requested",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:53:52.080318Z",
+      "from_status": "requested",
+      "to_status": "requested"
+    },
+    {
+      "event_id": "evt-56d9cc2572664bac8ef25fef8cfd1f3e",
+      "event_type": "workflow_started",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:53:52.080358Z",
+      "from_status": "requested",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-3740b22bb3b44ebfaa83051e6d5c42a0",
+      "event_type": "stage_queued",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:53:52.080426Z",
+      "stage_run_id": "stage-804abe53db40",
+      "from_status": "queued",
+      "to_status": "queued"
+    },
+    {
+      "event_id": "evt-7b2a4ebd52cc41db8afd74a01b19bb89",
+      "event_type": "stage_started",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:53:52.080443Z",
+      "stage_run_id": "stage-804abe53db40",
+      "from_status": "queued",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-1b41e38031674eb78be616d44e31b804",
+      "event_type": "stage_queued",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:54:11.765523Z",
+      "stage_run_id": "stage-d609902a2c4e",
+      "from_status": "queued",
+      "to_status": "queued"
+    },
+    {
+      "event_id": "evt-32ac1800b19340979c687e9b269f8a62",
+      "event_type": "stage_started",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:54:11.765694Z",
+      "stage_run_id": "stage-d609902a2c4e",
+      "from_status": "queued",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-ee10a81c20314108b2b5f6ce586ba4e2",
+      "event_type": "eval_completed",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:54:15.182888Z",
+      "eval_suite_id": "kaggle-Survived",
+      "stage_run_id": "stage-d609902a2c4e",
+      "passed": true,
+      "metrics": {
+        "accuracy": 0.8215,
+        "accuracy_std": 0.0226,
+        "f1_macro": 0.8091,
+        "cv_folds": 5.0
+      },
+      "gate_passed": true,
+      "report_ref": "kaggle-eval://stage-d609902a2c4e"
+    },
+    {
+      "event_id": "evt-d59dd3a8f1944c2d9bbf6bc8502476b2",
+      "event_type": "artifact_published",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:54:15.183107Z",
+      "artifact_id": "artifact-9d9059c3c826",
+      "artifact_type": "eval_report"
+    },
+    {
+      "event_id": "evt-2e0a6a203cfe43dca2eabc680e07ce25",
+      "event_type": "gate_passed",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:54:15.183303Z",
+      "stage_run_id": "stage-d609902a2c4e",
+      "from_status": "running",
+      "to_status": "succeeded"
+    },
+    {
+      "event_id": "evt-0d78f240cd2a4253a30f59a36984681c",
+      "event_type": "stage_queued",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:54:28.530840Z",
+      "stage_run_id": "stage-c051db6b9b1e",
+      "from_status": "queued",
+      "to_status": "queued"
+    },
+    {
+      "event_id": "evt-430cda3eedc040b48839619edf6fd0e8",
+      "event_type": "stage_started",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:54:28.530935Z",
+      "stage_run_id": "stage-c051db6b9b1e",
+      "from_status": "queued",
+      "to_status": "running"
+    },
+    {
+      "event_id": "evt-4b5b8048c688469aa63a412234dda7eb",
+      "event_type": "eval_completed",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:54:30.519157Z",
+      "eval_suite_id": "kaggle-Survived",
+      "stage_run_id": "stage-c051db6b9b1e",
+      "passed": true,
+      "metrics": {
+        "accuracy": 0.8316,
+        "accuracy_std": 0.0167,
+        "f1_macro": 0.8172,
+        "cv_folds": 5.0
+      },
+      "gate_passed": true,
+      "report_ref": "kaggle-eval://stage-c051db6b9b1e"
+    },
+    {
+      "event_id": "evt-b8d3ac6e4c214f6a8f2098ca20a571c7",
+      "event_type": "artifact_published",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:54:30.519246Z",
+      "artifact_id": "artifact-2c1eb0f47f53",
+      "artifact_type": "eval_report"
+    },
+    {
+      "event_id": "evt-4e9422f2d2ea4d8e81b04ae0cc4efc8d",
+      "event_type": "gate_passed",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:54:30.519335Z",
+      "stage_run_id": "stage-c051db6b9b1e",
+      "from_status": "running",
+      "to_status": "succeeded"
+    },
+    {
+      "event_id": "evt-dfa66bcd7e2643009b9854bf647d18fd",
+      "event_type": "gate_passed",
+      "run_id": "run-b13afaf1dc8e",
+      "occurred_at": "2026-07-20T12:54:49.510723Z",
+      "stage_run_id": "stage-804abe53db40",
+      "from_status": "running",
+      "to_status": "succeeded"
+    }
+  ],
+  "decisions": [],
+  "stage_runs": [
+    {
+      "stage_run_id": "stage-804abe53db40",
+      "stage_code": "00_agent_orchestration",
+      "status": "succeeded",
+      "gate_result": "pending"
+    },
+    {
+      "stage_run_id": "stage-d609902a2c4e",
+      "stage_code": "kaggle_eval",
+      "status": "succeeded",
+      "gate_result": "passed"
+    },
+    {
+      "stage_run_id": "stage-c051db6b9b1e",
+      "stage_code": "kaggle_eval",
+      "status": "succeeded",
+      "gate_result": "passed"
+    }
+  ]
+}

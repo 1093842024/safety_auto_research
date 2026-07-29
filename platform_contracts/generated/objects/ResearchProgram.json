@@ -1,0 +1,74 @@
+{
+  "$defs": {
+    "ProgramStatus": {
+      "enum": [
+        "draft",
+        "active",
+        "paused",
+        "archived"
+      ],
+      "title": "ProgramStatus",
+      "type": "string"
+    },
+    "RiskTier": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "title": "RiskTier",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "budget_policy_ref": {
+      "title": "Budget Policy Ref",
+      "type": "string"
+    },
+    "default_policy_pack_ref": {
+      "title": "Default Policy Pack Ref",
+      "type": "string"
+    },
+    "domain": {
+      "title": "Domain",
+      "type": "string"
+    },
+    "goal_statement": {
+      "title": "Goal Statement",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "owner": {
+      "title": "Owner",
+      "type": "string"
+    },
+    "program_id": {
+      "title": "Program Id",
+      "type": "string"
+    },
+    "risk_tier": {
+      "$ref": "#/$defs/RiskTier"
+    },
+    "status": {
+      "$ref": "#/$defs/ProgramStatus"
+    }
+  },
+  "required": [
+    "program_id",
+    "name",
+    "domain",
+    "owner",
+    "goal_statement",
+    "risk_tier",
+    "budget_policy_ref",
+    "default_policy_pack_ref",
+    "status"
+  ],
+  "title": "ResearchProgram",
+  "type": "object"
+}

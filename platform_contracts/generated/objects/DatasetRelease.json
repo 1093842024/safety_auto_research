@@ -1,0 +1,67 @@
+{
+  "$defs": {
+    "PiiStatus": {
+      "enum": [
+        "unknown",
+        "redacted",
+        "blocked",
+        "approved_sensitive"
+      ],
+      "title": "PiiStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "artifact_ref": {
+      "title": "Artifact Ref",
+      "type": "string"
+    },
+    "dataset_id": {
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "label_schema_version": {
+      "title": "Label Schema Version",
+      "type": "string"
+    },
+    "leakage_report_ref": {
+      "title": "Leakage Report Ref",
+      "type": "string"
+    },
+    "pii_status": {
+      "$ref": "#/$defs/PiiStatus"
+    },
+    "quality_report_ref": {
+      "title": "Quality Report Ref",
+      "type": "string"
+    },
+    "retention_policy": {
+      "title": "Retention Policy",
+      "type": "string"
+    },
+    "source_mix": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Source Mix",
+      "type": "object"
+    },
+    "split_policy": {
+      "title": "Split Policy",
+      "type": "string"
+    }
+  },
+  "required": [
+    "dataset_id",
+    "artifact_ref",
+    "label_schema_version",
+    "pii_status",
+    "split_policy",
+    "retention_policy",
+    "quality_report_ref",
+    "leakage_report_ref"
+  ],
+  "title": "DatasetRelease",
+  "type": "object"
+}

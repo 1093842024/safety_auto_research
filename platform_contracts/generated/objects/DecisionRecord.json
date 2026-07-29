@@ -1,0 +1,77 @@
+{
+  "$defs": {
+    "DecisionType": {
+      "enum": [
+        "continue",
+        "revisit",
+        "exit_success",
+        "exit_budget",
+        "exit_converged",
+        "hitl_required"
+      ],
+      "title": "DecisionType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "approved_by": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Approved By",
+      "type": "array"
+    },
+    "decision_id": {
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "decision_type": {
+      "$ref": "#/$defs/DecisionType"
+    },
+    "evidence_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "policy_hits": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Policy Hits",
+      "type": "array"
+    },
+    "reason_codes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Reason Codes",
+      "type": "array"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "target_stage": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target Stage"
+    }
+  },
+  "required": [
+    "decision_id",
+    "run_id",
+    "decision_type"
+  ],
+  "title": "DecisionRecord",
+  "type": "object"
+}

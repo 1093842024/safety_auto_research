@@ -1,0 +1,59 @@
+{
+  "$defs": {
+    "RegistryStatus": {
+      "enum": [
+        "candidate",
+        "approved",
+        "production",
+        "archived"
+      ],
+      "title": "RegistryStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "adapter_stack": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Adapter Stack",
+      "type": "array"
+    },
+    "artifact_ref": {
+      "title": "Artifact Ref",
+      "type": "string"
+    },
+    "base_model": {
+      "title": "Base Model",
+      "type": "string"
+    },
+    "model_id": {
+      "title": "Model Id",
+      "type": "string"
+    },
+    "registry_status": {
+      "$ref": "#/$defs/RegistryStatus"
+    },
+    "safety_capabilities": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Safety Capabilities",
+      "type": "array"
+    },
+    "training_recipe_ref": {
+      "title": "Training Recipe Ref",
+      "type": "string"
+    }
+  },
+  "required": [
+    "model_id",
+    "base_model",
+    "training_recipe_ref",
+    "artifact_ref",
+    "registry_status"
+  ],
+  "title": "ModelVersion",
+  "type": "object"
+}

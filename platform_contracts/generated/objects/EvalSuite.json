@@ -1,0 +1,50 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "canary_policy_ref": {
+      "title": "Canary Policy Ref",
+      "type": "string"
+    },
+    "eval_suite_id": {
+      "title": "Eval Suite Id",
+      "type": "string"
+    },
+    "metric_defs": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Metric Defs",
+      "type": "object"
+    },
+    "pass_thresholds": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Pass Thresholds",
+      "type": "object"
+    },
+    "sandbox_policy_ref": {
+      "title": "Sandbox Policy Ref",
+      "type": "string"
+    },
+    "suite_type": {
+      "title": "Suite Type",
+      "type": "string"
+    },
+    "task_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Task Refs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "eval_suite_id",
+    "suite_type",
+    "sandbox_policy_ref",
+    "canary_policy_ref"
+  ],
+  "title": "EvalSuite",
+  "type": "object"
+}
