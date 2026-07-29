@@ -70,6 +70,11 @@ class InnerLoopConfig(BaseModel):
     # Which agent CLI drives the inner loop when mode == "agent".
     # "codex" | "claude_code" | None (= use env AGENT_COMMAND generic transport).
     agent_cli: str | None = None
+    # Human-in-the-loop collaboration mode:
+    # "autonomous"  — fully automatic (default)
+    # "step_confirm"— pause after each major step (inner / audit / outer) for human review
+    # "outer_confirm"— pause only after each outer-loop iteration before the next one
+    collaboration_mode: str = Field(default="autonomous", pattern="^(autonomous|step_confirm|outer_confirm)$")
 
 
 class LaunchBenchmarkRequest(BaseModel):
@@ -118,7 +123,7 @@ class ReportMetricRequest(BaseModel):
     metric_name: str
     direction: str = "higher"  # higher | lower
     score: float
-    config: dict[str, Any] = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict, alias="config_snapshot")
 
 
 class EvaluateRunRequest(BaseModel):
@@ -128,6 +133,42 @@ class EvaluateRunRequest(BaseModel):
     predictions_path: str | None = None
     ranked_lists_path: str | None = None
     judge_url: str | None = None
+
+
+class DebugRequest(BaseModel):
+    """Run one stage of the dual loop in isolation for debugging.
+
+    - ``stage``: "inner" (inner loop eval) or "outer" (external audit).
+    - ``audit_input_override``: optional manual audit input for outer-stage debug
+      (when absent, auto-derived from the most recent inner-loop result).
+    """
+
+    stage: str  # "inner" | "outer"
+    audit_input_override: dict[str, Any] | None = None
+
+
+class CollaborationAdjustments(BaseModel):
+    """Adjustments a human makes during collaboration pauses.
+
+    Fields are optional — only provided values take effect in the next inner-loop iteration.
+    """
+
+    model: str | None = None
+    fe: str | None = None  # "basic" | "rich"
+    cv_folds: int | None = None
+    threshold: float | None = None
+    audit_threshold: float | None = None
+    data_dir: str | None = None
+    action: str = "continue"  # "continue" | "abort" | "restart"
+    note: str | None = None
+
+
+class ResolveCollaborationRequest(BaseModel):
+    """Resolve a collaboration pause (approve/reject with optional adjustments)."""
+
+    resolution: str  # "approved" | "rejected"
+    reviewer: str = "human"
+    adjustments: CollaborationAdjustments | None = None
 
 
 class CreateStageRunRequest(BaseModel):

@@ -80,6 +80,7 @@ class PlatformContractsTest(unittest.TestCase):
             "AuditCompletedEvent",
             "ImprovementAppliedEvent",
             "AgentStepEvent",
+            "DebugEvent",
         })
         self.assertEqual(schemas["objects"]["Artifact"]["title"], "Artifact")
 

@@ -252,6 +252,32 @@ class AgentStepEvent(BasePlatformEvent):
         return self
 
 
+class DebugEvent(BasePlatformEvent):
+    """A single-stage debug result (inner-loop / outer-audit isolation).
+
+    When the researcher runs a debug against a single stage of the dual loop —
+    inner loop (eval) or outer audit — the result is persisted as a ``DebugEvent``
+    so the frontend "调试" panel can show the outcome before the full autonomous
+    experiment is launched.
+    """
+
+    event_type: EventType = Field(default=EventType.DEBUG_RESULT)
+    stage: str  # "inner" | "outer"
+    ok: bool = True
+    summary: str = ""
+    metrics: dict[str, float] = Field(default_factory=dict)
+    verdict: dict[str, object] | None = None  # outer-audit: confidence/recommendation etc.
+    report_ref: str | None = None
+    detail: str | None = None
+    error: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_event_type(self) -> "DebugEvent":
+        if self.event_type != EventType.DEBUG_RESULT:
+            raise ValueError("debug event_type must be debug_result")
+        return self
+
+
 class ImprovementAppliedEvent(BasePlatformEvent):
     """Recursive-improvement meta-loop committed a change to the research *process*.
 
@@ -290,5 +316,6 @@ ALL_EVENT_MODELS: tuple[type[ContractModel], ...] = (
     LessonPromotedEvent,
     AuditCompletedEvent,
     AgentStepEvent,
+    DebugEvent,
     ImprovementAppliedEvent,
 )

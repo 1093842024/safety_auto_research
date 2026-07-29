@@ -3,7 +3,12 @@ import {
   getAgentTrace,
   getEvents,
   getRun,
+  debugRun,
+  runExperiment,
+  resolveCollaboration,
   AgentTraceStep,
+  CollaborationAdjustments,
+  DebugResult,
   RunDetail,
 } from "../api/client";
 import { DualLoopLive } from "./DualLoopLive";
@@ -13,10 +18,11 @@ import { ImprovementTimeline } from "./ImprovementTimeline";
 import { ApprovalConsole } from "./ApprovalConsole";
 import { EventStream } from "./EventStream";
 
-type Sub = "live" | "audit" | "tree" | "improve" | "approval" | "events" | "agent";
+type Sub = "live" | "debug" | "audit" | "tree" | "improve" | "approval" | "events" | "agent";
 
 const SUBS: Array<{ id: Sub; label: string }> = [
   { id: "live", label: "总览" },
+  { id: "debug", label: "调试" },
   { id: "audit", label: "审计结论" },
   { id: "tree", label: "假设树" },
   { id: "improve", label: "改进时间线" },
@@ -128,6 +134,68 @@ export function RunDashboard({ runId }: { runId: string }) {
     ? `agent · cli=${il.agent_cli || cfg.agent_cli || "auto"} · skills=${(il.skills || []).length} tools=${(il.tools || []).length} steps=${(il.step_plan || []).length}`
     : `scripted · model=${il.model || cfg.model || "gbm"} fe=${il.fe || "basic"} cv=${il.cv_folds ?? 5}` +
       (il.threshold != null ? ` thr=${il.threshold}` : "");
+  const collabMode: string = (il as any).collaboration_mode || (cfg as any).collaboration_mode || "autonomous";
+  const collabLabel: string = ({ autonomous: "完全自主", step_confirm: "每步确认", outer_confirm: "外循环确认" } as Record<string, string>)[collabMode] || collabMode;
+
+  // ---- Debug state ----
+  const [debugBusy, setDebugBusy] = useState<"inner" | "outer" | null>(null);
+  const [debugResults, setDebugResults] = useState<DebugResult[]>([]);
+
+  const handleDebug = async (stage: "inner" | "outer") => {
+    setDebugBusy(stage);
+    try {
+      await debugRun(runId, stage);
+    } catch (e: any) {
+      console.error("debug error", e);
+    }
+    setDebugBusy(null);
+  };
+
+  // Poll debug results from events
+  useEffect(() => {
+    if (sub !== "debug") return;
+    const dbg = events
+      .filter((e) => e.event_type === "debug_result")
+      .map((e) => ({
+        stage: e.stage as "inner" | "outer",
+        ok: e.ok as boolean,
+        summary: e.summary as string,
+        metrics: e.metrics as Record<string, number> | undefined,
+        verdict: e.verdict as DebugResult["verdict"],
+        report_ref: e.report_ref as string | null | undefined,
+        detail: e.detail as string | null | undefined,
+        error: e.error as string | null | undefined,
+      }));
+    setDebugResults(dbg);
+  }, [sub, events]);
+
+  // ---- Experiment start ----
+  const [expBusy, setExpBusy] = useState(false);
+  const handleStartExperiment = async () => {
+    setExpBusy(true);
+    try {
+      await runExperiment(runId);
+    } catch (e: any) {
+      console.error("start experiment error", e);
+    }
+    setExpBusy(false);
+  };
+
+  // ---- Collaboration state ----
+  const [collabLoading, setCollabLoading] = useState(false);
+  const collabCtx = collabMode !== "autonomous" && (["running", "waiting_approval"].includes(runStatus))
+    ? events.find((e) => e.event_type === "approval_required" && e.subject_type === "collaboration")
+    : null;
+  const [collabAdj, setCollabAdj] = useState<CollaborationAdjustments>({});
+  const handleCollabResolve = async (resolution: "approved" | "rejected") => {
+    setCollabLoading(true);
+    try {
+      await resolveCollaboration(runId, { resolution, adjustments: collabAdj });
+    } catch (e: any) {
+      console.error("resolve collab error", e);
+    }
+    setCollabLoading(false);
+  };
 
   return (
     <div className="run-dashboard">
@@ -154,10 +222,82 @@ export function RunDashboard({ runId }: { runId: string }) {
           <span>
             <span className="muted">研究设定　</span>
             <span className="mono small">
-              内循环={innerSummary} · 审计严格度={cfg.audit_threshold ?? 0.8} · 预算={maxOuter}轮
+              内循环={innerSummary} · 审计严格度={cfg.audit_threshold ?? 0.8} · 预算={maxOuter}轮 · 协作={collabLabel}
             </span>
           </span>
         </div>
+
+        {/* Experiment-start button for requested runs */}
+        {runStatus === "requested" && (
+          <div className="card note" style={{ marginTop: 12 }}>
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <strong>该研究任务已创建，尚未启动完整实验</strong>
+                <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
+                  可先在「调试」页验证内/外循环，确认无误后再启动完整自主实验。
+                </p>
+              </div>
+              <button className="btn primary" disabled={expBusy} onClick={handleStartExperiment}>
+                {expBusy ? "启动中…" : "开始完整自主实验 →"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Collaboration confirmation panel */}
+        {collabCtx && runStatus === "waiting_approval" && (
+          <div className="card" style={{ marginTop: 12, border: "2px solid var(--accent)" }}>
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <strong>⚡ 协作暂停 — 等待确认</strong>
+              <span className="pill warn">{collabLabel}</span>
+            </div>
+            <p className="muted" style={{ marginTop: 6 }}>
+              当前步骤已暂停，请审阅运行状态后选择「继续」或「中止」。
+            </p>
+            <div className="collab-form" style={{ marginTop: 10 }}>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                <label className="field" style={{ margin: 0 }}>
+                  <span>模型　</span>
+                  <select value={collabAdj.model || ""} onChange={(e) => setCollabAdj({ ...collabAdj, model: e.target.value || null })} style={{ width: 120 }}>
+                    <option value="">不变</option>
+                    {["gbm", "gbm-strong", "rf", "logreg"].map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </label>
+                <label className="field" style={{ margin: 0 }}>
+                  <span>FE　</span>
+                  <select value={collabAdj.fe || ""} onChange={(e) => setCollabAdj({ ...collabAdj, fe: (e.target.value || null) as any })} style={{ width: 100 }}>
+                    <option value="">不变</option>
+                    <option value="basic">basic</option>
+                    <option value="rich">rich</option>
+                  </select>
+                </label>
+                <label className="field" style={{ margin: 0 }}>
+                  <span>CV　　　</span>
+                  <input type="number" min={1} max={20} value={collabAdj.cv_folds ?? ""} placeholder="不变" onChange={(e) => setCollabAdj({ ...collabAdj, cv_folds: e.target.value ? Number(e.target.value) : null })} style={{ width: 70 }} />
+                </label>
+                <label className="field" style={{ margin: 0 }}>
+                  <span>门槛　</span>
+                  <input type="number" step={0.01} value={collabAdj.threshold ?? ""} placeholder="不变" onChange={(e) => setCollabAdj({ ...collabAdj, threshold: e.target.value ? Number(e.target.value) : null })} style={{ width: 80 }} />
+                </label>
+                <label className="field" style={{ margin: 0 }}>
+                  <span>审计严格度</span>
+                  <input type="number" step={0.05} min={0} max={1} value={collabAdj.audit_threshold ?? ""} placeholder="不变" onChange={(e) => setCollabAdj({ ...collabAdj, audit_threshold: e.target.value ? Number(e.target.value) : null })} style={{ width: 80 }} />
+                </label>
+              </div>
+              <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                <button className="btn primary" disabled={collabLoading} onClick={() => handleCollabResolve("approved")}>
+                  {collabLoading ? "确认中…" : "✓ 继续"}
+                </button>
+                <button className="btn" disabled={collabLoading} onClick={() => handleCollabResolve("rejected")}>
+                  ✕ 中止
+                </button>
+              </div>
+              <p className="muted small" style={{ marginTop: 6 }}>
+                上方字段留空 = 保持原设定不变。填写的调整将在下一轮内循环中生效。
+              </p>
+            </div>
+          </div>
+        )}
 
         {runStatus !== "running" && auditCount >= maxOuter && (
           <div className="muted" style={{ marginTop: 8 }}>
@@ -186,6 +326,16 @@ export function RunDashboard({ runId }: { runId: string }) {
       </div>
 
       {sub === "live" && <DualLoopLive runId={runId} />}
+      {sub === "debug" && (
+        <DebugPanel
+          runStatus={runStatus}
+          debugBusy={debugBusy}
+          debugResults={debugResults}
+          onDebug={handleDebug}
+          onStartExperiment={handleStartExperiment}
+          expBusy={expBusy}
+        />
+      )}
       {sub === "audit" && <AuditBoard runId={runId} />}
       {sub === "tree" && <HypothesisTree runId={runId} />}
       {sub === "improve" && <ImprovementTimeline runId={runId} />}
@@ -269,6 +419,126 @@ function TraceStep({ step }: { step: AgentTraceStep }) {
       )}
       {open && step.detail && (
         <pre className="trace-detail">{step.detail}</pre>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Debug panel: isolate inner / outer loop stages before the full experiment
+// ---------------------------------------------------------------------------
+
+function DebugPanel({
+  runStatus,
+  debugBusy,
+  debugResults,
+  onDebug,
+  onStartExperiment,
+  expBusy,
+}: {
+  runStatus: string;
+  debugBusy: "inner" | "outer" | null;
+  debugResults: DebugResult[];
+  onDebug: (stage: "inner" | "outer") => void;
+  onStartExperiment: () => void;
+  expBusy: boolean;
+}) {
+  const innerLatest = debugResults.filter((r) => r.stage === "inner").slice(-1)[0];
+  const outerLatest = debugResults.filter((r) => r.stage === "outer").slice(-1)[0];
+
+  return (
+    <div className="card debug-panel" style={{ marginTop: 12 }}>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h3 style={{ margin: 0 }}>⚙ 调试面板</h3>
+        <span className="muted small">
+          {debugResults.length > 0 ? `${debugResults.length} 条调试记录` : "尚未调试"}
+        </span>
+      </div>
+      <p className="muted" style={{ marginBottom: 16 }}>
+        在启动完整实验前，可对双循环的关键环节进行<b>单独调试</b>：验证数据加载、模型训练、审计阈值是否合理。
+        调试结果不会污染研究记录与榜单。
+      </p>
+
+      <div className="grid2" style={{ gap: 12 }}>
+        {/* Inner loop debug */}
+        <div className="debug-card">
+          <h4>内循环调试</h4>
+          <p className="muted small">运行一次 kaggle_eval（或 agent 内循环），验证数据、模型与指标。</p>
+          <button
+            className="btn primary"
+            disabled={debugBusy !== null}
+            onClick={() => onDebug("inner")}
+          >
+            {debugBusy === "inner" ? "运行中…" : "▶ 运行内循环调试"}
+          </button>
+          {innerLatest && <DebugResultCard r={innerLatest} />}
+        </div>
+
+        {/* Outer loop debug */}
+        <div className="debug-card">
+          <h4>外循环调试</h4>
+          <p className="muted small">对最近一次内循环结果运行外审计（layer_11），验证审计阈值与结论。</p>
+          <button
+            className="btn"
+            disabled={debugBusy !== null || !innerLatest}
+            onClick={() => onDebug("outer")}
+          >
+            {debugBusy === "outer" ? "运行中…" : "▶ 运行外循环调试"}
+          </button>
+          {!innerLatest && <p className="muted small">请先运行内循环调试，再调试外循环。</p>}
+          {outerLatest && <DebugResultCard r={outerLatest} />}
+        </div>
+      </div>
+
+      {runStatus === "requested" && (
+        <div className="card note" style={{ marginTop: 16 }}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <strong>调试通过？</strong>
+              <span className="muted" style={{ marginLeft: 8 }}>可开始完整的自主实验。</span>
+            </div>
+            <button className="btn primary" disabled={expBusy} onClick={onStartExperiment}>
+              {expBusy ? "启动中…" : "开始完整自主实验 →"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DebugResultCard({ r }: { r: DebugResult }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={`debug-result ${r.ok ? "ok" : "fail"}`} style={{ marginTop: 10 }}>
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <span>
+          <span className={`pill ${r.ok ? "ok" : "bad"}`}>{r.ok ? "✓ 通过" : "✕ 失败"}</span>
+          <span className="muted small" style={{ marginLeft: 8 }}>{r.summary}</span>
+        </span>
+        <button type="button" className="btn tiny" onClick={() => setOpen((v) => !v)}>
+          {open ? "收起" : "详情"}
+        </button>
+      </div>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {r.error && <p className="muted" style={{ color: "var(--red)" }}>错误: {r.error}</p>}
+          {r.metrics && Object.keys(r.metrics).length > 0 && (
+            <div>
+              <span className="muted small">指标：</span>
+              {Object.entries(r.metrics).map(([k, v]) => (
+                <span key={k} className="pill accent" style={{ marginRight: 4 }}>{k}={typeof v === "number" ? v.toFixed(4) : String(v)}</span>
+              ))}
+            </div>
+          )}
+          {r.verdict && (
+            <div>
+              <span className="muted small">审计结论：confidence={r.verdict.confidence}, recoverable={String(r.verdict.recoverable)}, gate_passed={String(r.verdict.gate_passed)}</span>
+              {r.verdict.unresolved?.length > 0 && <span className="muted small">, unresolved={r.verdict.unresolved.join(", ")}</span>}
+            </div>
+          )}
+          {r.detail && <pre className="trace-detail">{r.detail}</pre>}
+        </div>
       )}
     </div>
   );

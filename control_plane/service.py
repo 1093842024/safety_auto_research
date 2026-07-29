@@ -231,7 +231,8 @@ class ControlPlaneService:
             nm = next(iter(scores))
             target = _best(scores[nm])
 
-        artifact_ids = [a.artifact_id for a in self._repo.list_artifacts(run_id)]
+        artifacts = self._repo.list_artifacts(run_id)
+        artifact_ids = [a.artifact_id for a in artifacts]
         record = {
             "record_id": self._repo.next_id("rec"),
             "task_id": task_id,
@@ -241,6 +242,7 @@ class ControlPlaneService:
             "score": round(float(target), 6),
             "config_snapshot": config,
             "artifact_ids": artifact_ids,
+            "artifacts": [{"artifact_id": a.artifact_id} for a in artifacts],
             "status": run.status,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -272,6 +274,13 @@ class ControlPlaneService:
         artifact_ids: list[str] | None = None,
         source: str = "platform",
     ) -> dict[str, Any]:
+        artifact_ids = list(artifact_ids or [])
+        run_artifacts = self._repo.list_artifacts(run_id)
+        artifacts_data = [
+            {"artifact_id": a.artifact_id}
+            for a in run_artifacts
+            if a.artifact_id in artifact_ids
+        ]
         record = {
             "record_id": self._repo.next_id("rec"),
             "task_id": task_id,
@@ -280,7 +289,8 @@ class ControlPlaneService:
             "direction": str(direction).strip().lower(),
             "score": round(float(score), 6),
             "config_snapshot": dict(config or {}),
-            "artifact_ids": list(artifact_ids or []),
+            "artifact_ids": artifact_ids,
+            "artifacts": artifacts_data,
             "status": status,
             "source": source,
             "created_at": datetime.now(timezone.utc).isoformat(),

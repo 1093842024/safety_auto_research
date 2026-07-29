@@ -51,14 +51,6 @@ class HypoTreeStore:
                 "CREATE TABLE IF NOT EXISTS hypo_nodes ("
                 "node_id TEXT PRIMARY KEY, parent_id TEXT, data TEXT)"
             )
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS experiences ("
-                "entry_id TEXT PRIMARY KEY, kind TEXT, data TEXT)"
-            )
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS strategies ("
-                "rollback_id TEXT PRIMARY KEY, data TEXT)"
-            )
             conn.commit()
         self._load_memory()
 

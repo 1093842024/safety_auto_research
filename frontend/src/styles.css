@@ -296,3 +296,25 @@ html, body, #root { height: 100%; }
 
 /* Realtime validation hint (RegisterTask) */
 .ok-text { color: var(--ok); font-size: 12px; }
+
+/* ===== Debug panel ===== */
+.debug-panel { padding: 14px 16px; }
+.debug-card {
+  border: 1px solid var(--border); border-radius: 10px; padding: 14px;
+  background: var(--panel);
+}
+.debug-card h4 { margin: 0 0 6px; font-size: 14px; }
+.debug-card .btn { margin-top: 8px; }
+.debug-result {
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  background: var(--bg);
+}
+.debug-result.ok { border-color: var(--ok); }
+.debug-result.fail { border-color: var(--red); }
+
+/* ===== Collaboration form ===== */
+.collab-form {
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+  background: var(--panel);
+}
+.collab-form .field { display: inline-flex; flex-direction: column; gap: 2px; }

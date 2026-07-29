@@ -23,15 +23,20 @@ deterministically.
 
 from __future__ import annotations
 
+import json as _json
+import threading
+import time as _time
 from typing import Any
 
 from ..control_plane.schemas import CreateStageRunRequest
 from ..control_plane.schemas import RecordDecisionRequest
+from ..control_plane.schemas import RequestApprovalRequest
 from ..control_plane.schemas import UpdateStageStatusRequest
 from ..control_plane.service import ControlPlaneService
 from ..control_plane.service import NotFoundError
 from ..platform_contracts.enums import DecisionType
 from ..platform_contracts.enums import StageStatus
+from ..platform_contracts.enums import WorkflowStatus
 from ..platform_contracts.events import BasePlatformEvent
 from .decision.router import IterationRouter
 from .registry import AdapterRegistry
@@ -45,6 +50,21 @@ from .agent.harness import AgentHarness
 from .agent.harness import LocalAgentHarness
 from .agent.harness import RemoteAgentHarness
 from .base import StageTaskSpec
+
+# Human-in-the-loop collaboration state: one entry per paused run.  The background
+# thread writes the step context into ``_COLLAB_PAUSES`` and blocks until the HTTP
+# resolve-collaboration endpoint signals it.  The resolve handler writes adjustments
+# (model / fe / threshold / audit_threshold / action) before signalling, so the
+# thread can apply them and either continue or abort.
+_COLLAB_PAUSES: dict[str, dict[str, Any]] = {}
+_COLLAB_LOCK = threading.Lock()
+
+# Re-export for api.py so the resolve-collaboration endpoint can write adjustments.
+def _collab_pauses() -> dict[str, dict[str, Any]]:
+    return _COLLAB_PAUSES
+
+def _collab_lock() -> threading.Lock:
+    return _COLLAB_LOCK
 
 
 class ClosedLoopOrchestrator:
@@ -337,6 +357,7 @@ class ClosedLoopOrchestrator:
         strategy_db: str | None = None,
         refine_hook: Any | None = None,
         inner_agent_config: dict[str, Any] | None = None,
+        collaboration_mode: str = "autonomous",
     ) -> dict[str, Any]:
         """DUAL-LOOP driver: inner research -> external audit -> (refine/restart) -> repeat.
 
@@ -361,6 +382,7 @@ class ClosedLoopOrchestrator:
         base_goal = obj.get("goal") or obj.get("objective") or run.target_id
         goal = base_goal
         inner_params = dict(inner_params or {})
+        orig_inner_params = dict(inner_params)  # snapshot for restart via collaboration
         audit_params = dict(audit_params or {})
         steps: list[dict[str, Any]] = []
         # When an inner-loop agent config is supplied, fold the researcher's system prompt
@@ -419,6 +441,25 @@ class ClosedLoopOrchestrator:
             )
             steps.append(self._step(f"inner[{outer}]", stage, result, None))
 
+            # ---- COLLABORATION (step_confirm): pause after inner loop for human review ----
+            if collaboration_mode == "step_confirm":
+                adj = self._collab_pause(run_id, {
+                    "stage": "inner_loop",
+                    "iteration": outer,
+                    "max_iters": max_outer_iters,
+                    "summary": f"内循环 #{outer+1}/{max_outer_iters} 完成: accuracy={inner_acc:.4f}",
+                    "metrics": (
+                        dict(inner_event.metrics)
+                        if inner_event and getattr(inner_event, "metrics", None)
+                        else {}
+                    ),
+                    "collab_mode": collaboration_mode,
+                })
+                if adj is None:
+                    self.svc.set_run_status(run_id, "failed", detail="collaboration: user aborted after inner loop")
+                    return self._summary(run_id, steps, "collaboration_aborted")
+                self._apply_collab_adjustments(inner_params, audit_params, adj)
+
             # ---- OUTER AUDIT: independent constraint-wise verification ----
             # The control plane curates a SCOPED audit input: the outer auditor sees only
             # the objective + the inner loop's *result* (metrics/verdict) + prior outer-loop
@@ -452,6 +493,31 @@ class ClosedLoopOrchestrator:
                 "unresolved": getattr(audit_event, "unresolved_claims", []),
             })
             steps.append(self._step(f"audit[{outer}]", audit_stage, audit_result, decision))
+
+            # ---- COLLABORATION (step_confirm): pause after outer audit for human review ----
+            if collaboration_mode == "step_confirm":
+                adj = self._collab_pause(run_id, {
+                    "stage": "outer_audit",
+                    "iteration": outer,
+                    "max_iters": max_outer_iters,
+                    "summary": (
+                        f"外审计 #{outer+1}/{max_outer_iters} 完成: "
+                        f"confidence={getattr(audit_event,'confidence',0):.2f}, "
+                        f"recommendation={decision.decision_type.value}"
+                    ),
+                    "verdict": {
+                        "confidence": getattr(audit_event, "confidence", 0),
+                        "recoverable": getattr(audit_event, "recoverable", True),
+                        "gate_passed": getattr(audit_event, "gate_passed", True),
+                        "recommendation": decision.decision_type.value,
+                        "unresolved": getattr(audit_event, "unresolved_claims", []),
+                    },
+                    "collab_mode": collaboration_mode,
+                })
+                if adj is None:
+                    self.svc.set_run_status(run_id, "failed", detail="collaboration: user aborted after audit")
+                    return self._summary(run_id, steps, "collaboration_aborted")
+                self._apply_collab_adjustments(inner_params, audit_params, adj)
 
             # Cumulative state: backpropagate the audit insight onto the hypothesis node.
             rejected = list(getattr(audit_event, "rejected_candidates", []) or [])
@@ -497,9 +563,94 @@ class ClosedLoopOrchestrator:
             except NotFoundError:
                 pass  # layer_09 still a stub in this deployment
 
+            # ---- COLLABORATION: pause after full outer-loop iteration (step_confirm / outer_confirm) ----
+            if collaboration_mode in ("step_confirm", "outer_confirm"):
+                adj = self._collab_pause(run_id, {
+                    "stage": "outer_complete",
+                    "iteration": outer,
+                    "max_iters": max_outer_iters,
+                    "summary": (
+                        f"第 {outer+1}/{max_outer_iters} 轮完成 | "
+                        f"inner_acc={inner_acc:.4f} | "
+                        f"audit_confidence={getattr(audit_event,'confidence',0):.2f} | "
+                        f"next={decision.decision_type.value}"
+                    ),
+                    "metrics": {"accuracy": inner_acc},
+                    "verdict": {"confidence": getattr(audit_event, "confidence", 0)},
+                    "collab_mode": collaboration_mode,
+                })
+                if adj is None:
+                    self.svc.set_run_status(run_id, "failed", detail="collaboration: user aborted after outer iter")
+                    return self._summary(run_id, steps, "collaboration_aborted")
+                self._apply_collab_adjustments(inner_params, audit_params, adj)
+                if adj.get("action") == "restart":
+                    goal = base_goal
+                    inner_params = {**orig_inner_params}
+
             outer += 1
 
         return self._summary(run_id, steps, "exited_budget")
+
+    # --------------------------------------------------- human-in-the-loop collaboration
+
+    def _collab_pause(self, run_id: str, step_context: dict[str, Any]) -> dict[str, Any] | None:
+        """Pause for human review (blocking, called from the background thread).
+
+        Sets the run to ``WAITING_APPROVAL``, emits an ``ApprovalRequiredEvent``, and blocks
+        until the HTTP ``/resolve-collaboration`` endpoint signals completion. Returns the
+        human's adjustments dict, or ``None`` when the human rejected / aborted.
+        """
+        evt = threading.Event()
+        with _COLLAB_LOCK:
+            _COLLAB_PAUSES[run_id] = {"evt": evt, "adjustments": None, "rejected": False}
+
+        self.svc.request_approval(
+            run_id,
+            RequestApprovalRequest(
+                subject_type="collaboration",
+                reason=_json.dumps(step_context, ensure_ascii=False, default=str),
+                policy_ref=step_context.get("collab_mode", "step_confirm"),
+            ),
+        )
+
+        # Wait for the human to resolve (approve + adjustments, or reject).
+        while True:
+            if evt.wait(timeout=2):
+                break
+            try:
+                r = self.svc.get_workflow_run(run_id)
+                if r.status in (WorkflowStatus.FAILED, WorkflowStatus.CANCELLED):
+                    with _COLLAB_LOCK:
+                        _COLLAB_PAUSES.pop(run_id, None)
+                    return None
+            except Exception:
+                pass
+
+        with _COLLAB_LOCK:
+            state = _COLLAB_PAUSES.pop(run_id, {"rejected": True})
+        if state.get("rejected"):
+            return None
+        return state.get("adjustments") or {}
+
+    @staticmethod
+    def _apply_collab_adjustments(
+        inner_params: dict[str, Any],
+        audit_params: dict[str, Any],
+        adj: dict[str, Any],
+    ) -> None:
+        """Fold the human's adjustments into the mutable inner/audit param dicts."""
+        if adj.get("model"):
+            inner_params["model"] = adj["model"]
+        if adj.get("fe"):
+            inner_params["fe"] = adj["fe"]
+        if adj.get("cv_folds"):
+            inner_params["cv_folds"] = int(adj["cv_folds"])
+        if adj.get("threshold") is not None:
+            inner_params["threshold"] = float(adj["threshold"])
+        if adj.get("data_dir"):
+            inner_params["data_dir"] = adj["data_dir"]
+        if adj.get("audit_threshold") is not None:
+            audit_params["threshold"] = float(adj["audit_threshold"])
 
     # --------------------------------------------------- recursive improvement hook
     def run_self_evolution(self, run_id: str, params: dict[str, Any] | None = None) -> tuple[Any, Any]:

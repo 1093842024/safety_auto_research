@@ -141,9 +141,10 @@ def goal_text(comp: dict[str, Any]) -> str:
     )
 
 
-def run_codex_path(orch: ClosedLoopOrchestrator, run_id: str):
+def run_codex_path(orch: ClosedLoopOrchestrator, run_id: str, comp: dict[str, Any] | None = None):
     candidates = ["kaggle_eval", "layer_08_result_analysis_experience"]
-    stage, result = orch.dispatch_open_goal(run_id, goal_text(COMPETITIONS["_active"]), candidates)
+    target = comp or COMPETITIONS.get("_active", {})
+    stage, result = orch.dispatch_open_goal(run_id, goal_text(target), candidates)
     return [("00_agent_orchestration (Codex open-goal)", stage, result)], "codex"
 
 
@@ -470,7 +471,7 @@ def main() -> int:
     args = ap.parse_args()
 
     comp = COMPETITIONS[args.competition]
-    COMPETITIONS["_active"] = comp  # used by run_codex_path's goal text
+    COMPETITIONS["_active"] = comp  # fallback for goal_text if comp not passed explicitly
     suffix = "_DUAL" if args.mode == "dual-loop" else ""
     report_path = os.path.join(data_dir_for(comp), f"REPORT{suffix}.md")
     trace_path = os.path.join(data_dir_for(comp), f"TRACE{suffix}.json")
@@ -504,7 +505,7 @@ def main() -> int:
         try:
             if args.no_codex:
                 raise RuntimeError("--no-codex requested")
-            steps, driver = run_codex_path(orch, run_id)
+            steps, driver = run_codex_path(orch, run_id, comp)
             print(f"[demo] Codex open-goal turn complete; steps={len(steps)}", flush=True)
         except Exception as exc:  # pragma: no cover - resilience for the demo
             print(f"[demo] Codex path failed ({exc!r}); using scripted fallback.", flush=True)

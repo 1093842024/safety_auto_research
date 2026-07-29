@@ -163,7 +163,7 @@ class CapabilityRegistry:
 
     def list_capabilities(self) -> list[dict[str, object]]:
         """The ten infrastructure-layer capabilities (agent-callable tools)."""
-        return [c.to_catalog_entry() for c in self._caps.values() if c.is_infra]
+        return [cap.to_catalog_entry() for cap in self._caps.values() if cap.is_infra]
 
     def list_all_capabilities(self) -> list[dict[str, object]]:
         """Every registered capability, including extra non-infra ones (e.g. kaggle_eval).

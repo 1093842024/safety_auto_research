@@ -253,6 +253,8 @@ export interface InnerLoopConfig {
   step_plan?: string[];
   /** Which agent CLI drives the inner loop when mode == "agent": "codex" | "claude_code" | "auto". */
   agent_cli?: "codex" | "claude_code" | "auto" | null;
+  /** Human-in-the-loop collaboration mode: "autonomous" | "step_confirm" | "outer_confirm". */
+  collaboration_mode?: "autonomous" | "step_confirm" | "outer_confirm";
 }
 
 /** Researcher-facing configuration for launching a benchmark task as a research run. */
@@ -266,17 +268,17 @@ export interface LaunchConfig {
   agent_cli?: "codex" | "claude_code" | "auto" | null;
 }
 
-export const launchBenchmarkTask = (taskId: string, config: LaunchConfig = {}) =>
-  apiPost<{
+export const launchBenchmarkTask = (taskId: string, config: LaunchConfig = {}, noAutoRun?: boolean) => {
+  const path = `/benchmark-tasks/${encodeURIComponent(taskId)}/launch`;
+  const url = noAutoRun ? `${path}?auto_run=false` : path;
+  return apiPost<{
     run_id: string;
     task_id: string;
     supported_by_platform: boolean;
     status: string;
     message?: string;
-  }>(
-    `/benchmark-tasks/${encodeURIComponent(taskId)}/launch`,
-    config as Record<string, unknown>,
-  );
+  }>(url, config as Record<string, unknown>);
+};
 
 // ----- Research records (best-3 per task + global leaderboard) -----
 
@@ -289,7 +291,7 @@ export interface ResearchRecord {
   direction: string;
   score: number;
   config_snapshot: Record<string, any> | null;
-  artifacts: Record<string, any> | null;
+  artifacts: Array<{artifact_id: string}> | null;
   is_top3: boolean;
   created_at: string;
 }
@@ -360,3 +362,67 @@ export interface RunDetail extends WorkflowRunSummary {
   ended_at?: string;
   status_detail?: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// Debug: isolate one stage (inner/outer) of the dual loop
+// ---------------------------------------------------------------------------
+
+export interface DebugResult {
+  stage: "inner" | "outer";
+  ok: boolean;
+  summary: string;
+  metrics?: Record<string, number>;
+  verdict?: {
+    confidence: number;
+    recoverable: boolean;
+    gate_passed: boolean;
+    unresolved: string[];
+    rejected: string[];
+    recommendation?: string;
+  } | null;
+  report_ref?: string | null;
+  detail?: string | null;
+  error?: string | null;
+}
+
+export const debugRun = (runId: string, stage: "inner" | "outer", auditInputOverride?: Record<string, any>) =>
+  apiPost<{ run_id: string; stage: string; status: string }>(
+    `/workflow-runs/${encodeURIComponent(runId)}/debug`,
+    { stage, audit_input_override: auditInputOverride || null },
+  );
+
+// ---------------------------------------------------------------------------
+// Run full experiment (for existing requested runs)
+// ---------------------------------------------------------------------------
+
+export const runExperiment = (runId: string) =>
+  apiPost<{ run_id: string; status: string; collaboration_mode?: string }>(
+    `/workflow-runs/${encodeURIComponent(runId)}/run-experiment`,
+  );
+
+// ---------------------------------------------------------------------------
+// Human-in-the-loop collaboration: resolve a paused step
+// ---------------------------------------------------------------------------
+
+export interface CollaborationAdjustments {
+  model?: string | null;
+  fe?: "basic" | "rich" | null;
+  cv_folds?: number | null;
+  threshold?: number | null;
+  audit_threshold?: number | null;
+  data_dir?: string | null;
+  action?: "continue" | "abort" | "restart";
+  note?: string | null;
+}
+
+export interface ResolveCollaborationPayload {
+  resolution: "approved" | "rejected";
+  reviewer?: string;
+  adjustments?: CollaborationAdjustments | null;
+}
+
+export const resolveCollaboration = (runId: string, payload: ResolveCollaborationPayload) =>
+  apiPost<{ status: string; run_id: string; resolution: string }>(
+    `/workflow-runs/${encodeURIComponent(runId)}/resolve-collaboration`,
+    payload as unknown as Record<string, unknown>,
+  );

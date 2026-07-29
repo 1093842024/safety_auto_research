@@ -17,46 +17,31 @@ from ..platform_contracts.objects import WorkflowRun
 from .schemas import CapabilityRunRequest
 from .schemas import CreateStageRunRequest
 from .schemas import CreateWorkflowRunRequest
+from .schemas import DebugRequest
 from .schemas import DispatchRequest
 from .schemas import DualLoopRequest
+from .schemas import EvaluateRunRequest
 from .schemas import InnerLoopConfig
 from .schemas import LaunchBenchmarkRequest
 from .schemas import MessageResponse
 from .schemas import RecordDecisionRequest
 from .schemas import RegisterTaskRequest
+from .schemas import ReportMetricRequest
 from .schemas import RequestApprovalRequest
 from .schemas import ResolveApprovalRequest
-from .schemas import ValidateTaskRequest
-from .schemas import ReportMetricRequest
-from .schemas import EvaluateRunRequest
+from .schemas import ResolveCollaborationRequest
 from .schemas import UpdateStageStatusRequest
+from .schemas import ValidateTaskRequest
 from .service import ConflictError
 from .service import ControlPlaneService
 from .service import NotFoundError
 from .store_tree import ResearchStateStore
 from ..benchmark_tasks import get_catalog
 from ..benchmark_tasks import get_task
+from ..benchmark_tasks import _default_eval_method as _get_eval_method_desc
 from ..benchmark_tasks import to_dict
 
-
-def _default_eval_method(task: "BenchmarkTask") -> str:
-    """Compose a concise evaluation-method description from a task's core fields.
-
-    Used as a fallback when a curated task does not supply an explicit ``eval_method``.
-    """
-    direction = "越高越好" if task.direction == "higher" else "越低越好"
-    gate = task.gates if task.gates else "无"
-    if task.harness == "kaggle_eval":
-        return (
-            f"以 {task.eval_metric} 为指标（{direction}），通过门限 {gate}；"
-            f"基线 baseline={task.baseline}，参考 reference={task.reference}。"
-            "平台内 kaggle_eval 执行 {cv} 折交叉验证（默认 5 折）。"
-        )
-    return (
-        f"以 {task.eval_metric} 为指标（{direction}），门限 {gate}；"
-        f"基线 baseline={task.baseline}，参考 reference={task.reference}。"
-        f"原始评估由 {task.harness} 在外部环境中完成，现改为由 agent 模式执行（已剥离 docker/Arbor 依赖）。"
-    )
+_shutdown_event = threading.Event()
 
 
 def create_app(service: ControlPlaneService | None = None) -> FastAPI:
@@ -71,6 +56,11 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
         ),
     )
     svc = service or ControlPlaneService()
+
+    @app.on_event("shutdown")
+    def _on_shutdown():
+        _shutdown_event.set()
+
     from ..execution_plane.orchestrator import ClosedLoopOrchestrator
 
     # Shared cumulative-state store (dual-loop): the orchestrator threads it into the
@@ -674,7 +664,7 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
 
         # Core task spec for agent execution (Task 4): keep only what an agent needs —
         # goal / definition / data / eval method / metrics — and drop docker/Arbor deps.
-        eval_method = task.eval_method or _default_eval_method(task)
+        eval_method = task.eval_method or _get_eval_method_desc(task)
         goal_text = (
             f"任务：{task.name}（{task.source_project}）。"
             f"目标：优化指标 {task.eval_metric}（{('越高越好' if task.direction == 'higher' else '越低越好')}），"
@@ -827,7 +817,10 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
                     inner_params["cv_folds"] = int(type_cfg["cv_folds"])
 
             def _drive() -> None:
+                if _shutdown_event.is_set():
+                    return
                 try:
+                    collab_mode = getattr(inner, "collaboration_mode", None) or "autonomous"
                     summary = active_orchestrator.run_dual_loop(
                         run.run_id,
                         inner_capability="kaggle_eval",
@@ -836,6 +829,7 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
                         max_outer_iters=cfg.max_outer_iters,
                         agent_inner=agent_mode,
                         inner_agent_config=inner_agent_config,
+                        collaboration_mode=collab_mode,
                     )
                     # 双循环结束后把终态写回 run（否则 status 永远停在 running）
                     svc.set_run_status(run.run_id, summary.get("status", "exited_budget"))
@@ -965,5 +959,320 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
             })
         trace.sort(key=lambda e: e["seq"])
         return trace
+
+    # ------------------------------------------------------------------ #
+    # Run-context reconstruction (debug / re-run)                        #
+    # ------------------------------------------------------------------ #
+
+    def _build_run_ctx(run) -> dict[str, Any]:
+        """Reconstruct the full execution context (orchestrator, params, config)
+        from a run's ``objective_snapshot`` so debug / run-experiment can replay.
+        """
+        obj = run.objective_snapshot or {}
+        cfg0 = obj.get("config", {}) or {}
+        inner_dump = cfg0.get("inner_loop") or {}
+        inner = InnerLoopConfig(**inner_dump) if inner_dump else InnerLoopConfig()
+        task_id = obj.get("benchmark_task_id", "")
+        task = get_task(task_id)
+        if task is None:
+            raise ValueError(f"cannot rebuild context: task {task_id} not found")
+        pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        type_cfg = dict(task.type_config or {})
+        is_custom_exec = (
+            task_id.startswith("custom.")
+            and task.harness == "kaggle_eval"
+            and task.supported_by_platform
+        )
+        # Resolve preset
+        if is_custom_exec:
+            preset = "custom"
+        elif inner.preset:
+            preset = inner.preset
+        elif task_id == "platform.spaceship":
+            preset = "spaceship"
+        elif task_id == "platform.titanic":
+            preset = "titanic"
+        else:
+            preset = "titanic"
+        fe_value = (inner.fe or "basic").lower()
+        if fe_value not in ("basic", "rich"):
+            fe_value = "basic"
+        if is_custom_exec:
+            data_dir = inner.data_dir or str(type_cfg.get("data_dir") or "")
+        else:
+            data_dir = inner.data_dir or os.path.join(pkg_root, "data", "kaggle", preset)
+        if inner.threshold is not None:
+            threshold = float(inner.threshold)
+        elif is_custom_exec and type_cfg.get("threshold") not in (None, ""):
+            threshold = float(type_cfg["threshold"])
+        elif preset == "spaceship":
+            threshold = 0.80
+        else:
+            threshold = 0.82
+        agent_mode = obj.get("execution_mode") == "agent"
+        agent_cli = cfg0.get("agent_cli") or obj.get("agent_cli")
+        inner_params = {
+            "preset": preset,
+            "model": inner.model,
+            "fe": fe_value,
+            "data_dir": data_dir,
+            "cv_folds": inner.cv_folds,
+            "threshold": threshold,
+        }
+        if inner.drop_cols:
+            inner_params["drop_cols"] = list(inner.drop_cols)
+        if is_custom_exec:
+            if type_cfg.get("target_col"):
+                inner_params["target"] = str(type_cfg["target_col"])
+            extra_drops = list(type_cfg.get("drop_cols") or [])
+            if type_cfg.get("id_col"):
+                extra_drops.append(str(type_cfg["id_col"]))
+            merged = list(inner_params.get("drop_cols", [])) + extra_drops
+            if merged:
+                inner_params["drop_cols"] = sorted(set(merged))
+            if type_cfg.get("model") and inner.model == "gbm":
+                inner_params["model"] = str(type_cfg["model"])
+            if type_cfg.get("cv_folds") and inner.cv_folds == 5:
+                inner_params["cv_folds"] = int(type_cfg["cv_folds"])
+        inner_agent_config = (
+            {**inner.model_dump(), "task_spec": obj.get("task_spec", {}), "goal": obj.get("goal", "")}
+            if agent_mode
+            else None
+        )
+        per_run_orch = None
+        if agent_mode and agent_cli in ("codex", "claude_code"):
+            cli_bin = "codex" if agent_cli == "codex" else os.environ.get("CLAUDE_CMD", "claude")
+            if shutil.which(cli_bin):
+                per_run_orch = _make_agent_orchestrator(agent_cli)
+        elif agent_mode and orchestrator.has_real_agent():
+            per_run_orch = orchestrator
+        active_orchestrator = per_run_orch or orchestrator
+        collab_mode = getattr(inner, "collaboration_mode", None) or "autonomous"
+        return {
+            "active_orchestrator": active_orchestrator,
+            "inner_params": inner_params,
+            "inner_agent_config": inner_agent_config,
+            "agent_mode": agent_mode,
+            "audit_threshold": cfg0.get("audit_threshold", 0.8),
+            "max_outer_iters": cfg0.get("max_outer_iters", 3),
+            "collaboration_mode": collab_mode,
+            "execution_mode": obj.get("execution_mode", "platform"),
+        }
+
+    def _spawn_full_experiment(run, ctx: dict[str, Any]) -> None:
+        """Start a full autonomous experiment (dual loop) in a background daemon thread."""
+        active_orchestrator = ctx["active_orchestrator"]
+        try:
+            svc.start_workflow_run(run.run_id)
+        except (ConflictError, ValueError):
+            pass  # already running / terminal
+
+        def _drive() -> None:
+            try:
+                summary = active_orchestrator.run_dual_loop(
+                    run.run_id,
+                    inner_capability="kaggle_eval",
+                    inner_params=ctx["inner_params"],
+                    audit_params={"threshold": ctx["audit_threshold"]},
+                    max_outer_iters=ctx["max_outer_iters"],
+                    agent_inner=ctx["agent_mode"],
+                    inner_agent_config=ctx.get("inner_agent_config"),
+                    collaboration_mode=ctx.get("collaboration_mode", "autonomous"),
+                )
+                svc.set_run_status(run.run_id, summary.get("status", "exited_budget"))
+                try:
+                    svc.capture_run_record(run.run_id)
+                except Exception:
+                    pass
+            except Exception:
+                logging.exception("experiment failed for run=%s", run.run_id)
+                try:
+                    svc.set_run_status(run.run_id, "failed")
+                except Exception:
+                    pass
+
+        threading.Thread(target=_drive, daemon=True).start()
+
+    # ------------------------------------------------------------------ #
+    # Debug: isolate one stage (inner / outer) of the dual loop          #
+    # ------------------------------------------------------------------ #
+    @app.post(
+        "/workflow-runs/{run_id}/debug",
+        summary="Debug one stage (inner/outer) of the dual loop in isolation",
+    )
+    def debug_run(run_id: str, body: DebugRequest) -> dict:
+        try:
+            run = svc.get_workflow_run(run_id)
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"run {run_id} not found")
+        try:
+            ctx = _build_run_ctx(run)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        active_orch = ctx["active_orchestrator"]
+        stage = body.stage
+        if stage not in ("inner", "outer"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="stage must be 'inner' or 'outer'")
+
+        def _debug_thread() -> None:
+            if _shutdown_event.is_set():
+                return
+            from ..execution_plane.sdk import PlatformSDK
+            from ..platform_contracts.events import DebugEvent
+            sdk = PlatformSDK(svc, state_store=state_store)
+            # StageRun creation requires the workflow to be RUNNING.
+            try:
+                svc.start_workflow_run(run_id)
+            except (ConflictError, ValueError):
+                pass  # already running / terminal
+            try:
+                if stage == "inner":
+                    if ctx["agent_mode"]:
+                        goal = run.objective_snapshot.get("goal", "") if run.objective_snapshot else ""
+                        _, result = active_orch.dispatch_open_goal(
+                            run_id, goal,
+                            agent_config=ctx.get("inner_agent_config"),
+                        )
+                    else:
+                        _, result = active_orch.run_capability(
+                            run_id, "kaggle_eval", ctx["inner_params"]
+                        )
+                    ev = result.event
+                    metrics = dict(ev.metrics) if ev and getattr(ev, "metrics", None) else {}
+                    ok = bool(ev and getattr(ev, "passed", True))
+                    report = getattr(ev, "report_ref", None) if ev else None
+                    detail = result.detail
+                    summary = f"内循环调试完成 | accuracy={metrics.get('accuracy','?')} | ok={ok}"
+                    sdk.emit_event(DebugEvent(
+                        run_id=run_id, stage="inner", ok=ok, summary=summary,
+                        metrics=metrics, report_ref=report, detail=detail,
+                    ))
+                else:  # outer
+                    events = svc.list_events(run_id)
+                    last_inner = None
+                    for e in reversed(events):
+                        if e.get("event_type") == "eval_completed":
+                            last_inner = e
+                            break
+                    audit_input = body.audit_input_override
+                    if audit_input is None:
+                        if last_inner is None:
+                            sdk.emit_event(DebugEvent(
+                                run_id=run_id, stage="outer", ok=False,
+                                summary="未找到内循环结果，请先调试内循环",
+                                error="no inner result found",
+                            ))
+                            return
+                        audit_input = {
+                            "objective": run.objective_snapshot.get("goal", "") if run.objective_snapshot else "",
+                            "result_metrics": last_inner.get("metrics", {}),
+                            "result_report_ref": last_inner.get("report_ref"),
+                            "result_gate_passed": last_inner.get("gate_passed", True),
+                            "result_real_eval": "kaggle" in str(last_inner.get("report_ref", "") or ""),
+                            "prior_audits": [],
+                            "constraints": [],
+                        }
+                    _, result = active_orch.run_capability(
+                        run_id, "layer_11_external_audit",
+                        {"objective": audit_input.get("objective", ""), "audit_input": audit_input, "threshold": ctx["audit_threshold"]},
+                    )
+                    ev = result.event
+                    ok = bool(ev and getattr(ev, "gate_passed", True))
+                    verdict = {
+                        "confidence": getattr(ev, "confidence", 0) if ev else 0,
+                        "recoverable": getattr(ev, "recoverable", True) if ev else True,
+                        "gate_passed": getattr(ev, "gate_passed", True) if ev else True,
+                        "unresolved": list(getattr(ev, "unresolved_claims", []) if ev else []),
+                        "rejected": list(getattr(ev, "rejected_candidates", []) if ev else []),
+                    } if ev else None
+                    summary = f"外审计调试完成 | confidence={verdict.get('confidence',0):.2f} | ok={ok}" if verdict else "外审计调试完成"
+                    sdk.emit_event(DebugEvent(
+                        run_id=run_id, stage="outer", ok=ok, summary=summary,
+                        verdict=verdict, detail=result.detail,
+                    ))
+            except Exception as exc:
+                logging.exception("debug failed for run=%s stage=%s", run_id, stage)
+                sdk.emit_event(DebugEvent(
+                    run_id=run_id, stage=stage, ok=False,
+                    summary=f"调试失败: {exc}", error=str(exc),
+                ))
+
+        threading.Thread(target=_debug_thread, daemon=True).start()
+        return {"run_id": run_id, "stage": stage, "status": "debugging"}
+
+    # ------------------------------------------------------------------ #
+    # Run full experiment (for existing requested runs)                  #
+    # ------------------------------------------------------------------ #
+    @app.post(
+        "/workflow-runs/{run_id}/run-experiment",
+        summary="Start the full autonomous experiment (dual loop) on an existing requested run",
+    )
+    def start_full_experiment(run_id: str) -> dict:
+        try:
+            run = svc.get_workflow_run(run_id)
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"run {run_id} not found")
+        try:
+            ctx = _build_run_ctx(run)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+        # Check agent availability for agent-mode runs.
+        agent_mode = ctx["agent_mode"]
+        if agent_mode:
+            obj = run.objective_snapshot or {}
+            cfg0 = obj.get("config", {}) or {}
+            agent_cli = cfg0.get("agent_cli") or obj.get("agent_cli")
+            if agent_cli in ("codex", "claude_code"):
+                cli_bin = "codex" if agent_cli == "codex" else os.environ.get("CLAUDE_CMD", "claude")
+                if shutil.which(cli_bin) is None:
+                    msg = f"agent 模式选择 {agent_cli}，但在 PATH 中找不到 {cli_bin}，已终止。"
+                    svc.set_run_status(run_id, "failed", detail=msg)
+                    return {"run_id": run_id, "status": "failed", "message": msg}
+            elif not orchestrator.has_real_agent():
+                msg = "内循环 agent 模式需要接入远程 Agent，当前环境未配置，已终止。请设置环境变量 AGENT_COMMAND 或选择 codex/claude_code。"
+                svc.set_run_status(run_id, "failed", detail=msg)
+                return {"run_id": run_id, "status": "failed", "message": msg}
+
+        _spawn_full_experiment(run, ctx)
+        return {"run_id": run_id, "status": "running", "collaboration_mode": ctx.get("collaboration_mode", "autonomous")}
+
+    # ------------------------------------------------------------------ #
+    # Human-in-the-loop collaboration: resolve a paused step             #
+    # ------------------------------------------------------------------ #
+    @app.post(
+        "/workflow-runs/{run_id}/resolve-collaboration",
+        summary="Resolve a collaboration pause (approve+adjust / reject) to resume the loop",
+    )
+    def resolve_collaboration(run_id: str, body: ResolveCollaborationRequest) -> dict:
+        from ..execution_plane.orchestrator import _collab_lock as _orch_lock
+        from ..execution_plane.orchestrator import _collab_pauses as _orch_pauses
+
+        pauses = _orch_pauses()
+        lock = _orch_lock()
+        # Carry adjustments into the shared state BEFORE resolving the approval, so the
+        # waiting background thread sees them once the run transitions back to RUNNING.
+        with lock:
+            if run_id in pauses:
+                ctx = pauses[run_id]
+                ctx["adjustments"] = body.adjustments.model_dump() if body.adjustments else {}
+                ctx["rejected"] = (body.resolution != "approved")
+
+        try:
+            svc.resolve_approval(
+                run_id,
+                ResolveApprovalRequest(
+                    resolution=body.resolution,
+                    resolved_by=body.reviewer,
+                ),
+            )
+        except Exception as exc:
+            raise _translate(exc)
+
+        with lock:
+            if run_id in pauses:
+                pauses[run_id].get("evt", threading.Event()).set()
+
+        return {"status": "ok", "run_id": run_id, "resolution": body.resolution}
 
     return app

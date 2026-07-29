@@ -134,3 +134,4 @@ class EventType(str, Enum):
     AUDIT_COMPLETED = "audit_completed"
     IMPROVEMENT_APPLIED = "improvement_applied"
     AGENT_STEP = "agent_step"
+    DEBUG_RESULT = "debug_result"

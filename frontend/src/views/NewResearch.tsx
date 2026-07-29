@@ -507,6 +507,35 @@ function ConfigForm({
         )}
       </fieldset>
 
+      {/* ---------------- Collaboration mode ---------------- */}
+      <fieldset className="cfg-block">
+        <legend>人机协作模式</legend>
+        <div className="field">
+          <label>执行方式</label>
+          <div className="row" style={{ gap: 8 }}>
+            <button
+              type="button"
+              className={`btn tiny ${(inner.collaboration_mode || "autonomous") === "autonomous" ? "primary" : ""}`}
+              onClick={() => patchInner({ collaboration_mode: "autonomous" })}
+            >完全自主</button>
+            <button
+              type="button"
+              className={`btn tiny ${inner.collaboration_mode === "step_confirm" ? "primary" : ""}`}
+              onClick={() => patchInner({ collaboration_mode: "step_confirm" })}
+            >每步确认</button>
+            <button
+              type="button"
+              className={`btn tiny ${inner.collaboration_mode === "outer_confirm" ? "primary" : ""}`}
+              onClick={() => patchInner({ collaboration_mode: "outer_confirm" })}
+            >外循环确认</button>
+          </div>
+          <p className="muted small">
+            <b>完全自主</b>：全自动运行，无人工干预。<b>每步确认</b>：内循环、外审计、每轮结束后均暂停，等待人工确认与调整后继续。
+            <b>外循环确认</b>：仅每轮外循环完成后暂停，可调整参数（模型/特征/门限）再进入下一轮。
+          </p>
+        </div>
+      </fieldset>
+
       {isPlatform && inner.mode === "agent" && (
         <div className="card note">
           <strong>平台原生任务 · 以自主 Agent 模式执行</strong>
@@ -567,7 +596,9 @@ export function NewResearch({
     skills: [],
     tools: [],
     step_plan: [],
+    collaboration_mode: "autonomous",
   });
+  const [autoRun, setAutoRun] = useState(true);
   const [busy, setBusy] = useState(false);
   const [registering, setRegistering] = useState(false);
 
@@ -645,10 +676,10 @@ export function NewResearch({
         max_outer_iters: config.max_outer_iters,
         model: inner.model,
         fe: inner.fe === "rich",
-        inner_loop: inner,
+        inner_loop: { ...inner, collaboration_mode: inner.collaboration_mode || "autonomous" },
         agent_cli: inner.mode === "agent" ? (inner.agent_cli ?? null) : null,
       };
-      const r = await launchBenchmarkTask(selected.task_id, payload);
+      const r = await launchBenchmarkTask(selected.task_id, payload, !autoRun);
       // Agent-mode launch with no remote agent configured ends as a clear FAILED run
       // (Task 1): surface the reason and keep the user on this screen.
       if (r.status === "failed") {
@@ -787,11 +818,18 @@ export function NewResearch({
           </div>
 
           <div className="row" style={{ marginTop: 16, justifyContent: "flex-end", gap: 10 }}>
+            <label className="tool-item" style={{ marginRight: "auto" }}>
+              <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} />
+              <span>立即运行完整实验</span>
+            </label>
+            <span className="muted small" style={{ marginRight: 10, maxWidth: 200 }}>
+              取消勾选可先<b>调试内/外循环</b>，调试通过后再从仪表盘启动完整实验。
+            </span>
             <button className="btn" onClick={onCancel}>
               取消
             </button>
             <button className="btn primary" disabled={busy} onClick={handleLaunch}>
-              {busy ? "启动中…" : "开始研究 →"}
+              {busy ? "启动中…" : autoRun ? "开始研究 →" : "创建并进入调试 →"}
             </button>
           </div>
         </div>
