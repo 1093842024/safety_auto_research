@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import threading
@@ -842,12 +843,13 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
                     try:
                         svc.capture_run_record(run.run_id)
                     except Exception:
-                        pass
+                        logging.exception("capture_run_record failed for run=%s", run.run_id)
                 except Exception:
+                    logging.exception("dual loop failed for run=%s", run.run_id)
                     try:
                         svc.set_run_status(run.run_id, "failed")
                     except Exception:
-                        pass
+                        logging.exception("set_run_status('failed') failed for run=%s", run.run_id)
 
             threading.Thread(target=_drive, daemon=True).start()
 

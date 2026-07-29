@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 from pathlib import Path
@@ -53,8 +54,9 @@ class Repository:
         assert self._store_path is not None
         try:
             raw = json.loads(self._store_path.read_text(encoding="utf-8"))
-        except Exception:
+        except (json.JSONDecodeError, OSError) as exc:
             # A corrupt store must never crash startup — begin empty instead.
+            logging.error("Corrupt store at %s: %s. Starting empty.", self._store_path, exc)
             return
         for coll_name, (model_name, key) in _PERSIST_COLLECTIONS.items():
             coll = getattr(self, coll_name)
@@ -107,10 +109,12 @@ class Repository:
             self._persist()
 
     def get_workflow_run(self, run_id: str) -> Any | None:
-        return self.workflow_runs.get(run_id)
+        with self._lock:
+            return self.workflow_runs.get(run_id)
 
     def list_workflow_runs(self) -> list[Any]:
-        return list(self.workflow_runs.values())
+        with self._lock:
+            return list(self.workflow_runs.values())
 
     # ----- StageRun -----
     def put_stage_run(self, stage: Any) -> None:
@@ -119,10 +123,12 @@ class Repository:
             self._persist()
 
     def get_stage_run(self, stage_run_id: str) -> Any | None:
-        return self.stage_runs.get(stage_run_id)
+        with self._lock:
+            return self.stage_runs.get(stage_run_id)
 
     def list_stage_runs(self, run_id: str) -> list[Any]:
-        return [s for s in self.stage_runs.values() if s.run_id == run_id]
+        with self._lock:
+            return [s for s in self.stage_runs.values() if s.run_id == run_id]
 
     # ----- DecisionRecord -----
     def put_decision(self, decision: Any) -> None:
@@ -131,10 +137,12 @@ class Repository:
             self._persist()
 
     def get_decision(self, decision_id: str) -> Any | None:
-        return self.decisions.get(decision_id)
+        with self._lock:
+            return self.decisions.get(decision_id)
 
     def list_decisions(self, run_id: str) -> list[Any]:
-        return [d for d in self.decisions.values() if d.run_id == run_id]
+        with self._lock:
+            return [d for d in self.decisions.values() if d.run_id == run_id]
 
     # ----- Artifact (spec §9.4 publish_artifact) -----
     def put_artifact(self, artifact: Any) -> None:
@@ -143,13 +151,15 @@ class Repository:
             self._persist()
 
     def get_artifact(self, artifact_id: str) -> Any | None:
-        return self.artifacts.get(artifact_id)
+        with self._lock:
+            return self.artifacts.get(artifact_id)
 
     def list_artifacts(self, run_id: str | None = None) -> list[Any]:
-        if run_id is None:
-            return list(self.artifacts.values())
-        # Artifacts are referenced by stage_run_id via lineage; filter by producer match.
-        return [a for a in self.artifacts.values() if run_id in str(a.producer_ref)]
+        with self._lock:
+            if run_id is None:
+                return list(self.artifacts.values())
+            # Artifacts are referenced by stage_run_id via lineage; filter by producer match.
+            return [a for a in self.artifacts.values() if run_id in str(a.producer_ref)]
 
     # ----- LessonCard (spec §9.4 register_lesson -> reinjection) -----
     def put_lesson(self, lesson: Any) -> None:
@@ -158,12 +168,14 @@ class Repository:
             self._persist()
 
     def get_lesson(self, lesson_id: str) -> Any | None:
-        return self.lessons.get(lesson_id)
+        with self._lock:
+            return self.lessons.get(lesson_id)
 
     def list_lessons(self, run_id: str | None = None) -> list[Any]:
-        if run_id is None:
-            return list(self.lessons.values())
-        return [l for l in self.lessons.values() if l.source_run_id == run_id]
+        with self._lock:
+            if run_id is None:
+                return list(self.lessons.values())
+            return [l for l in self.lessons.values() if l.source_run_id == run_id]
 
     # ----- Metrics (spec §9.4 record_metric) -----
     def record_metric(self, run_id: str, name: str, value: float, tags: dict[str, Any] | None = None) -> None:
@@ -174,7 +186,8 @@ class Repository:
             self._persist()
 
     def list_metrics(self, run_id: str) -> list[dict[str, Any]]:
-        return list(self.metrics.get(run_id, []))
+        with self._lock:
+            return list(self.metrics.get(run_id, []))
 
     # ----- Event log -----
     def append_event(self, event: Any) -> None:
@@ -183,9 +196,10 @@ class Repository:
             self._persist()
 
     def list_events(self, run_id: str | None = None) -> list[dict[str, Any]]:
-        if run_id is None:
-            return list(self.events)
-        return [e for e in self.events if e.get("run_id") == run_id]
+        with self._lock:
+            if run_id is None:
+                return list(self.events)
+            return [e for e in self.events if e.get("run_id") == run_id]
 
     # ----- Research records (leaderboard) -----
     def put_research_record(self, rec: dict[str, Any]) -> None:
@@ -194,13 +208,15 @@ class Repository:
             self._persist()
 
     def get_research_record(self, record_id: str) -> dict[str, Any] | None:
-        return self.research_records.get(record_id)
+        with self._lock:
+            return self.research_records.get(record_id)
 
     def list_research_records(self, task_id: str | None = None) -> list[dict[str, Any]]:
-        rs = list(self.research_records.values())
-        if task_id:
-            rs = [r for r in rs if r.get("task_id") == task_id]
-        return rs
+        with self._lock:
+            rs = list(self.research_records.values())
+            if task_id:
+                rs = [r for r in rs if r.get("task_id") == task_id]
+            return rs
 
     def update_research_record(self, record_id: str, **fields: Any) -> None:
         with self._lock:

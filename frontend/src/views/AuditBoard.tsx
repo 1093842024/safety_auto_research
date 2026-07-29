@@ -18,8 +18,8 @@ export function AuditBoard({ runId }: { runId: string }) {
       try {
         const a = await getAudit(runId);
         if (alive) setAudits(a);
-      } catch {
-        /* ignore */
+      } catch (err: any) {
+        console.warn("[Polling] Failed to fetch data for AuditBoard:", err);
       }
     };
     load();

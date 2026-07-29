@@ -10,8 +10,8 @@ export function ApprovalConsole({ runId }: { runId: string }) {
     try {
       const evs = await getEvents(runId);
       setApprovals(evs.filter((e) => e.event_type === "approval_required"));
-    } catch {
-      /* ignore */
+    } catch (err: any) {
+      console.warn("[Polling] Failed to fetch data for ApprovalConsole:", err);
     }
   };
 
@@ -31,8 +31,8 @@ export function ApprovalConsole({ runId }: { runId: string }) {
         body: JSON.stringify({ resolution, resolved_by: "frontend_user" }),
       });
       await load();
-    } catch {
-      /* ignore */
+    } catch (err: any) {
+      console.warn("[Polling] Failed to fetch data for ApprovalConsole:", err);
     } finally {
       setBusy("");
     }
@@ -63,7 +63,10 @@ export function ApprovalConsole({ runId }: { runId: string }) {
             <button
               className="btn"
               disabled={busy === a.approval_id}
-              onClick={() => resolve(a.approval_id, "rejected")}
+              onClick={() => {
+                if (!window.confirm("确认拒绝该审批请求？此操作不可撤销。")) return;
+                resolve(a.approval_id, "rejected");
+              }}
             >
               拒绝
             </button>

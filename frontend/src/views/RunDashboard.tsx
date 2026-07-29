@@ -74,8 +74,8 @@ export function RunDashboard({ runId }: { runId: string }) {
         if (!alive) return;
         setRun(r);
         setEvents(e);
-      } catch {
-        /* transient */
+      } catch (err: any) {
+        console.warn("[Polling] Failed to fetch data for RunDashboard:", err);
       }
     };
     load();
@@ -97,8 +97,8 @@ export function RunDashboard({ runId }: { runId: string }) {
       try {
         const steps = await getAgentTrace(runId);
         if (alive) setTrace(steps);
-      } catch {
-        /* transient */
+      } catch (err: any) {
+        console.warn("[Polling] Failed to fetch data for RunDashboard:", err);
       } finally {
         if (alive) setTraceLoading(false);
       }

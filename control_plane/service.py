@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from datetime import timezone
 from typing import Any
@@ -105,7 +106,9 @@ class ControlPlaneService:
             validate_stage_status_transition(from_status, to_status)
         except ValueError as exc:
             raise ConflictError(str(exc)) from exc
-        event_type = _STAGE_EVENT_TYPE[to_status]
+        event_type = _STAGE_EVENT_TYPE.get(to_status)
+        if event_type is None:
+            raise ValueError(f"unsupported stage status for event mapping: {to_status}")
         stage.status = to_status
         self._repo.append_event(
             StageStatusChangedEvent(
@@ -432,7 +435,16 @@ class ControlPlaneService:
         run = self._require_workflow_run(run_id)
         approval_id = self._open_approvals.get(run_id)
         if approval_id is None:
-            raise ConflictError(f"run {run_id} has no open approval to resolve")
+            if run.status == WorkflowStatus.WAITING_APPROVAL:
+                logging.warning(
+                    "run %s is WAITING_APPROVAL but has no open approval record "
+                    "(likely after restart); generating recovery approval_id.",
+                    run_id,
+                )
+                approval_id = self._repo.next_id("apr-recovery")
+                self._open_approvals[run_id] = approval_id
+            else:
+                raise ConflictError(f"run {run_id} has no open approval to resolve")
         if run.status != WorkflowStatus.WAITING_APPROVAL:
             raise ConflictError(f"run {run_id} is not in waiting_approval state")
 

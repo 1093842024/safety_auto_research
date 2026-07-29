@@ -46,40 +46,37 @@ class HypoTreeStore:
     def _init_db(self) -> None:
         assert self.db_path is not None
         os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS hypo_nodes ("
-            "node_id TEXT PRIMARY KEY, parent_id TEXT, data TEXT)"
-        )
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS experiences ("
-            "entry_id TEXT PRIMARY KEY, kind TEXT, data TEXT)"
-        )
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS strategies ("
-            "rollback_id TEXT PRIMARY KEY, data TEXT)"
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS hypo_nodes ("
+                "node_id TEXT PRIMARY KEY, parent_id TEXT, data TEXT)"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS experiences ("
+                "entry_id TEXT PRIMARY KEY, kind TEXT, data TEXT)"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS strategies ("
+                "rollback_id TEXT PRIMARY KEY, data TEXT)"
+            )
+            conn.commit()
         self._load_memory()
 
     def _load_memory(self) -> None:
         assert self.db_path is not None
-        conn = sqlite3.connect(self.db_path)
-        for nid, _pid, data in conn.execute("SELECT node_id, parent_id, data FROM hypo_nodes"):
-            self._nodes[nid] = HypothesisNode.model_validate_json(data)
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            for nid, _pid, data in conn.execute("SELECT node_id, parent_id, data FROM hypo_nodes"):
+                self._nodes[nid] = HypothesisNode.model_validate_json(data)
 
     def _persist_node(self, node: HypothesisNode) -> None:
         if not self.db_path:
             return
-        conn = sqlite3.connect(self.db_path)
-        conn.execute(
-            "INSERT OR REPLACE INTO hypo_nodes VALUES (?,?,?)",
-            (node.node_id, node.parent_id, node.model_dump_json()),
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO hypo_nodes VALUES (?,?,?)",
+                (node.node_id, node.parent_id, node.model_dump_json()),
+            )
+            conn.commit()
 
     # ------------------------------------------------------------------ tree ops
     def observe(
@@ -212,27 +209,24 @@ class ExperienceBank:
     def _init_db(self) -> None:
         assert self.db_path is not None
         os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS experiences (entry_id TEXT PRIMARY KEY, kind TEXT, data TEXT)"
-        )
-        conn.commit()
-        conn.close()
-        conn = sqlite3.connect(self.db_path)
-        for eid, _kind, data in conn.execute("SELECT entry_id, kind, data FROM experiences"):
-            self._entries[eid] = ExperienceEntry.model_validate_json(data)
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS experiences (entry_id TEXT PRIMARY KEY, kind TEXT, data TEXT)"
+            )
+            conn.commit()
+        with sqlite3.connect(self.db_path) as conn:
+            for eid, _kind, data in conn.execute("SELECT entry_id, kind, data FROM experiences"):
+                self._entries[eid] = ExperienceEntry.model_validate_json(data)
 
     def _persist(self, e: ExperienceEntry) -> None:
         if not self.db_path:
             return
-        conn = sqlite3.connect(self.db_path)
-        conn.execute(
-            "INSERT OR REPLACE INTO experiences VALUES (?,?,?)",
-            (e.entry_id, e.kind, e.model_dump_json()),
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO experiences VALUES (?,?,?)",
+                (e.entry_id, e.kind, e.model_dump_json()),
+            )
+            conn.commit()
 
     def add(
         self,
@@ -279,26 +273,23 @@ class StrategyArchive:
     def _init_db(self) -> None:
         assert self.db_path is not None
         os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS strategies (rollback_id TEXT PRIMARY KEY, data TEXT)"
-        )
-        conn.commit()
-        conn.close()
-        conn = sqlite3.connect(self.db_path)
-        for rid, data in conn.execute("SELECT rollback_id, data FROM strategies"):
-            self._strategies[rid] = json.loads(data)
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS strategies (rollback_id TEXT PRIMARY KEY, data TEXT)"
+            )
+            conn.commit()
+        with sqlite3.connect(self.db_path) as conn:
+            for rid, data in conn.execute("SELECT rollback_id, data FROM strategies"):
+                self._strategies[rid] = json.loads(data)
 
     def _persist(self, rid: str, data: dict[str, Any]) -> None:
         if not self.db_path:
             return
-        conn = sqlite3.connect(self.db_path)
-        conn.execute(
-            "INSERT OR REPLACE INTO strategies VALUES (?,?)", (rid, json.dumps(data))
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO strategies VALUES (?,?)", (rid, json.dumps(data))
+            )
+            conn.commit()
 
     def commit(self, snapshot: dict[str, Any]) -> str:
         """Store a mechanism snapshot; return its rollback id."""

@@ -212,12 +212,6 @@ export function RegisterTask({
     setValues(init);
   };
 
-  // Upload results land in the first path field of the same group (data).
-  const uploadTarget = useMemo(() => {
-    const p = allFields.find((f) => f.type === "path");
-    return p?.key || "data_dir";
-  }, [allFields]);
-
   const missingRequired = useMemo(
     () =>
       allFields.filter((f) => {
@@ -345,7 +339,7 @@ export function RegisterTask({
                       field={f}
                       value={values[f.key]}
                       onChange={(v) => setValues((prev) => ({ ...prev, [f.key]: v }))}
-                      onUploaded={(path) => setValues((prev) => ({ ...prev, [uploadTarget]: path }))}
+                      onUploaded={(path) => setValues((prev) => ({ ...prev, [f.key]: path }))}
                     />
                   ))}
                 </fieldset>

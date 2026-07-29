@@ -23,8 +23,8 @@ export function EventStream({ runId }: { runId: string }) {
       try {
         const e = await getEvents(runId);
         if (alive) setEvents(e);
-      } catch {
-        /* ignore */
+      } catch (err: any) {
+        console.warn("[Polling] Failed to fetch data for EventStream:", err);
       }
     };
     load();

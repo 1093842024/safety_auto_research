@@ -405,11 +405,11 @@ class ClosedLoopOrchestrator:
                 stage, result = self.run_capability(run_id, inner_capability, inner_params)
             inner_detail = result.detail
             inner_event = result.event
-            inner_acc = (
-                float(inner_event.metrics.get("accuracy", 0.0))
-                if inner_event and getattr(inner_event, "metrics", None)
-                else 0.0
-            )
+            inner_acc = 0.0
+            if inner_event:
+                metrics = getattr(inner_event, "metrics", None)
+                if isinstance(metrics, dict):
+                    inner_acc = float(metrics.get("accuracy", 0.0))
             # Cumulative state: observe a hypothesis node from this inner answer.
             node_id = self.sdk.observe_hypothesis(
                 hypothesis=f"{inner_capability} -> cv accuracy={inner_acc:.4f}",

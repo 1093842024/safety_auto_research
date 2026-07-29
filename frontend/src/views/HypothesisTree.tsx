@@ -11,8 +11,8 @@ export function HypothesisTree({ runId }: { runId: string }) {
       try {
         const t = await getHypoTree(runId);
         if (alive) setNodes(t.nodes || []);
-      } catch {
-        /* ignore */
+      } catch (err: any) {
+        console.warn("[Polling] Failed to fetch data for HypothesisTree:", err);
       }
     };
     load();

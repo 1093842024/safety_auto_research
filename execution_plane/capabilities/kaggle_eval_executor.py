@@ -91,6 +91,10 @@ class KaggleEvalExecutor(StageExecutor):
         fe = (params.get("fe") or "basic").lower()
         X, y = self._build_xy(df, target, preset, drop_cols, fe)
 
+        cv_folds = min(cv_folds, len(y) // 2, 20)
+        if cv_folds < 2:
+            raise ValueError(f"数据集太小（{len(y)} 条），cv_folds 至少需要 2")
+
         # --- auto split numeric / categorical columns ---
         num_features = [c for c in X.columns if pd.api.types.is_numeric_dtype(X[c])]
         cat_features = [c for c in X.columns if not pd.api.types.is_numeric_dtype(X[c])]
@@ -249,6 +253,9 @@ class KaggleEvalExecutor(StageExecutor):
                     df[c] = df[c].astype(str)
         else:
             df = df.drop(columns=[c for c in drop_cols if c in df])
+
+        if target not in df.columns:
+            raise ValueError(f"目标列 '{target}' 不在数据集中。可用列: {list(df.columns)}")
 
         y = df[target]
         if y.dtype == bool:

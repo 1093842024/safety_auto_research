@@ -4,7 +4,12 @@
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`/api${path}`, { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${path}`);
-  return (await res.json()) as T;
+  try {
+    return (await res.json()) as T;
+  } catch (err) {
+    console.error(`[API] Invalid JSON response from ${path}:`, err);
+    throw new Error(`Invalid response from ${path}`);
+  }
 }
 
 export async function apiPost<T>(path: string, body: Record<string, unknown> = {}): Promise<T> {
@@ -14,7 +19,12 @@ export async function apiPost<T>(path: string, body: Record<string, unknown> = {
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${path}`);
-  return (await res.json()) as T;
+  try {
+    return (await res.json()) as T;
+  } catch (err) {
+    console.error(`[API] Invalid JSON response from ${path}:`, err);
+    throw new Error(`Invalid response from ${path}`);
+  }
 }
 
 export interface WorkflowRunSummary {

@@ -23,8 +23,8 @@ export function DualLoopLive({ runId }: { runId: string }) {
         setAudit(a);
         setImprove(i);
         setRun(r);
-      } catch {
-        /* ignore transient */
+      } catch (err: any) {
+        console.warn("[Polling] Failed to fetch data for DualLoopLive:", err);
       }
     };
     load();
@@ -40,7 +40,7 @@ export function DualLoopLive({ runId }: { runId: string }) {
   ).length;
 
   const runStatus: string = run?.status ?? "—";
-  const maxOuter = 3;
+  const maxOuter: number = (run?.objective_snapshot?.config?.max_outer_iters as number) || 3;
   const outerDone = audit.length;
   const decisions = events.filter((e) => e.event_type === "decision_issued");
   const lastDecision: string | null = decisions.length
@@ -149,11 +149,22 @@ export function DualLoopLive({ runId }: { runId: string }) {
             <span>{improve.length}</span>
           </div>
           <h3 style={{ marginTop: 12 }}>外循环轨迹</h3>
-          <ul className="tight mono">
-            {audit.concat(improve).map((e, i) => (
-              <li key={i}>{e.event_type}</li>
-            ))}
-          </ul>
+          <div style={{ marginBottom: 8 }}>
+            <span className="muted">审计事件</span>
+            <ul className="tight mono">
+              {audit.map((a, i) => (
+                <li key={i}>{a.audit_id} gate={String(a.gate_passed)}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <span className="muted">改进事件</span>
+            <ul className="tight mono">
+              {improve.map((it, i) => (
+                <li key={i}>{it.improvement_id} → {it.target_mechanism}</li>
+              ))}
+            </ul>
+          </div>
         </div>
       </div>
     </div>

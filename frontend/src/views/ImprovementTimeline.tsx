@@ -11,8 +11,8 @@ export function ImprovementTimeline({ runId }: { runId: string }) {
       try {
         const i = await getImprovements(runId);
         if (alive) setItems(i);
-      } catch {
-        /* ignore */
+      } catch (err: any) {
+        console.warn("[Polling] Failed to fetch data for ImprovementTimeline:", err);
       }
     };
     load();
