@@ -1,6 +1,27 @@
 // Thin client over the control-plane REST API. All paths are relative to the /api
 // proxy configured in vite.config.ts (which forwards to the FastAPI server).
 
+import { z } from "zod";
+
+// ---------------------------------------------------------------------------
+// Runtime validation — catches backend schema drift before it corrupts the UI.
+// When a Zod parse fails we log a loud warning in dev/staging but still return
+// the raw data so the UI doesn't break (the mismatch is likely to surface as a
+// visible glitch rather than a hard crash).
+// ---------------------------------------------------------------------------
+
+/** Non-blocking parse: warns on schema drift but returns the raw data anyway. */
+function safeParse<T>(schema: z.ZodType<T>, data: unknown, label: string): T {
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    console.error(`[Schema Violation] ${label}:`, result.error.issues);
+    // Return the raw data — the caller will likely show a partial/glitching
+    // UI rather than a blank screen, which is a better degradation path.
+    return data as T;
+  }
+  return result.data;
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`/api${path}`, { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${path}`);
@@ -94,7 +115,16 @@ export interface ExperienceEntry {
   confidence: number;
 }
 
-export const getRuns = () => apiGet<WorkflowRunSummary[]>("/workflow-runs");
+export const getRuns = async () => {
+  const data = await apiGet<any[]>("/workflow-runs");
+  // Light validation: each run must have at least run_id and status.
+  for (const r of data) {
+    if (typeof r?.run_id !== "string" || typeof r?.status !== "string") {
+      console.error("[Schema Violation] getRuns: item missing run_id/status", r);
+    }
+  }
+  return data as WorkflowRunSummary[];
+};
 export const getRun = (id: string) =>
   apiGet<
     WorkflowRunSummary & {
@@ -105,7 +135,15 @@ export const getRun = (id: string) =>
   >(`/workflow-runs/${encodeURIComponent(id)}`);
 export const getEvents = (runId: string) =>
   apiGet<Array<Record<string, any>>>(`/events?run_id=${encodeURIComponent(runId)}`);
-export const getAudit = (runId: string) => apiGet<AuditEvent[]>(`/workflow-runs/${runId}/audit`);
+export const getAudit = async (runId: string) => {
+  const data = await apiGet<any[]>(`/workflow-runs/${runId}/audit`);
+  for (const a of data) {
+    if (typeof a?.audit_id !== "string") {
+      console.error("[Schema Violation] getAudit: item missing audit_id", a);
+    }
+  }
+  return data as AuditEvent[];
+};
 export const getImprovements = (runId: string) =>
   apiGet<ImprovementEvent[]>(`/workflow-runs/${runId}/improvements`);
 export const getHypoTree = (runId: string) =>
@@ -143,7 +181,15 @@ export interface BenchmarkTask {
   type_config?: Record<string, any> | null;
 }
 
-export const getBenchmarkTasks = () => apiGet<BenchmarkTask[]>("/benchmark-tasks");
+export const getBenchmarkTasks = async () => {
+  const data = await apiGet<any[]>("/benchmark-tasks");
+  for (const t of data) {
+    if (typeof t?.task_id !== "string" || typeof t?.name !== "string") {
+      console.error("[Schema Violation] getBenchmarkTasks: item missing task_id/name", t);
+    }
+  }
+  return data as BenchmarkTask[];
+};
 
 /** A single step in the agent's inner-loop execution trace ("Agent 执行流水"). */
 export interface AgentTraceStep {
@@ -312,10 +358,68 @@ export const getResearchRecords = (taskId?: string) =>
 export const getLeaderboard = () =>
   apiGet<ResearchRecord[]>("/research-records/leaderboard");
 
-export const reproduceRecord = (recordId: string) =>
-  apiPost<{ run_id: string; task_id: string; from_record: string }>(
-    `/research-records/${encodeURIComponent(recordId)}/reproduce`,
+export const reproduceRecord = (recordId: string, autostart = false) =>
+  apiPost<{ run_id: string; task_id: string; from_record: string; autostarted?: boolean; note?: string }>(
+    `/research-records/${encodeURIComponent(recordId)}/reproduce${autostart ? "?autostart=true" : ""}`,
   );
+
+// ---------------------------------------------------------------------------
+// Harness-engineering observability (Phase 1-3): playbook / strategies / evolution
+// ---------------------------------------------------------------------------
+
+/** One ACE playbook entry (itemized evolving context bullet). */
+export interface PlaybookEntry {
+  entry_id: string;
+  scope: string;
+  section: string;
+  content: string;
+  helpful: number;
+  harmful: number;
+  run_id?: string | null;
+  iter_no: number;
+}
+
+/** One meta-loop strategy archive entry (propose-apply-verify-rollback lifecycle). */
+export interface StrategyEntry {
+  rollback_id: string;
+  run_id?: string;
+  status?: string;
+  inner_param_patch?: Record<string, unknown>;
+  prediction?: { baseline?: number; min_delta?: number; tolerance?: number; claim?: string };
+  actual_accuracy?: number;
+  actual_delta?: number;
+}
+
+/** One evolution candidate (Phase 3 population search). */
+export interface EvolutionCandidate {
+  candidate_id: string;
+  run_id: string;
+  params: Record<string, unknown>;
+  generation: number;
+  parent_id?: string | null;
+  branch: string;
+  fitness?: number | null;
+  novelty: number;
+  status: string;
+  metrics?: Record<string, unknown>;
+  offspring_count: number;
+}
+
+export const getPlaybook = (scope?: string) =>
+  apiGet<PlaybookEntry[]>(scope ? `/playbook?scope=${encodeURIComponent(scope)}` : "/playbook");
+
+export const getStrategies = (runId?: string) =>
+  apiGet<StrategyEntry[]>(runId ? `/strategies?run_id=${encodeURIComponent(runId)}` : "/strategies");
+
+export const getEvolution = (runId: string) =>
+  apiGet<EvolutionCandidate[]>(`/workflow-runs/${encodeURIComponent(runId)}/evolution`);
+
+/** Launch parallel evolutionary search for a run (Phase 3). */
+export const runEvolution = (runId: string, params: Record<string, unknown> = {}) =>
+  apiPost<Record<string, unknown>>(`/workflow-runs/${encodeURIComponent(runId)}/evolution`, params);
+
+/** Benchmark-suite catalog (ScienceAgentBench / MLE-bench metadata). */
+export const getBenchmarkSuites = () => apiGet<Array<Record<string, unknown>>>("/benchmark-suites");
 
 /** Validate a task registration payload; returns errors without persisting. */
 export const validateTask = (taskType: string, values: Record<string, any>) =>
@@ -426,3 +530,50 @@ export const resolveCollaboration = (runId: string, payload: ResolveCollaboratio
     `/workflow-runs/${encodeURIComponent(runId)}/resolve-collaboration`,
     payload as unknown as Record<string, unknown>,
   );
+
+// ---------------------------------------------------------------------------
+// Shared display constants — single source of truth for status/decision labels.
+// Views import these instead of defining their own copies.
+// ---------------------------------------------------------------------------
+
+export const STATUS_LABEL: Record<string, string> = {
+  running: "运行中",
+  requested: "已请求",
+  waiting_approval: "等待审批",
+  succeeded: "成功",
+  failed: "失败",
+  exited_budget: "已完成 · 已达最大轮数",
+  exited_converged: "已完成 · 审计通过",
+  cancelled: "已取消",
+};
+
+export const STATUS_CLASS: Record<string, string> = {
+  running: "warn",
+  requested: "accent",
+  waiting_approval: "accent",
+  succeeded: "ok",
+  failed: "bad",
+  exited_budget: "ok",
+  exited_converged: "ok",
+  cancelled: "bad",
+};
+
+export const DECISION_LABEL: Record<string, string> = {
+  accept: "ACCEPT · 接受",
+  revisit: "REFINE · 复核",
+  restart: "RESTART · 重启",
+  exit_success: "EXIT_SUCCESS · 通过",
+  continue: "继续",
+  audit_refine: "REFINE · 复核",
+  audit_restart: "RESTART · 重启",
+};
+
+export const DECISION_CLASS: Record<string, string> = {
+  accept: "ok",
+  revisit: "warn",
+  restart: "bad",
+  exit_success: "ok",
+  continue: "accent",
+  audit_refine: "warn",
+  audit_restart: "bad",
+};

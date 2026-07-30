@@ -4,6 +4,7 @@ import { NewResearch } from "./views/NewResearch";
 import { RunDashboard } from "./views/RunDashboard";
 import { BenchmarkCatalog } from "./views/BenchmarkCatalog";
 import { Leaderboard } from "./views/Leaderboard";
+import { CompareRuns } from "./views/CompareRuns";
 
 const STATUS_LABEL: Record<string, string> = {
   running: "运行中",
@@ -11,8 +12,8 @@ const STATUS_LABEL: Record<string, string> = {
   waiting_approval: "等待审批",
   succeeded: "成功",
   failed: "失败",
-  exited_budget: "已完成·预算耗尽",
-  exited_converged: "已完成·已收敛",
+  exited_budget: "已完成·已达最大轮数",
+  exited_converged: "已完成·审计通过",
   cancelled: "已取消",
 };
 const STATUS_CLASS: Record<string, string> = {
@@ -61,7 +62,7 @@ export function App() {
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [taskMap, setTaskMap] = useState<Record<string, BenchmarkTask>>({});
   const [runId, setRunId] = useState<string>("");
-  const [view, setView] = useState<"welcome" | "new" | "run" | "catalog" | "leaderboard">("welcome");
+  const [view, setView] = useState<"welcome" | "new" | "run" | "catalog" | "leaderboard" | "compare">("welcome");
   const [error, setError] = useState<string>("");
   // Per-category collapse state for the research-records sidebar.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -148,6 +149,10 @@ export function App() {
           🏆 研究榜单
         </button>
 
+        <button className="btn block" onClick={() => setView("compare")}>
+          📊 实验对比
+        </button>
+
         <div className="sidebar-label">研究记录 ({runs.length})</div>
         <div className="run-list">
           {groups.length === 0 && <div className="muted small" style={{ padding: 6 }}>暂无记录</div>}
@@ -222,6 +227,15 @@ export function App() {
             }}
             onNewResearch={() => setView("new")}
             taskName={(tid) => taskMap[tid]?.name || tid}
+          />
+        )}
+
+        {view === "compare" && (
+          <CompareRuns
+            onOpenRun={(rid) => {
+              setRunId(rid);
+              setView("run");
+            }}
           />
         )}
 

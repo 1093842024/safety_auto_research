@@ -79,11 +79,13 @@ export function Leaderboard({ onOpenRun, onNewResearch, taskName }: Props) {
     return map;
   }, [sorted]);
 
-  const handleReproduce = async (rec: ResearchRecord) => {
-    setBusyId(rec.record_id);
+  const handleReproduce = async (rec: ResearchRecord, autostart = false) => {
+    setBusyId(rec.record_id + (autostart ? ":auto" : ""));
     setError("");
     try {
-      const res = await reproduceRecord(rec.record_id);
+      const res = await reproduceRecord(rec.record_id, autostart);
+      // F3: autostarted runs are already driving; non-autostarted open the new
+      // REQUESTED run so the user can inspect/launch it from the dashboard.
       onOpenRun(res.run_id);
     } catch (e: any) {
       setError(`复现失败：${String(e?.message || e)}`);
@@ -204,10 +206,18 @@ export function Leaderboard({ onOpenRun, onNewResearch, taskName }: Props) {
                     </button>
                     <button
                       className="btn small ghost"
-                      disabled={busyId === rec.record_id}
+                      disabled={busyId.startsWith(rec.record_id)}
                       onClick={() => handleReproduce(rec)}
                     >
-                      {busyId === rec.record_id ? "复现中…" : "复现"}
+                      {busyId === rec.record_id ? "建档中…" : "复现"}
+                    </button>
+                    <button
+                      className="btn small primary"
+                      disabled={busyId.startsWith(rec.record_id)}
+                      onClick={() => handleReproduce(rec, true)}
+                      title="按记录的配置快照重新启动一次完整研究"
+                    >
+                      {busyId === `${rec.record_id}:auto` ? "启动中…" : "复现并启动"}
                     </button>
                   </div>
                 </td>

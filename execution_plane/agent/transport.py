@@ -337,6 +337,12 @@ class CLIAgentTransport(Transport):
             if run_id is None or cid is None:
                 return {"ok": False, "error": "run_capability needs run_id + capability_id"}
             try:
+                # C2 fix: the CLI path must enforce the SAME outer-loop reservation as
+                # the harness tool handler — an inner-loop agent may never invoke the
+                # external audit (layer_11) or the meta-loop (layer_09).
+                from .harness import assert_inner_capability_allowed
+
+                assert_inner_capability_allowed(cid)
                 stage, result = self._capability_runner(run_id, cid, params)
                 return {
                     "ok": True,
@@ -407,8 +413,10 @@ class CLIAgentTransport(Transport):
             }
         return {
             "msg_type": "agent.stage_result",
-            "final_status": "succeeded",
-            "gate_result": "passed",
+            # A turn that produced no structured result MUST NOT masquerade as a
+            # passed stage: nothing verifiable happened (C4 fix).
+            "final_status": "failed",
+            "gate_result": "failed",
             "event": None,
             "output_refs": [],
             "detail": f"agent returned no structured result: {snippet}",

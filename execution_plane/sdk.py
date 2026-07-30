@@ -211,6 +211,7 @@ class PlatformSDK:
         lesson: str,
         applicable_stages: list[str] | None = None,
         confidence: float = 0.5,
+        source_run_id: str | None = None,
     ) -> str | None:
         """Record a pass/fail lesson in the cross-run ExperienceBank (training-free replay)."""
 
@@ -222,6 +223,7 @@ class PlatformSDK:
             lesson=lesson,
             applicable_stages=applicable_stages or [],
             confidence=confidence,
+            source_run_id=source_run_id,
         )
         return e.entry_id
 

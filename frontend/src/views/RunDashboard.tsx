@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   getAgentTrace,
   getEvents,
@@ -11,14 +11,16 @@ import {
   DebugResult,
   RunDetail,
 } from "../api/client";
+import { useSSE } from "../api/useSSE";
 import { DualLoopLive } from "./DualLoopLive";
 import { AuditBoard } from "./AuditBoard";
 import { HypothesisTree } from "./HypothesisTree";
 import { ImprovementTimeline } from "./ImprovementTimeline";
 import { ApprovalConsole } from "./ApprovalConsole";
 import { EventStream } from "./EventStream";
+import { EvolutionPanel } from "./EvolutionPanel";
 
-type Sub = "live" | "debug" | "audit" | "tree" | "improve" | "approval" | "events" | "agent";
+type Sub = "live" | "debug" | "audit" | "tree" | "improve" | "approval" | "events" | "agent" | "evolution";
 
 const SUBS: Array<{ id: Sub; label: string }> = [
   { id: "live", label: "总览" },
@@ -26,6 +28,7 @@ const SUBS: Array<{ id: Sub; label: string }> = [
   { id: "audit", label: "审计结论" },
   { id: "tree", label: "假设树" },
   { id: "improve", label: "改进时间线" },
+  { id: "evolution", label: "进化观察" },
   { id: "approval", label: "审批台" },
   { id: "agent", label: "Agent 执行流水" },
   { id: "events", label: "事件" },
@@ -37,8 +40,8 @@ const STATUS_LABEL: Record<string, string> = {
   waiting_approval: "等待审批",
   succeeded: "成功",
   failed: "失败",
-  exited_budget: "已完成 · 预算耗尽",
-  exited_converged: "已完成 · 已收敛",
+  exited_budget: "已完成 · 已达最大轮数",
+  exited_converged: "已完成 · 审计通过",
   cancelled: "已取消",
 };
 const STATUS_CLASS: Record<string, string> = {
@@ -73,6 +76,7 @@ export function RunDashboard({ runId }: { runId: string }) {
   const [sub, setSub] = useState<Sub>("live");
   const [trace, setTrace] = useState<AgentTraceStep[]>([]);
   const [traceLoading, setTraceLoading] = useState(false);
+  const [pollError, setPollError] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -82,8 +86,10 @@ export function RunDashboard({ runId }: { runId: string }) {
         if (!alive) return;
         setRun(r);
         setEvents(e);
+        setPollError("");
       } catch (err: any) {
         console.warn("[Polling] Failed to fetch data for RunDashboard:", err);
+        if (alive) setPollError("数据刷新失败，显示的是缓存数据。请检查后端是否运行。");
       }
     };
     load();
@@ -93,6 +99,26 @@ export function RunDashboard({ runId }: { runId: string }) {
       clearInterval(t);
     };
   }, [runId]);
+
+  // SSE real-time progress → trigger immediate re-fetch when an event arrives.
+  const { connected: sseConnected, latestEvent } = useSSE(runId);
+  const latestEventRef = useRef(latestEvent);
+  latestEventRef.current = latestEvent;
+  const fetchNow = useCallback(async () => {
+    try {
+      const [r, e] = await Promise.all([getRun(runId), getEvents(runId)]);
+      setRun(r);
+      setEvents(e);
+      setPollError("");
+    } catch (err: any) {
+      setPollError("数据刷新失败，显示的是缓存数据。请检查后端是否运行。");
+    }
+  }, [runId]);
+  useEffect(() => {
+    if (latestEvent) {
+      fetchNow();
+    }
+  }, [latestEvent, fetchNow]);
 
   // Agent execution trace ("Agent 执行流水"): pull while the tab is active and refresh
   // periodically so the flow grows live as the inner-loop agent works.
@@ -199,6 +225,11 @@ export function RunDashboard({ runId }: { runId: string }) {
 
   return (
     <div className="run-dashboard">
+      {pollError && (
+        <div className="card" style={{ borderColor: "var(--warn)", background: "var(--warn-soft)", color: "var(--warn)", marginBottom: 12 }}>
+          ⚠ {pollError}
+        </div>
+      )}
       <div className="card status-header">
         <div className="row" style={{ gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <span className={`pill ${STATUS_CLASS[runStatus] || "accent"}`}>
@@ -206,6 +237,7 @@ export function RunDashboard({ runId }: { runId: string }) {
           </span>
           <strong>{obj.name || run?.target_id || runId}</strong>
           <span className="muted mono small">{runId}</span>
+          <span className={`dot ${sseConnected ? "ok" : "bad"}`} title={sseConnected ? "实时推送已连接" : "实时推送断开，使用轮询"} style={{ width: 7, height: 7, marginLeft: -6 }} />
         </div>
 
         <div className="row status-meta" style={{ gap: 22, flexWrap: "wrap" }}>
@@ -301,7 +333,7 @@ export function RunDashboard({ runId }: { runId: string }) {
 
         {runStatus !== "running" && auditCount >= maxOuter && (
           <div className="muted" style={{ marginTop: 8 }}>
-            双循环已结束：跑满 {maxOuter} 轮外部审计，外循环均未给出 ACCEPT（持续 REFINE），以「预算耗尽」终态退出。
+            双循环已结束：已完成 {maxOuter} 轮外部审计，外循环未给出 ACCEPT（持续 REFINE），以「已达最大轮数」终态退出。
           </div>
         )}
 
@@ -336,10 +368,28 @@ export function RunDashboard({ runId }: { runId: string }) {
           expBusy={expBusy}
         />
       )}
-      {sub === "audit" && <AuditBoard runId={runId} />}
-      {sub === "tree" && <HypothesisTree runId={runId} />}
-      {sub === "improve" && <ImprovementTimeline runId={runId} />}
+      {sub === "audit" && (
+        events.filter(e => e.event_type === "audit_completed").length === 0
+          ? <div className="card muted" style={{ textAlign: "center", padding: 40, marginTop: 12 }}>暂无外循环审计记录。研究启动后，每轮外循环会在此展示约束检查结果与置信度。</div>
+          : <AuditBoard runId={runId} />
+      )}
+      {sub === "tree" && (
+        events.filter(e => e.event_type === "hypothesis_observed").length === 0
+          ? <div className="card muted" style={{ textAlign: "center", padding: 40, marginTop: 12 }}>暂无假设树节点。每次内循环产生研究结果时，会在此记录一条假设及其证据。</div>
+          : <HypothesisTree runId={runId} />
+      )}
+      {sub === "improve" && (
+        events.filter(e => e.event_type === "improvement_applied").length === 0
+          ? <div className="card muted" style={{ textAlign: "center", padding: 40, marginTop: 12 }}>暂无改进时间线。元循环（layer_09）在启用后会在此记录每次改进前后的指标对比。</div>
+          : <ImprovementTimeline runId={runId} />
+      )}
       {sub === "approval" && <ApprovalConsole runId={runId} />}
+      {sub === "evolution" && (
+        <EvolutionPanel
+          runId={runId}
+          scope={String(run?.objective_snapshot?.benchmark_task_id || run?.target_id || "")}
+        />
+      )}
       {sub === "agent" && (
         <AgentTracePanel steps={trace} loading={traceLoading} runStatus={runStatus} />
       )}

@@ -1,0 +1,625 @@
+[
+  {
+    "competition_id": "aerial-cactus-identification",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Image Classification",
+    "dataset_size_gb": 0.0254,
+    "known_issue": null
+  },
+  {
+    "competition_id": "aptos2019-blindness-detection",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Image Classification",
+    "dataset_size_gb": 10.22,
+    "known_issue": null
+  },
+  {
+    "competition_id": "denoising-dirty-documents",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Image To Image",
+    "dataset_size_gb": 0.06,
+    "known_issue": null
+  },
+  {
+    "competition_id": "detecting-insults-in-social-commentary",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Text Classification",
+    "dataset_size_gb": 0.002,
+    "known_issue": null
+  },
+  {
+    "competition_id": "dog-breed-identification",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Image Classification",
+    "dataset_size_gb": 0.75,
+    "known_issue": "test split from public annotated corpus, agent can cheat (#128)",
+    "excluded": true,
+    "exclusion_reason": "MLE-bench test split held out from public Stanford Dogs corpus -> agents can cheat [#128]"
+  },
+  {
+    "competition_id": "dogs-vs-cats-redux-kernels-edition",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Image Classification",
+    "dataset_size_gb": 0.85,
+    "known_issue": null
+  },
+  {
+    "competition_id": "histopathologic-cancer-detection",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Image Regression",
+    "dataset_size_gb": 7.76,
+    "known_issue": null
+  },
+  {
+    "competition_id": "jigsaw-toxic-comment-classification-challenge",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Text Classification",
+    "dataset_size_gb": 0.133,
+    "known_issue": null,
+    "noisy_leaderboard": true
+  },
+  {
+    "competition_id": "leaf-classification",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Image Classification",
+    "dataset_size_gb": 0.036,
+    "known_issue": null
+  },
+  {
+    "competition_id": "mlsp-2013-birds",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Audio Classification",
+    "dataset_size_gb": 0.5851,
+    "known_issue": null
+  },
+  {
+    "competition_id": "new-york-city-taxi-fare-prediction",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Tabular",
+    "dataset_size_gb": 5.7,
+    "known_issue": null
+  },
+  {
+    "competition_id": "nomad2018-predict-transparent-conductors",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Tabular",
+    "dataset_size_gb": 0.00624,
+    "known_issue": null
+  },
+  {
+    "competition_id": "plant-pathology-2020-fgvc7",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Image Classification",
+    "dataset_size_gb": 0.8,
+    "known_issue": null
+  },
+  {
+    "competition_id": "random-acts-of-pizza",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Text Classification",
+    "dataset_size_gb": 0.003,
+    "known_issue": "label leakage: giver_username_if_known field leaks outcome (#108)",
+    "excluded": true,
+    "exclusion_reason": "giver_username_if_known leaks outcome -> trivial perfect prediction (drop) [#108]"
+  },
+  {
+    "competition_id": "ranzcr-clip-catheter-line-classification",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Image Classification",
+    "dataset_size_gb": 13.13,
+    "known_issue": "prep bug: sample submission missing columns (#30)",
+    "excluded": true,
+    "exclusion_reason": "prepare.py drops columns from sample submission [#30]"
+  },
+  {
+    "competition_id": "siim-isic-melanoma-classification",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Image Classification",
+    "dataset_size_gb": 116.16,
+    "known_issue": null
+  },
+  {
+    "competition_id": "spooky-author-identification",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Text Classification",
+    "dataset_size_gb": 0.0019,
+    "known_issue": null
+  },
+  {
+    "competition_id": "tabular-playground-series-dec-2021",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Tabular",
+    "dataset_size_gb": 0.7,
+    "known_issue": "crowded leaderboard, hard to discriminate",
+    "noisy_leaderboard": true
+  },
+  {
+    "competition_id": "tabular-playground-series-may-2022",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Tabular",
+    "dataset_size_gb": 0.57,
+    "known_issue": "crowded leaderboard, hard to discriminate",
+    "noisy_leaderboard": true
+  },
+  {
+    "competition_id": "text-normalization-challenge-english-language",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Seq->Seq",
+    "dataset_size_gb": 0.344,
+    "known_issue": null
+  },
+  {
+    "competition_id": "text-normalization-challenge-russian-language",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Seq->Seq",
+    "dataset_size_gb": 0.517,
+    "known_issue": null
+  },
+  {
+    "competition_id": "the-icml-2013-whale-challenge-right-whale-redux",
+    "complexity_split": "low",
+    "in_lite": true,
+    "category": "Audio Classification",
+    "dataset_size_gb": 0.29314,
+    "known_issue": null
+  },
+  {
+    "competition_id": "AI4Code",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "alaska2-image-steganalysis",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "billion-word-imputation",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "cassava-leaf-disease-classification",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "cdiscount-image-classification-challenge",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "chaii-hindi-and-tamil-question-answering",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "champs-scalar-coupling",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": "prep bug: structure file missing test molecules (#70)",
+    "excluded": true,
+    "exclusion_reason": "test molecules missing from structures.csv [#70]"
+  },
+  {
+    "competition_id": "facebook-recruiting-iii-keyword-extraction",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "freesound-audio-tagging-2019",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "google-quest-challenge",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "h-and-m-personalized-fashion-recommendations",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "herbarium-2020-fgvc7",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "herbarium-2021-fgvc8",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "herbarium-2022-fgvc9",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "hotel-id-2021-fgvc8",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "hubmap-kidney-segmentation",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": "test json leaks near-perfect score information",
+    "excluded": true,
+    "exclusion_reason": "public test {image_id}.json leaks info -> near-perfect score trivial"
+  },
+  {
+    "competition_id": "icecube-neutrinos-in-deep-ice",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": "prep bug: checksum mismatch (#58)",
+    "excluded": true,
+    "exclusion_reason": "prepared checksums mismatch [#58]"
+  },
+  {
+    "competition_id": "imet-2020-fgvc7",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "inaturalist-2019-fgvc6",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "iwildcam-2020-fgvc7",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "jigsaw-unintended-bias-in-toxicity-classification",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "kuzushiji-recognition",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "learning-agency-lab-automated-essay-scoring-2",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "lmsys-chatbot-arena",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "multi-modal-gesture-recognition",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": "test .mat files leak labels (#77)",
+    "excluded": true,
+    "exclusion_reason": "public test .mat files leak test labels [#77]"
+  },
+  {
+    "competition_id": "osic-pulmonary-fibrosis-progression",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "petfinder-pawpularity-score",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "plant-pathology-2021-fgvc8",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "seti-breakthrough-listen",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "statoil-iceberg-classifier-challenge",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "tensorflow-speech-recognition-challenge",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": "prep bug: wrong test label range, speakers not disjoint (#63)",
+    "excluded": true,
+    "exclusion_reason": "prepare.py builds wrong test-label range + speakers not disjoint from train/val [#63]"
+  },
+  {
+    "competition_id": "tensorflow2-question-answering",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": "grading bug: validation fails due to jsonl not csv (#134)",
+    "excluded": true,
+    "exclusion_reason": "grade.py validate_submission fails: answer file is test.jsonl not test.csv [#134]"
+  },
+  {
+    "competition_id": "tgs-salt-identification-challenge",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "tweet-sentiment-extraction",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "us-patent-phrase-to-phrase-matching",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "uw-madison-gi-tract-image-segmentation",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "ventilator-pressure-prediction",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "whale-categorization-playground",
+    "complexity_split": "medium",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "3d-object-detection-for-autonomous-vehicles",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "bms-molecular-translation",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "google-research-identify-contrails-reduce-global-warming",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "hms-harmful-brain-activity-classification",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "iwildcam-2019-fgvc6",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "nfl-player-contact-detection",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "predict-volcanic-eruptions-ingv-oe",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "rsna-2022-cervical-spine-fracture-detection",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "rsna-breast-cancer-detection",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "rsna-miccai-brain-tumor-radiogenomic-classification",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "siim-covid19-detection",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "smartphone-decimeter-2022",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": "nmea files leak, perfect score trivial (#93)",
+    "excluded": true,
+    "exclusion_reason": "public test span_log.nmea leaks info -> trivial perfect score [#93]"
+  },
+  {
+    "competition_id": "stanford-covid-vaccine",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "vesuvius-challenge-ink-detection",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  },
+  {
+    "competition_id": "vinbigdata-chest-xray-abnormalities-detection",
+    "complexity_split": "high",
+    "in_lite": false,
+    "category": null,
+    "dataset_size_gb": null,
+    "known_issue": null
+  }
+]

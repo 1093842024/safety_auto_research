@@ -21,12 +21,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import uuid
 from typing import Any
 
 from ..platform_contracts.objects import ExperienceEntry
 from ..platform_contracts.objects import HypothesisNode
+from .evolution import EvolutionArchive
+from .playbook import PlaybookStore
 
 
 def _new_id(prefix: str) -> str:
@@ -190,13 +193,27 @@ class HypoTreeStore:
 
 
 class ExperienceBank:
-    """Training-free experience bank (Contextual Experience Replay), cross-run reusable."""
+    """Training-free experience bank (Contextual Experience Replay), cross-run reusable.
+
+    Phase 2 lifecycle:
+      * **dedup-merge** — adding a lesson whose normalized (kind, lesson) key already
+        exists *reinforces* that entry (uses+1, confidence bump, recency refresh)
+        instead of appending a near-duplicate;
+      * **decay** — ``query()`` ranks by ``confidence * decay ** staleness`` so an
+        unreinforced lesson fades as newer evidence arrives (context lifecycle
+        management, Weng bottleneck #2).
+    """
+
+    DECAY = 0.97
 
     def __init__(self, db_path: str | None = None) -> None:
         self.db_path = db_path
         self._entries: dict[str, ExperienceEntry] = {}
+        self._seq = 0
         if db_path:
             self._init_db()
+        if self._entries:
+            self._seq = max(e.seq for e in self._entries.values())
 
     def _init_db(self) -> None:
         assert self.db_path is not None
@@ -220,6 +237,10 @@ class ExperienceBank:
             )
             conn.commit()
 
+    @staticmethod
+    def _norm(text: str) -> str:
+        return re.sub(r"[^a-z0-9一-鿿]+", " ", text.lower()).strip()
+
     def add(
         self,
         kind: str,
@@ -227,7 +248,21 @@ class ExperienceBank:
         lesson: str,
         applicable_stages: list[str] | None = None,
         confidence: float = 0.5,
+        source_run_id: str | None = None,
     ) -> ExperienceEntry:
+        key = (kind, self._norm(lesson))
+        for e in self._entries.values():
+            if (e.kind, self._norm(e.lesson)) == key:
+                # reinforcement: merge, do not duplicate
+                e.uses += 1
+                e.confidence = min(0.99, round(e.confidence + 0.05, 4))
+                self._seq += 1
+                e.seq = self._seq  # refresh recency
+                if source_run_id:
+                    e.source_run_id = source_run_id
+                self._persist(e)
+                return e
+        self._seq += 1
         e = ExperienceEntry(
             entry_id=_new_id("exp"),
             kind=kind,
@@ -235,18 +270,24 @@ class ExperienceBank:
             lesson=lesson,
             applicable_stages=applicable_stages or [],
             confidence=confidence,
+            uses=0,
+            seq=self._seq,
+            source_run_id=source_run_id,
         )
         self._entries[e.entry_id] = e
         self._persist(e)
         return e
 
     def query(self, stage: str | None = None, k: int = 5) -> list[ExperienceEntry]:
-        """Retrieve up to ``k`` experiences, optionally filtered by applicable stage."""
+        """Retrieve up to ``k`` experiences, ranked by decayed confidence."""
 
         out = list(self._entries.values())
         if stage is not None:
             out = [e for e in out if stage in e.applicable_stages]
-        out.sort(key=lambda e: e.confidence, reverse=True)
+        out.sort(
+            key=lambda e: e.confidence * (self.DECAY ** max(0, self._seq - e.seq)),
+            reverse=True,
+        )
         return out[:k]
 
     def list_all(self) -> list[ExperienceEntry]:
@@ -254,7 +295,19 @@ class ExperienceBank:
 
 
 class StrategyArchive:
-    """Mechanism-carrier history with rollback ids (Darwin Gödel Machine-style archive)."""
+    """Mechanism-carrier history with rollback ids (Darwin Gödel Machine-style archive).
+
+    Every committed snapshot carries a ``run_id`` (dual-loop isolation invariant #3)
+    and a lifecycle ``status``:
+
+      * ``pending_verification`` — accepted by the frozen-verifier gate, applied to the
+        next inner loop, waiting for the post-hoc metric check (AHE-style falsifiable
+        edit: the proposal's ``prediction`` is verified against the *actual* next metric);
+      * ``verified`` — the prediction held (no regression beyond tolerance);
+      * ``rolled_back`` — the prediction was falsified; the orchestrator restored the
+        pre-patch params and marked the entry so it is never applied again;
+      * ``rejected`` — failed the frozen-verifier gate, never applied.
+    """
 
     def __init__(self, db_path: str | None = None) -> None:
         self.db_path = db_path
@@ -294,15 +347,50 @@ class StrategyArchive:
     def get(self, rollback_id: str) -> dict[str, Any] | None:
         return self._strategies.get(rollback_id)
 
+    def update(self, rollback_id: str, **fields: Any) -> dict[str, Any] | None:
+        """Merge fields into an entry and persist (verification results, status)."""
+
+        entry = self._strategies.get(rollback_id)
+        if entry is None:
+            return None
+        entry.update(fields)
+        self._persist(rollback_id, entry)
+        return entry
+
+    def pending(self, run_id: str | None = None) -> list[dict[str, Any]]:
+        """Entries accepted-but-not-yet-verified (optionally filtered by run)."""
+
+        out = [
+            e
+            for e in self._strategies.values()
+            if e.get("status") == "pending_verification"
+            and (run_id is None or e.get("run_id") == run_id)
+        ]
+        return out
+
+    def list_all(self, run_id: str | None = None) -> list[dict[str, Any]]:
+        out = list(self._strategies.values())
+        if run_id is not None:
+            out = [e for e in out if e.get("run_id") == run_id]
+        return out
+
     def rollback(self, rollback_id: str) -> dict[str, Any] | None:
-        return self._strategies.get(rollback_id)
+        """Mark an entry rolled back (falsified prediction) and return it.
+
+        The orchestrator is responsible for restoring the pre-patch params; this
+        records the fact durably so the entry is excluded from future ``pending()``.
+        """
+
+        return self.update(rollback_id, status="rolled_back")
 
 
 class ResearchStateStore:
-    """Convenience bundle of the three stores, sharing one SQLite path (or all in-memory)."""
+    """Convenience bundle of the five stores, sharing one SQLite path (or all in-memory)."""
 
     def __init__(self, db_path: str | None = None) -> None:
         self.db_path = db_path
         self.hypo_tree = HypoTreeStore(db_path)
         self.experience_bank = ExperienceBank(db_path)
         self.strategy_archive = StrategyArchive(db_path)
+        self.playbook = PlaybookStore(db_path)
+        self.evolution = EvolutionArchive(db_path)

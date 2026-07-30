@@ -199,6 +199,12 @@ class ExperienceEntry(ContractModel):
     lesson: str
     applicable_stages: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0, default=0.5)
+    # Lifecycle fields (Phase 2): dedup reinforcement counter + recency marker.
+    # Defaults keep pre-Phase-2 persisted rows deserializable.
+    uses: int = 0
+    seq: int = 0
+    # Provenance (M5 fix): the run that produced this lesson (per-run audit/clear).
+    source_run_id: str | None = None
 
 
 class PolicyPack(ContractModel):

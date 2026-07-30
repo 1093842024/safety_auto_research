@@ -35,10 +35,23 @@
 ```
 
 - **内循环**：具体研究执行，可由脚本化 `kaggle_eval` executor 或自主 agent（`mode="agent"`）驱动。
-- **外循环**：`layer_11_external_audit` 对研究产出做约束审计，给出 Accept / Refine / Restart 裁决；Refine 会真正改变内循环参数（否则重复同轨迹）。
-- **元循环（层⑨）**：`layer_09_self_iterative_evolution` 用冻结校验器做元级自检与回滚，并把经验沉淀进假设树 / 经验库 / 策略归档。
+- **外循环**：`layer_11_external_audit` 对研究产出做约束审计（含 held-out 泛化一致性检查），给出 Accept / Refine / Restart 裁决；Refine 会真正改变内循环参数（否则重复同轨迹）；连续 REFINE 无进展的轨迹会被 RESTART 抛弃。
+- **元循环（层⑨）**：`layer_09_self_iterative_evolution` 在**可编辑面白名单**内提出具体参数补丁，携带**可证伪预测**；orchestrator 应用补丁到下一轮内循环并**事后验证**——兑现标 `verified`、回归超容差则**真回滚**参数并标 `rolled_back`。
 
-### 2.2 分层模块
+### 2.2 Harness 工程（对照 Weng《Harness Engineering for Self-Improvement》的三期升级）
+
+| 机制 | 模块 | 说明 |
+|------|------|------|
+| **ACE 式 Playbook** | `control_plane/playbook.py` | 条目化研究上下文（策略/避坑/事实），确定性去重合并 + helpful/harmful 计数，跨 run 学习、只注入内循环（绝不进审计输入） |
+| **失败模式挖掘** | `control_plane/failure_miner.py` | 事件日志聚类反复出现的失败模式；被拒方向（rejected_candidates）回流内循环，不再重复试错 |
+| **策略生命周期** | `control_plane/store_tree.py` | StrategyArchive：`pending_verification → verified / rolled_back / expired_*`，全部带 run_id |
+| **held-out 评估** | `capabilities/kaggle_eval_executor.py` | 15% 分层 held-out 一次性打分（CV 喂内循环，gate 冻结）；审计 `heldout_consistency` 约束抓过拟合 |
+| **真实 LLM judge** | `control_plane/llm_judge.py` | `LLM_JUDGE_URL` 协议（score/rationale/evidence_refs），失败确定性回退 heuristic |
+| **经验生命周期** | `store_tree.py::ExperienceBank` | 每轮自动蒸馏成功/失败经验；去重合并（uses/conf 强化）+ `conf×0.97^staleness` 衰减；dispatch 自动注入 top-3 |
+| **多维预算** | `orchestrator.py` | `budget={max_seconds, max_capability_calls, max_cost}` 任一超额硬停 `exited_budget`；计数在 `run_capability` 本体，agent 调用无法绕过 |
+| **并行进化搜索** | `control_plane/evolution.py` + `task_manager.py` | 种群式候选（适应度比例父代选择 ÷(1+后代数)、blake2b 稳定哈希新颖性拒绝 ≥0.92）；线程池并行评估（结果 JSON 落盘可断点恢复），候选写入 gen{g} 分支假设树，每代冠军过冻结审计 |
+
+### 2.3 分层模块
 
 | 层 | 目录 | 职责 |
 |----|------|------|
@@ -60,8 +73,14 @@ safety_auto_research/
 ├── control_plane/                 # 控制平面（service + repository + api + schemas）
 │   ├── api.py                     #   FastAPI 应用（create_app 工厂）
 │   ├── service.py                 #   ControlPlaneService 状态机服务
-│   ├── store.py                   #   Repository（内存 + JSON 落盘）
-│   ├── store_tree.py              #   ResearchStateStore（SQLite 落盘）
+│   ├── store.py                   #   Repository（内存 + JSON 落盘，锁内原子写）
+│   ├── store_tree.py              #   ResearchStateStore 五件套（SQLite 落盘）
+│   ├── playbook.py                #   ACE 式 Playbook（条目化/去重合并/计数）
+│   ├── failure_miner.py           #   失败模式聚类（事件日志 → 避坑条目）
+│   ├── evolution.py               #   进化搜索（种群/选择/变异/新颖性/归档）
+│   ├── task_manager.py            #   并行任务管理器（JSON 落盘，崩溃恢复）
+│   ├── llm_judge.py               #   真实 LLM judge 客户端（证据链 + 回退）
+│   ├── progress_bus.py            #   SSE 进度总线（多订阅者，跨线程安全）
 │   └── schemas.py                 #   API 请求/响应模型（含 InnerLoopConfig）
 ├── execution_plane/               # 执行平面（adapter / orchestrator / agent / capabilities）
 │   ├── orchestrator.py            #   ClosedLoopOrchestrator + run_dual_loop
@@ -70,7 +89,7 @@ safety_auto_research/
 │   ├── executors/                 #   eval / attack / lesson 真实 executor
 │   └── decision/router.py        #   IterationRouter（参考策略 + 安全护栏）
 ├── infrastructure/                # 十层研究基础设施资产（详见其 README）
-├── benchmark_tasks/               # 任务目录（18 个任务 / 11 个类别）
+├── benchmark_tasks/               # 任务目录（18 个任务 / 11 个类别 + suites/ 基准套件）
 ├── frontend/                      # 研究人员控制面板（React + Vite + TS）
 ├── scripts/                       # 端到端演示脚本（如 run_kaggle_codex_demo.py）
 ├── evaluation/                    # 原始 idea 质量 / 评测资产（已部分沉淀到 infrastructure）
@@ -89,7 +108,11 @@ safety_auto_research/
   - *数据与方法*（脚本化与 agent 共用）：`preset` / `model`(gbm·gbm-strong·rf·logreg) / `fe`(基础·增强) / `cv_folds` / `threshold` / `drop_cols` / `data_dir`。
   - *自主 Agent 模式*：`mode` 切换脚本化↔agent；agent 模式额外可配 `system_prompt`、技能标签、工具多选（自动剔除护栏能力）、有序步骤编排。
 - **Benchmark 任务目录**：从 9 个上游项目扫描出 18 个「明确数据集 + 评测」任务，覆盖 11 个类别，作为新建研究的起点。
-- **双循环审计与可观测**：每个 run 的假设树（hypo-tree）、外部审计结论（audit）、改进项（improvements）均可实时查看。
+- **双循环审计与可观测**：每个 run 的假设树（hypo-tree）、外部审计结论（audit）、改进项（improvements）均可实时查看；「进化观察」子 Tab 展示 Playbook 条目、策略补丁生命周期与进化种群。
+- **研究榜单与一键复现**：每次研究自动沉淀记录，按指标方向取每任务最优 3 条高亮；支持「复现并启动」（按配置快照即刻重跑完整研究）。
+- **SSE 实时进度**：`GET /workflow-runs/{id}/stream` 推送 inner_done / audit_done / generation_done / finished 事件，前端实时刷新。
+- **实验对比**：勾选最多 8 个 run 横向对比指标与配置。
+- **基准套件**：`benchmark_tasks/suites/` 内置 ScienceAgentBench（102 任务）与 MLE-bench（75 竞赛，含 Known-Issues 泄漏标注剔除）两套套件级清单与论文基线数据。
 - **Agent 工具面与线协议**：10 个基础设施层注册为 agent 可调工具（`run_capability`），并提供 `GET /agent/protocol` 返回 JSON Schema，便于接入 Codex / WorkBuddy 等外部 agent。
 - **HITL 审批门**：高危动作（如关键红队）可触发人工审批断点，平台在审批解决前不推进。
 
@@ -208,9 +231,17 @@ curl --noproxy '*' -o /dev/null -w "%{http_code}\n" http://localhost:5173/      
 | POST | `/workflow-runs/{run_id}/dispatch` | 单步派发 stage |
 | POST | `/workflow-runs/{run_id}/capabilities/{capability_id}/run` | 运行某个基础设施层能力 |
 | POST | `/workflow-runs/{run_id}/dual-loop` | 跑双循环（核心） |
+| POST | `/workflow-runs/{run_id}/evolution` | 跑并行进化搜索（种群/新颖性拒绝/代冠军审计） |
+| GET | `/workflow-runs/{run_id}/evolution` | 进化候选列表（适应度/新颖度/血缘） |
 | GET | `/workflow-runs/{run_id}/hypo-tree` | 假设树 |
 | GET | `/workflow-runs/{run_id}/audit` | 外部审计结论 |
 | GET | `/workflow-runs/{run_id}/improvements` | 改进项 |
+| GET | `/workflow-runs/{run_id}/stream` | SSE 实时进度推送 |
+| GET | `/playbook` | ACE Playbook 条目（可按 scope 过滤） |
+| GET | `/strategies` | 策略补丁生命周期（pending→verified/rolled_back） |
+| GET | `/research-records` · `/research-records/leaderboard` | 研究记录 / 全局榜 |
+| POST | `/research-records/{id}/reproduce?autostart=true` | 复现并即刻重跑 |
+| GET | `/benchmark-suites[/{id}][/tasks][/baselines]` | 基准套件（SAB / MLE-bench） |
 | GET | `/benchmark-tasks` | 任务目录 |
 | POST | `/benchmark-tasks/{task_id}/launch` | 按任务启动（含 inner_loop 配置） |
 
@@ -236,6 +267,8 @@ curl --noproxy '*' -o /dev/null -w "%{http_code}\n" http://localhost:5173/      
 | `CONTROL_PLANE_STORE` | `safety_auto_research/data/control_plane_store.json` | 控制平面 JSON 落盘路径 |
 | `RESEARCH_STATE_DB` | `safety_auto_research/data/research_state.db` | 双循环 SQLite 落盘路径 |
 | `HF_ENDPOINT` | `https://huggingface.co` | 真实竞赛数据下载（镜像对 gated 仓库返回 404，需直连 + `HF_TOKEN`） |
+| `LLM_JUDGE_URL` | 未设置 | 真实 LLM judge 端点（POST JSON → score/rationale/evidence_refs）；未设置时用确定性 heuristic |
+| `LLM_AUDIT_JUDGE` | 未设置 | 置 `1` 时外审计的 claim-support 评分走 `LLM_JUDGE_URL`（故障自动回退 heuristic） |
 
 > `create_app` 自建 service 时才会启用落盘；测试中以注入式 `Repository()`/`ControlPlaneService()` 构造的 service 仍为纯内存态，确保单测不触碰文件。
 
@@ -249,7 +282,7 @@ cd /Users/glennge/work/github/AI_research
     safety_auto_research/tests/ -q
 ```
 
-主要覆盖：`control_plane`（状态机/API）、`dual_loop`（双循环隔离与终态）、`capabilities`（能力注册）、`execution_plane`（executor/编排）、`platform_contracts`（对象/事件/Schema）。
+当前基线 **132 passed**。主要覆盖：`control_plane`（状态机/API）、`dual_loop`（双循环隔离与终态）、`playbook`（ACE 合并/反思/策略生命周期/审计隔离）、`phase2`（held-out/LLM judge/经验生命周期/预算）、`evolution`（种群/选择/新颖性/并行回放/审计隔离）、`benchmark_registry`（任务注册校验）、`benchmark_suites`（套件清单/基线）、`research_records`（榜单/复现）、`capabilities`、`execution_plane`、`platform_contracts`。前端 `npx tsc --noEmit` 0 errors。
 
 ---
 
@@ -274,8 +307,11 @@ cd /Users/glennge/work/github/AI_research
 - `infrastructure/README.md` — 十层研究基础设施资产总览
 - `doc/unified_safety_rd_platform_architecture_spec.md` — 平台架构 spec
 - `doc/dual_loop_upgrade_plan.md` — 双循环升级方案
+- `doc/harness_gap_analysis_and_upgrade_plan.md` — **Harness 工程差距分析与三期升级规划**（对照 Weng 综述，三期全部落地）
+- `doc/code_review_2026-07-30_round3.md` — 全项目代码审查 Round3（32 项缺陷 + 批 1→4 修复执行结果）
+- `doc/benchmark_suites_integration.md` — 基准套件（SAB / MLE-bench）集成说明
 - `doc/benchmark_tasks.md` — **内置 18 个研究任务的逐任务详解**（定义/数据/模型/指标/基线/性能）
 
 ---
 
-*最后更新：2026-07-29 · 已实现研究记录持久化（重启可加载）+ 内循环参数深度可配 + 控制面板分类分组/折叠/排序；新增 `doc/benchmark_tasks.md` 逐任务详解，并在 README 加入「内置研究任务总览」。*
+*最后更新：2026-07-30 · Harness 工程三期升级（ACE Playbook / 策略可证伪闭环 / held-out 审计 / 真实 LLM judge / 经验生命周期 / 多维预算 / 并行进化搜索）+ 全项目代码审查 Round3 修复（32 项缺陷批 1→4）+ 基准套件集成 + SSE 实时进度 + 实验对比；测试基线 132 passed、前端 tsc 0 errors。*

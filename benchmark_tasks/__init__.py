@@ -340,6 +340,62 @@ _TASKS: list[BenchmarkTask] = [
         tags=["mle-bench", "kaggle", "ml", "external-dependency"],
         note="External dependency: requires local mle-bench dataset_dir; repo provides only the harness.",
     ),
+    # ---------------- External suites (Weng harness appendix, tracked) ----- #
+    BenchmarkTask(
+        task_id="suite.science_agent_bench",
+        name="ScienceAgentBench · 102 data-driven discovery tasks",
+        source_project="OSU-NLP-Group/ScienceAgentBench",
+        category="agent_eval",
+        modality="mixed",
+        dataset_desc="102 tasks from 44 peer-reviewed publications in 4 disciplines "
+        "(Bioinformatics 27 / Comp. Chemistry 20 / GIS 27 / Psych&CogSci 28); covers data "
+        "processing, model development, data analysis, visualization. Target output = "
+        "self-contained Python program. Full manifest bundled (suites/data/); datasets + eval "
+        "programs fetched externally (HF annotation sheet + SharePoint zip).",
+        eval_metric="success_rate",
+        direction="higher",
+        baseline=32.4,  # Claude-3.5-Sonnet self-debug, w/o expert knowledge
+        reference=42.2,  # o1-preview self-debug (>10x cost)
+        gates={"attempts": 3, "output": "self-contained Python program passing eval script"},
+        harness="manual",
+        run_command="GET /benchmark-suites/science_agent_bench/tasks  (manifest); "
+        "python agent.py --framework self_debug  (in SAB repo)",
+        source_path=_os.path.join(_PKG_ROOT, "benchmark_tasks", "suites", "data",
+                                  "science_agent_bench_tasks.json"),
+        tags=["science-discovery", "agent-eval", "code-generation", "weng-harness", "suite"],
+        note="Suite integrated with full 102-task manifest + paper Table 3 baselines "
+        "(SR/CBS/VER/cost). See /benchmark-suites/science_agent_bench.",
+        eval_method="每任务生成自包含 Python 程序，跑通并通过任务专属 eval 脚本判定成功（SR，3 次尝试）；"
+        "辅以 VER（可执行率）、CodeBERTScore、API cost；可视化输出由 GPT-4o judge 评分。",
+    ),
+    BenchmarkTask(
+        task_id="suite.mle_bench",
+        name="MLE-bench · 75 offline Kaggle competitions (official suite)",
+        source_project="openai/mle-bench",
+        category="model_dev",
+        modality="mixed",
+        dataset_desc="75 Kaggle ML-engineering competitions (low 22 / medium 38 / high 15; lite=low, "
+        "158 GB vs full 3.3 TB). Train models, prepare data, run experiments, submit CSV to "
+        "grading scripts; Kaggle public leaderboard = human baseline. Full competition manifest "
+        "bundled incl. official leakage flags; raw data via Kaggle API (mlebench prepare).",
+        eval_metric="any_medal_percentage",
+        direction="higher",
+        baseline=16.9,  # o1-preview + AIDE (paper headline, Weng post)
+        reference=64.44,  # leaderboard top (Famou-Agent 2.0, 2026-02)
+        gates={"medal": ">= Kaggle bronze per competition", "seeds": ">=3, mean±SEM"},
+        harness="manual",
+        run_command="GET /benchmark-suites/mle_bench/tasks  (manifest); "
+        "mlebench prepare --lite && mlebench grade ...  (in mle-bench repo)",
+        source_path=_os.path.join(_PKG_ROOT, "benchmark_tasks", "suites", "data",
+                                  "mle_bench_competitions.json"),
+        tags=["kaggle", "mle-bench", "ml-engineering", "weng-harness", "suite"],
+        note="Suite integrated with 75-competition manifest + leaderboard baselines + "
+        "resource-scaling & contamination analyses. Complements mlevolve.mle_bench (local "
+        "harness) and platform.titanic/spaceship (dual-loop-executable toy equivalents). "
+        "See /benchmark-suites/mle_bench.",
+        eval_method="每竞赛以 CSV 提交至官方 grade.py，按真实 Kaggle 排行榜奖牌线判定是否≥铜牌；"
+        "汇总指标 any_medal_percentage（按 low/medium/high/split75 分档，≥3 seeds 取均值±SEM）。",
+    ),
     # ---------------- Platform-native (dual-loop can actually run) --------- #
     BenchmarkTask(
         task_id="platform.titanic",
@@ -381,7 +437,78 @@ _TASKS: list[BenchmarkTask] = [
         supported_by_platform=True,
         note="Fully executable by the dual-loop platform (the demo task used in validation).",
     ),
+    BenchmarkTask(
+        task_id="platform.wine",
+        name="Wine Quality (binary classification)",
+        source_project="safety_auto_research",
+        category="platform_native",
+        modality="tabular",
+        dataset_desc="Wine chemical analysis → binary quality (sklearn load_wine, flavanoids threshold). 178 rows x 14 features.",
+        eval_metric="f1",
+        direction="higher",
+        baseline=0.72,
+        reference=None,
+        gates={"threshold": 0.78},
+        harness="kaggle_eval",
+        run_command="POST /benchmark-tasks/platform.wine/launch  (runs dual loop)",
+        source_path=_PKG_ROOT + "/data/kaggle/wine",
+        tags=["sklearn", "classification", "dual-loop", "wine"],
+        supported_by_platform=True,
+        note="Generated from sklearn load_wine. Binary target from flavanoids median split.",
+    ),
+    BenchmarkTask(
+        task_id="platform.iris",
+        name="Iris Species (multi-class)",
+        source_project="safety_auto_research",
+        category="platform_native",
+        modality="tabular",
+        dataset_desc="Fisher Iris flower species: 3 classes, 150 rows x 4 features. Classic ML benchmark.",
+        eval_metric="accuracy",
+        direction="higher",
+        baseline=0.90,
+        reference=None,
+        gates={"threshold": 0.92},
+        harness="kaggle_eval",
+        run_command="POST /benchmark-tasks/platform.iris/launch  (runs dual loop)",
+        source_path=_PKG_ROOT + "/data/kaggle/iris",
+        tags=["sklearn", "classification", "multi-class", "dual-loop"],
+        supported_by_platform=True,
+        note="Generated from sklearn load_iris. 3 balanced classes, strong baseline with GBM.",
+    ),
+    BenchmarkTask(
+        task_id="platform.breast_cancer",
+        name="Breast Cancer Wisconsin (binary classification)",
+        source_project="safety_auto_research",
+        category="platform_native",
+        modality="tabular",
+        dataset_desc="Breast cancer diagnosis from 30 numeric features. 569 rows, binary target. sklearn load_breast_cancer.",
+        eval_metric="accuracy",
+        direction="higher",
+        baseline=0.92,
+        reference=None,
+        gates={"threshold": 0.94},
+        harness="kaggle_eval",
+        run_command="POST /benchmark-tasks/platform.breast_cancer/launch  (runs dual loop)",
+        source_path=_PKG_ROOT + "/data/kaggle/breast_cancer",
+        tags=["sklearn", "classification", "medical", "dual-loop"],
+        supported_by_platform=True,
+        note="Generated from sklearn load_breast_cancer. 30 numeric features, strong GBM baseline >0.95.",
+    ),
 ]
+
+
+# ---- external suite access (ScienceAgentBench / MLE-bench) --------------- #
+def get_suites():
+    """List integrated external benchmark suites (see suites/)."""
+    from . import suites
+
+    return suites.list_suites()
+
+
+def get_suite(suite_id: str):
+    from . import suites
+
+    return suites.get_suite(suite_id)
 
 
 def _custom_tasks() -> list[BenchmarkTask]:

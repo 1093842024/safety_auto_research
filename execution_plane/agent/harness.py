@@ -257,6 +257,10 @@ class RemoteAgentHarness(AgentHarness):
                 "output_refs": list(result.output_refs),
                 "detail": result.detail,
             }
+        # M2 fix: explicit whitelist BEFORE getattr — any public SDK method outside
+        # AGENT_TOOL_NAMES (e.g. mark_pruned/mark_merged) must not be agent-callable.
+        if tool not in AGENT_TOOL_NAMES:
+            raise ValueError(f"unknown agent tool: {tool!r} (available: {AGENT_TOOL_NAMES})")
         method = getattr(self.sdk, tool, None)
         if method is None:
             raise ValueError(f"unknown agent tool: {tool!r} (available: {AGENT_TOOL_NAMES})")

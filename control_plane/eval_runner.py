@@ -127,10 +127,38 @@ def llm_judge_eval(
         )
 
     if judge_url:
-        # A real LLM judge would be called here; signature kept identical.
-        raise NotImplementedError(
-            f"真实 LLM judge 接入点已预留（{judge_url}），当前环境未实现 HTTP 调用。"
-        )
+        # Real LLM judge (Phase 2): one call per aligned pair (capped), each returning
+        # {score, rationale, evidence_refs} — Chain-of-Evidence style. Any failure
+        # falls back to the deterministic heuristic judge below; the run never dies
+        # because a judge service is down.
+        from .llm_judge import LLMJudgeError
+        from .llm_judge import call_llm_judge
+
+        judged: list[dict[str, Any]] = []
+        judge_error: str | None = None
+        for out, ref in paired[:50]:
+            try:
+                judged.append(call_llm_judge(prompt="", reference=ref, prediction=out, url=judge_url))
+            except LLMJudgeError as exc:
+                judge_error = str(exc)
+                break
+        if judged and judge_error is None:
+            n = len(judged)
+            avg = sum(j["score"] for j in judged) / n
+            return {
+                "metric_name": metric,
+                "direction": "higher",
+                "score": round(avg, 6),
+                "details": {
+                    "n": n,
+                    "judge": "llm",
+                    "judge_url": judge_url,
+                    "rationales": [j["rationale"] for j in judged[:5]],
+                    "evidence_refs": [j["evidence_refs"] for j in judged[:5]],
+                },
+                "n": n,
+            }
+        # fall through to heuristic with the reason recorded
 
     # Deterministic heuristic judge: token-overlap F1 of prediction vs reference.
     scores = [_token_f1(out, ref) for out, ref in paired]
@@ -147,6 +175,8 @@ def llm_judge_eval(
         ) if n else 0.0,
         "judge": "heuristic-token-f1",
     }
+    if judge_url:
+        details["fallback_reason"] = judge_error or "llm judge returned no scores"
     metric_name = metric
     return {
         "metric_name": metric_name,

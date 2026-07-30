@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { getAudit, getImprovements, getEvents, getRun } from "../api/client";
+import {
+  getAudit, getImprovements, getEvents, getRun,
+  STATUS_LABEL, STATUS_CLASS, DECISION_LABEL, DECISION_CLASS,
+} from "../api/client";
 
 /** Live dual-loop overview: inner-loop events vs outer-loop audit + improvement. */
 export function DualLoopLive({ runId }: { runId: string }) {
@@ -46,25 +49,16 @@ export function DualLoopLive({ runId }: { runId: string }) {
   const lastDecision: string | null = decisions.length
     ? decisions[decisions.length - 1].decision_type
     : null;
-  const decisionLabel =
-    lastDecision === "accept" ? "ACCEPT · 接受"
-    : lastDecision === "revisit" ? "REFINE · 复核"
-    : lastDecision === "restart" ? "RESTART · 重启"
-    : lastDecision === "exit_success" ? "EXIT_SUCCESS"
-    : lastDecision ?? "—";
-  const decisionClass =
-    lastDecision === "accept" ? "ok"
-    : lastDecision === "revisit" ? "warn"
-    : lastDecision === "restart" ? "bad"
-    : "accent";
+  const decisionLabel = lastDecision ? (DECISION_LABEL[lastDecision] || lastDecision) : "—";
+  const decisionClass = lastDecision ? (DECISION_CLASS[lastDecision] || "accent") : "accent";
   const statusLabel: Record<string, string> = {
     running: "运行中",
     requested: "已请求",
     waiting_approval: "等待审批",
     succeeded: "成功",
     failed: "失败",
-    exited_budget: "已完成 · 预算耗尽",
-    exited_converged: "已完成 · 已收敛",
+    exited_budget: "已完成 · 已达最大轮数",
+    exited_converged: "已完成 · 审计通过",
     cancelled: "已取消",
   };
   const statusClass: Record<string, string> = {
@@ -94,7 +88,7 @@ export function DualLoopLive({ runId }: { runId: string }) {
         </div>
         {runStatus !== "running" && outerDone >= maxOuter && (
           <div className="muted" style={{ marginTop: 8 }}>
-            双循环已结束：跑满 {maxOuter} 轮外部审计，外循环均未给出 ACCEPT（持续 REFINE），以「预算耗尽」终态退出。
+            双循环已结束：已完成 {maxOuter} 轮外部审计，外循环未给出 ACCEPT（持续 REFINE），以「已达最大轮数」终态退出。
           </div>
         )}
       </div>

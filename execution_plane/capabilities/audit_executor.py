@@ -17,6 +17,7 @@ passes a ``judge`` that calls a separate model in a separate context.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 from typing import Callable
 
@@ -73,6 +74,14 @@ class AuditExecutor(StageExecutor):
         params: dict[str, Any],
     ) -> ExecResult:
         judge: Callable[[str, str, str], float] = params.get("judge") or _default_judge
+        if params.get("judge") is None and os.environ.get("LLM_AUDIT_JUDGE") == "1":
+            # Opt-in real LLM judge for claim support (Phase 2). Falls back to the
+            # deterministic heuristic on any failure — the audit must always verdict.
+            from ...control_plane.llm_judge import judge_url as _judge_url
+            from ...control_plane.llm_judge import make_claim_judge
+
+            if _judge_url():
+                judge = make_claim_judge(_default_judge)
 
         run = sdk.load_object(f"run:{stage_run.run_id}")
         obj = run.objective_snapshot or {}
@@ -157,6 +166,34 @@ class AuditExecutor(StageExecutor):
             else "no real-eval signal in event log",
         })
 
+        # (2b) held-out generalization check (Phase 2) — programmatic, deterministic.
+        # The CV number feeds the inner loop; the held-out number is a one-shot,
+        # never-optimized measurement. A large CV→held-out gap signals overfitting
+        # (Weng: 'overly optimistic' failure mode / p-hacking guard).
+        ho_acc = last_metrics.get("heldout_accuracy") if has_eval else None
+        # I8 fix: also require a CV reference metric — without it the gap is
+        # meaningless (a missing "accuracy" key must not silently verify).
+        cv_ref = last_metrics.get("accuracy") if has_eval else None
+        if isinstance(ho_acc, (int, float)) and isinstance(cv_ref, (int, float)):
+            cv_acc = float(cv_ref)
+            gap = round(cv_acc - float(ho_acc), 4)
+            if gap <= 0.03:
+                ho_score, ho_status = 1.0, "verified"
+            elif gap <= 0.05:
+                ho_score, ho_status = 0.7, "partial"
+            elif gap <= 0.08:
+                ho_score, ho_status = 0.4, "partial"
+            else:
+                ho_score, ho_status = 0.1, "conflict"
+            constraints.append({
+                "id": "heldout_consistency",
+                "description": f"held-out generalization gap within tolerance (gap={gap})",
+                "status": ho_status,
+                "evidence_ref": report_ref,
+                "score": ho_score,
+                "note": f"cv={cv_acc} vs heldout={ho_acc}",
+            })
+
         # (3) claims supported by evidence — LLM-judge proxy (sees ONLY the curated result)
         claim_support = judge(answer, "claims are supported by the reported evidence", str(last_metrics))
         constraints.append({
@@ -191,12 +228,24 @@ class AuditExecutor(StageExecutor):
         unresolved = [c["description"] for c in constraints if c["status"] != "verified"]
         rejected = list(params.get("rejected_candidates", []) or [])
         recoverable = has_eval  # can refine if we have a result to build on
+        # I4 fix: make the Restart branch reachable — a trajectory that has already
+        # consumed several consecutive REFINE verdicts without converging is no
+        # longer recoverable (refining forever just burns budget on a dead end).
+        if recoverable and prior_audits:
+            streak = 0
+            for a in reversed(prior_audits):
+                if a.get("recommendation") in ("revisit", "refine"):
+                    streak += 1
+                else:
+                    break
+            if streak >= 3:
+                recoverable = False
 
         # ---- Accept / Refine / Restart (AREX decision law) ----
         if confidence >= threshold:
             recommendation = "accept"
             gate_passed = True
-        elif confidence < restart_floor and not recoverable:
+        elif not recoverable:
             recommendation = "restart"
             gate_passed = False
         else:

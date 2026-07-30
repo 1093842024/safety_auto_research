@@ -1,0 +1,92 @@
+[
+  {
+    "id": "aerial-cactus-identification",
+    "status": "prepared",
+    "detail": null,
+    "needs_rule_acceptance": false,
+    "rules_url": null,
+    "public": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/aerial-cactus-identification/prepared/public",
+    "private": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/aerial-cactus-identification/prepared/private",
+    "raw_bytes": 44324199
+  },
+  {
+    "id": "denoising-dirty-documents",
+    "status": "prepared",
+    "detail": null,
+    "needs_rule_acceptance": false,
+    "rules_url": null,
+    "public": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/denoising-dirty-documents/prepared/public",
+    "private": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/denoising-dirty-documents/prepared/private",
+    "raw_bytes": 58812186
+  },
+  {
+    "id": "detecting-insults-in-social-commentary",
+    "status": "prepared",
+    "detail": null,
+    "needs_rule_acceptance": false,
+    "rules_url": null,
+    "public": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/detecting-insults-in-social-commentary/prepared/public",
+    "private": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/detecting-insults-in-social-commentary/prepared/private",
+    "raw_bytes": 3019551
+  },
+  {
+    "id": "jigsaw-toxic-comment-classification-challenge",
+    "status": "prepared",
+    "detail": null,
+    "needs_rule_acceptance": false,
+    "rules_url": null,
+    "public": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/jigsaw-toxic-comment-classification-challenge/prepared/public",
+    "private": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/jigsaw-toxic-comment-classification-challenge/prepared/private",
+    "raw_bytes": 195598452
+  },
+  {
+    "id": "leaf-classification",
+    "status": "prepared",
+    "detail": null,
+    "needs_rule_acceptance": false,
+    "rules_url": null,
+    "public": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/leaf-classification/prepared/public",
+    "private": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/leaf-classification/prepared/private",
+    "raw_bytes": 80607912
+  },
+  {
+    "id": "nomad2018-predict-transparent-conductors",
+    "status": "prepared",
+    "detail": null,
+    "needs_rule_acceptance": false,
+    "rules_url": null,
+    "public": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/nomad2018-predict-transparent-conductors/prepared/public",
+    "private": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/nomad2018-predict-transparent-conductors/prepared/private",
+    "raw_bytes": 19698114
+  },
+  {
+    "id": "spooky-author-identification",
+    "status": "prepared",
+    "detail": null,
+    "needs_rule_acceptance": false,
+    "rules_url": null,
+    "public": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/spooky-author-identification/prepared/public",
+    "private": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/spooky-author-identification/prepared/private",
+    "raw_bytes": 5196163
+  },
+  {
+    "id": "text-normalization-challenge-english-language",
+    "status": "prepared",
+    "detail": null,
+    "needs_rule_acceptance": false,
+    "rules_url": null,
+    "public": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/text-normalization-challenge-english-language/prepared/public",
+    "private": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/text-normalization-challenge-english-language/prepared/private",
+    "raw_bytes": 451681465
+  },
+  {
+    "id": "text-normalization-challenge-russian-language",
+    "status": "prepared",
+    "detail": null,
+    "needs_rule_acceptance": false,
+    "rules_url": null,
+    "public": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/text-normalization-challenge-russian-language/prepared/public",
+    "private": "/Users/glennge/work/github/AI_research/safety_auto_research/benchmark_tasks/suites/data/mle_bench_data/text-normalization-challenge-russian-language/prepared/private",
+    "raw_bytes": 660879239
+  }
+]

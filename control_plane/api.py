@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import shutil
 import threading
+import time as _time
 
 from fastapi import FastAPI
 from fastapi import File
 from fastapi import HTTPException
 from fastapi import UploadFile
 from fastapi import status
+from fastapi.responses import StreamingResponse
 
 from ..platform_contracts.objects import DecisionRecord
 from ..platform_contracts.objects import StageRun
@@ -20,6 +23,7 @@ from .schemas import CreateWorkflowRunRequest
 from .schemas import DebugRequest
 from .schemas import DispatchRequest
 from .schemas import DualLoopRequest
+from .schemas import EvolutionRequest
 from .schemas import EvaluateRunRequest
 from .schemas import InnerLoopConfig
 from .schemas import LaunchBenchmarkRequest
@@ -36,12 +40,74 @@ from .service import ConflictError
 from .service import ControlPlaneService
 from .service import NotFoundError
 from .store_tree import ResearchStateStore
+from .progress_bus import progress_bus as _progress_bus
 from ..benchmark_tasks import get_catalog
 from ..benchmark_tasks import get_task
 from ..benchmark_tasks import _default_eval_method as _get_eval_method_desc
 from ..benchmark_tasks import to_dict
 
 _shutdown_event = threading.Event()
+_bg_threads: set[threading.Thread] = set()
+_bg_lock = threading.Lock()
+# Per-run cancellation events — set by the cancel-endpoint, checked by dual-loop workers.
+_run_cancel_events: dict[str, threading.Event] = {}
+
+
+def _register_bg_thread(t: threading.Thread) -> None:
+    """Track a background worker so shutdown can join it gracefully."""
+    with _bg_lock:
+        _bg_threads.add(t)
+
+
+def _deregister_bg_thread(t: threading.Thread) -> None:
+    with _bg_lock:
+        _bg_threads.discard(t)
+
+
+def _spawn_bg_thread(target, name: str = "") -> threading.Thread:
+    """Spawn a non-daemon background thread that will be joined on shutdown.
+
+    Non-daemon threads are NOT force-killed on process exit — they finish their
+    current work unit (e.g. a ``_persist`` call) before the process stops. This
+    prevents store-JSON corruption from a mid-write SIGTERM.
+    """
+    t = threading.Thread(target=target, daemon=False, name=name or f"bg-{len(_bg_threads)}")
+    _register_bg_thread(t)
+    t.start()
+    return t
+
+
+def _graceful_shutdown(timeout: float = 8.0) -> None:
+    """Signal background workers and wait for them to finish (at most *timeout* seconds)."""
+    _shutdown_event.set()
+    threads: list[threading.Thread] = []
+    with _bg_lock:
+        threads = list(_bg_threads)
+    deadline = _time.monotonic() + timeout
+    for t in threads:
+        remaining = deadline - _time.monotonic()
+        if remaining > 0:
+            t.join(timeout=remaining)
+    with _bg_lock:
+        _bg_threads.clear()
+
+
+atexit.register(_graceful_shutdown)
+
+
+def _map_summary_status(status: str) -> str:
+    """Map dual/evolution-loop summary statuses onto valid WorkflowStatus names (M6).
+
+    The orchestrator reports a few loop-local statuses that are not WorkflowStatus
+    enum members; writing them verbatim would raise and (worse) skip the run's
+    record capture.
+    """
+
+    _MAP = {
+        "collaboration_aborted": "cancelled",
+        "stopped_after_eval": "exited_converged",
+    }
+    return _MAP.get(status, status)
 
 
 def create_app(service: ControlPlaneService | None = None) -> FastAPI:
@@ -59,7 +125,7 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
 
     @app.on_event("shutdown")
     def _on_shutdown():
-        _shutdown_event.set()
+        _graceful_shutdown()
 
     from ..execution_plane.orchestrator import ClosedLoopOrchestrator
 
@@ -173,9 +239,37 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
     )
     def cancel_workflow_run(run_id: str) -> WorkflowRun:
         try:
+            # Signal any running background thread to abort at the next checkpoint.
+            _run_cancel_events.setdefault(run_id, threading.Event()).set()
             return svc.cancel_workflow_run(run_id)
         except Exception as exc:
             raise _translate(exc)
+
+    # ------------------------------------------------------------------ #
+    # Server-Sent Events: live progress stream for the frontend           #
+    # ------------------------------------------------------------------ #
+
+    @app.get(
+        "/workflow-runs/{run_id}/stream",
+        summary="SSE stream of dual-loop progress events for a run",
+    )
+    async def stream_progress(run_id: str):
+        """Server-Sent Events endpoint. Connect with EventSource in the
+        frontend to receive live dual-loop progress without polling."""
+        import asyncio as _asyncio
+
+        # F1 fix: capture the serving event loop so background _drive threads can
+        # publish progress events (they cannot discover it from their own thread).
+        _progress_bus.set_loop(_asyncio.get_running_loop())
+        return StreamingResponse(
+            _progress_bus.subscribe(run_id),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.get(
         "/workflow-runs",
@@ -437,7 +531,58 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
                 audit_params=req.audit_params or {"threshold": 0.8},
                 max_outer_iters=req.max_outer_iters,
                 agent_inner=req.agent_inner,
+                progress_callback=_progress_bus.emit,
             )
+        except Exception as exc:
+            raise _translate(exc)
+
+    # ----- Evolutionary search (Phase 3): parallel population -> audit champion -----
+    @app.post(
+        "/workflow-runs/{run_id}/evolution",
+        summary="Run parallel evolutionary search over the inner-loop config space",
+    )
+    def run_evolution_endpoint(run_id: str, req: EvolutionRequest) -> dict:
+        try:
+            try:
+                svc.start_workflow_run(run_id)
+            except (ConflictError, ValueError):
+                pass  # already running / terminal — proceed
+            inner_params = dict(req.inner_params) or {
+                "preset": "titanic",
+                "model": "gbm",
+                "data_dir": os.path.join(
+                    os.path.dirname(__file__), "..", "data", "kaggle", "titanic"
+                ),
+                "cv_folds": 5,
+                "threshold": 0.82,
+            }
+            return orchestrator.run_evolutionary_loop(
+                run_id,
+                inner_capability=req.inner_capability,
+                inner_params=inner_params,
+                audit_params=req.audit_params or {"threshold": 0.8},
+                population_size=req.population_size,
+                generations=req.generations,
+                max_workers=req.max_workers,
+                novelty_threshold=req.novelty_threshold,
+                budget=req.budget or None,
+                seed=req.seed,
+                progress_callback=_progress_bus.emit,
+            )
+        except Exception as exc:
+            raise _translate(exc)
+
+    # ----- Evolution observability: population / candidates -----
+    @app.get(
+        "/workflow-runs/{run_id}/evolution",
+        summary="Evolution candidates (fitness / novelty / lineage) for a run",
+    )
+    def list_evolution(run_id: str) -> list[dict]:
+        from dataclasses import asdict
+
+        try:
+            svc.get_workflow_run(run_id)
+            return [asdict(c) for c in state_store.evolution.list(run_id)]
         except Exception as exc:
             raise _translate(exc)
 
@@ -485,6 +630,24 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
     def list_experiences() -> list[dict]:
         return [e.model_dump(mode="json") for e in state_store.experience_bank.list_all()]
 
+    # ----- Dual-loop observability: ACE playbook (itemized evolving context) -----
+    @app.get(
+        "/playbook",
+        summary="ACE playbook entries (itemized evolving context, per-task scope)",
+    )
+    def list_playbook(scope: str | None = None) -> list[dict]:
+        from dataclasses import asdict
+
+        return [asdict(e) for e in state_store.playbook.list_entries(scope)]
+
+    # ----- Dual-loop observability: StrategyArchive (propose-apply-verify-rollback) -----
+    @app.get(
+        "/strategies",
+        summary="Meta-loop strategy archive with verification/rollback status",
+    )
+    def list_strategies(run_id: str | None = None) -> list[dict]:
+        return state_store.strategy_archive.list_all(run_id)
+
     # ----- Benchmark task catalog (mined from the OSS projects) -----
     @app.get(
         "/benchmark-tasks",
@@ -492,6 +655,89 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
     )
     def list_benchmark_tasks() -> list[dict]:
         return [to_dict(t) for t in get_catalog()]
+
+    # ----- External benchmark suites (ScienceAgentBench / MLE-bench) -----
+    @app.get(
+        "/benchmark-suites",
+        summary="List integrated external benchmark suites (Weng harness appendix)",
+    )
+    def list_benchmark_suites() -> list[dict]:
+        from ..benchmark_tasks import suites
+
+        return [s.to_dict() for s in suites.list_suites()]
+
+    @app.get(
+        "/benchmark-suites/{suite_id}",
+        summary="Suite detail: metrics, data acquisition, resource-scaling/contamination analyses",
+    )
+    def get_benchmark_suite(suite_id: str) -> dict:
+        from ..benchmark_tasks import suites
+
+        suite = suites.get_suite(suite_id)
+        if suite is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"suite {suite_id} not found")
+        return suite.to_dict()
+
+    @app.get(
+        "/benchmark-suites/{suite_id}/tasks",
+        summary="Suite sub-task manifest (default excludes known-issue/leakage competitions; "
+                "set include_excluded=true to see all). Filters: domain/split/category substring match",
+    )
+    def list_suite_tasks(
+        suite_id: str,
+        domain: str | None = None,
+        split: str | None = None,
+        category: str | None = None,
+        include_excluded: bool = False,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> dict:
+        from ..benchmark_tasks import suites
+
+        suite = suites.get_suite(suite_id)
+        if suite is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"suite {suite_id} not found")
+        rows = suite.load_manifest(include_excluded=include_excluded)
+
+        def _match(row: dict) -> bool:
+            if domain and domain.lower() not in str(row.get("domain", "")).lower():
+                return False
+            if split and split.lower() != str(row.get("complexity_split", "")).lower():
+                return False
+            if category:
+                hay = (str(row.get("subtask_categories", "")) + " " + str(row.get("category", ""))).lower()
+                if category.lower() not in hay:
+                    return False
+            return True
+
+        filtered = [r for r in rows if _match(r)]
+        return {
+            "suite_id": suite_id,
+            "total": len(filtered),
+            "offset": offset,
+            "tasks": filtered[offset : offset + max(0, limit)],
+        }
+
+    @app.get(
+        "/benchmark-suites/{suite_id}/baselines",
+        summary="Official baseline / leaderboard results for a suite",
+    )
+    def list_suite_baselines(suite_id: str) -> dict:
+        from dataclasses import asdict
+
+        from ..benchmark_tasks import suites
+
+        suite = suites.get_suite(suite_id)
+        if suite is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"suite {suite_id} not found")
+        headline = suites.suite_headline_baseline(suite)
+        return {
+            "suite_id": suite_id,
+            "headline_metric": suite.headline_metric,
+            "direction": suite.direction,
+            "headline": asdict(headline) if headline else None,
+            "baselines": [asdict(b) for b in suite.baselines],
+        }
 
     # ----- Custom task registration (schema-driven) -----
     @app.get(
@@ -830,9 +1076,10 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
                         agent_inner=agent_mode,
                         inner_agent_config=inner_agent_config,
                         collaboration_mode=collab_mode,
+                        cancel_event=_run_cancel_events.get(run.run_id),
+                        progress_callback=_progress_bus.emit,
                     )
-                    # 双循环结束后把终态写回 run（否则 status 永远停在 running）
-                    svc.set_run_status(run.run_id, summary.get("status", "exited_budget"))
+                    svc.set_run_status(run.run_id, _map_summary_status(summary.get("status", "exited_budget")))
                     # 自动入库"最优自主研究记录"（平台可实跑任务会自动算出指标）
                     try:
                         svc.capture_run_record(run.run_id)
@@ -844,8 +1091,14 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
                         svc.set_run_status(run.run_id, "failed")
                     except Exception:
                         logging.exception("set_run_status('failed') failed for run=%s", run.run_id)
+                finally:
+                    # I3 fix: no pending meta-loop proposal survives an abnormal exit.
+                    try:
+                        active_orchestrator.expire_pending_strategies(run.run_id)
+                    except Exception:
+                        pass
 
-            threading.Thread(target=_drive, daemon=True).start()
+            _spawn_bg_thread(_drive, name=f"dual-loop-{run.run_id}")
 
         return {
             "run_id": run.run_id,
@@ -884,15 +1137,46 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
     def get_leaderboard() -> list[dict]:
         return svc.leaderboard()
 
+    @app.get(
+        "/research-records/compare",
+        summary="Side-by-side comparison of multiple runs",
+    )
+    def compare_runs(ids: str = "") -> list[dict]:
+        """Compare runs by comma-separated run_ids.
+        Example:  /research-records/compare?ids=run-abc,run-def,run-xyz
+        """
+        run_ids = [rid.strip() for rid in ids.split(",") if rid.strip()]
+        if not run_ids:
+            return []
+        return svc.compare_runs(run_ids)
+
     @app.post(
         "/research-records/{record_id}/reproduce",
         summary="Reproduce a research record by re-launching its config",
     )
-    def reproduce_research_record(record_id: str) -> dict:
+    def reproduce_research_record(record_id: str, autostart: bool = False) -> dict:
         try:
-            return svc.reproduce_record(record_id)
+            payload = svc.reproduce_record(record_id)
         except KeyError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+        if autostart:
+            # F3 fix: close the reproduce loop — a platform-executable task can be
+            # re-driven immediately (previously the REQUESTED run was a dead end).
+            try:
+                new_run = svc.get_workflow_run(payload["run_id"])
+                task = get_task(payload["task_id"])
+                if task is not None and getattr(task, "supported_by_platform", False):
+                    ctx = _build_run_ctx(new_run)
+                    _spawn_full_experiment(new_run, ctx)
+                    payload["autostarted"] = True
+                else:
+                    payload["autostarted"] = False
+                    payload["note"] = "tracked-only 任务：已建档为 REQUESTED，需外部执行后上报指标"
+            except Exception as exc:  # never let autostart failure lose the new run
+                logging.exception("autostart after reproduce failed for run=%s", payload["run_id"])
+                payload["autostarted"] = False
+                payload["note"] = f"自动启动失败（run 已建档，可手动启动）: {exc}"
+        return payload
 
     # ------------------------------------------------------------------ #
     # Tracked-only run evaluation / metric reporting                     #
@@ -1068,6 +1352,8 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
             pass  # already running / terminal
 
         def _drive() -> None:
+            if _shutdown_event.is_set():
+                return
             try:
                 summary = active_orchestrator.run_dual_loop(
                     run.run_id,
@@ -1078,20 +1364,28 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
                     agent_inner=ctx["agent_mode"],
                     inner_agent_config=ctx.get("inner_agent_config"),
                     collaboration_mode=ctx.get("collaboration_mode", "autonomous"),
+                    cancel_event=_run_cancel_events.get(run.run_id),
+                    progress_callback=_progress_bus.emit,
                 )
-                svc.set_run_status(run.run_id, summary.get("status", "exited_budget"))
+                svc.set_run_status(run.run_id, _map_summary_status(summary.get("status", "exited_budget")))
                 try:
                     svc.capture_run_record(run.run_id)
                 except Exception:
-                    pass
+                    logging.exception("capture_run_record failed for run=%s", run.run_id)
             except Exception:
                 logging.exception("experiment failed for run=%s", run.run_id)
                 try:
                     svc.set_run_status(run.run_id, "failed")
                 except Exception:
+                    logging.exception("set_run_status('failed') failed for run=%s", run.run_id)
+            finally:
+                # I3 fix: no pending meta-loop proposal survives an abnormal exit.
+                try:
+                    active_orchestrator.expire_pending_strategies(run.run_id)
+                except Exception:
                     pass
 
-        threading.Thread(target=_drive, daemon=True).start()
+        _spawn_bg_thread(_drive, name=f"experiment-{run.run_id}")
 
     # ------------------------------------------------------------------ #
     # Debug: isolate one stage (inner / outer) of the dual loop          #
@@ -1197,7 +1491,7 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
                     summary=f"调试失败: {exc}", error=str(exc),
                 ))
 
-        threading.Thread(target=_debug_thread, daemon=True).start()
+        _spawn_bg_thread(_debug_thread, name=f"debug-{run_id}-{stage}")
         return {"run_id": run_id, "stage": stage, "status": "debugging"}
 
     # ------------------------------------------------------------------ #

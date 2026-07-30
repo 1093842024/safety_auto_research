@@ -72,7 +72,8 @@ class ControlPlaneService:
         if repository is None:
             repository = Repository(store_path=store_path)
         self._repo = repository
-        self._open_approvals: dict[str, str] = {}
+        # _open_approvals is now backed by Repository.open_approvals for persistence.
+        # The service-level dict is an alias; mutations go through self._repo.
 
     # ------------------------------------------------------------------ helpers
     def _emit_workflow_status_change(
@@ -390,6 +391,44 @@ class ControlPlaneService:
         )
         return board
 
+    def compare_runs(self, run_ids: list[str]) -> list[dict[str, Any]]:
+        """Build a side-by-side comparison of multiple runs."""
+        results: list[dict[str, Any]] = []
+        for rid in run_ids:
+            try:
+                run = self._require_workflow_run(rid)
+            except NotFoundError:
+                continue
+            obj = run.objective_snapshot or {}
+            cfg = obj.get("config", {}) if isinstance(obj.get("config"), dict) else {}
+            il = cfg.get("inner_loop", {}) if isinstance(cfg, dict) else {}
+            # Harvest best metric from events.
+            best_score: float | None = None
+            metric_name = str(obj.get("eval_metric") or "accuracy")
+            for e in self._repo.list_events(run.run_id):
+                if e.get("event_type") == "eval_completed":
+                    m = e.get("metrics", {}) or {}
+                    v = m.get("accuracy") or m.get("primary") or m.get(metric_name)
+                    if isinstance(v, (int, float)):
+                        if best_score is None or v > best_score:
+                            best_score = v
+            results.append({
+                "run_id": rid,
+                "task_id": obj.get("benchmark_task_id") or run.target_id,
+                "task_name": obj.get("name") or "",
+                "status": run.status.value if hasattr(run.status, "value") else str(run.status),
+                "metric_name": metric_name,
+                "score": best_score,
+                "model": il.get("model") or cfg.get("model") or "—",
+                "fe": il.get("fe") or ("rich" if cfg.get("fe") else "basic"),
+                "cv_folds": il.get("cv_folds") or 5,
+                "mode": il.get("mode") or "scripted",
+                "audit_threshold": cfg.get("audit_threshold") or 0.8,
+                "max_outer_iters": cfg.get("max_outer_iters") or 3,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+            })
+        return results
+
     def reproduce_record(self, record_id: str) -> dict[str, Any]:
         """Re-launch a run using a recorded config snapshot; returns the new run payload."""
         rec = self._repo.get_research_record(record_id)
@@ -423,7 +462,7 @@ class ControlPlaneService:
         if run.status == WorkflowStatus.WAITING_APPROVAL:
             raise ConflictError(f"run {run_id} is already waiting for approval")
         approval_id = self._repo.next_id("apr")
-        self._open_approvals[run_id] = approval_id
+        self._repo.open_approvals[run_id] = approval_id
         self._emit_workflow_status_change(
             run, WorkflowStatus.WAITING_APPROVAL, EventType.APPROVAL_REQUIRED
         )
@@ -443,7 +482,7 @@ class ControlPlaneService:
 
     def resolve_approval(self, run_id: str, req: ResolveApprovalRequest) -> tuple[WorkflowRun, str]:
         run = self._require_workflow_run(run_id)
-        approval_id = self._open_approvals.get(run_id)
+        approval_id = self._repo.open_approvals.get(run_id)
         if approval_id is None:
             if run.status == WorkflowStatus.WAITING_APPROVAL:
                 logging.warning(
@@ -452,7 +491,7 @@ class ControlPlaneService:
                     run_id,
                 )
                 approval_id = self._repo.next_id("apr-recovery")
-                self._open_approvals[run_id] = approval_id
+                self._repo.open_approvals[run_id] = approval_id
             else:
                 raise ConflictError(f"run {run_id} has no open approval to resolve")
         if run.status != WorkflowStatus.WAITING_APPROVAL:
@@ -477,7 +516,8 @@ class ControlPlaneService:
                 note=req.note,
             )
         )
-        self._open_approvals.pop(run_id, None)
+        self._repo.open_approvals.pop(run_id, None)
+        self._repo.persist_now()
         return run, approval_id
 
     # ------------------------------------------------------------------ StageRun

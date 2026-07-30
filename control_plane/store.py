@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import threading
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,8 @@ class Repository:
         self.events: list[dict[str, Any]] = []
         # Autonomous research records (leaderboard): record_id -> dict.
         self.research_records: dict[str, dict[str, Any]] = {}
+        # Open approvals: run_id -> approval_id (persisted so restart preserves pending approvals).
+        self.open_approvals: dict[str, str] = {}
         self._store_path: Path | None = Path(store_path) if store_path else None
         self._lock = threading.Lock()
         if self._store_path is not None and self._store_path.exists():
@@ -55,8 +58,20 @@ class Repository:
         try:
             raw = json.loads(self._store_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
-            # A corrupt store must never crash startup — begin empty instead.
-            logging.error("Corrupt store at %s: %s. Starting empty.", self._store_path, exc)
+            # Back up the corrupt file before starting empty so data can be recovered
+            # manually. The original is moved, not deleted.
+            bak = self._store_path.with_name(self._store_path.name + ".corrupt." + str(int(os.path.getmtime(str(self._store_path)))))
+            try:
+                shutil.move(str(self._store_path), str(bak))
+                logging.error(
+                    "Corrupt store at %s backed up to %s: %s. Starting empty.",
+                    self._store_path, bak, exc,
+                )
+            except OSError as bak_exc:
+                logging.error(
+                    "Corrupt store at %s (backup failed: %s): %s. Starting empty.",
+                    self._store_path, bak_exc, exc,
+                )
             return
         for coll_name, (model_name, key) in _PERSIST_COLLECTIONS.items():
             coll = getattr(self, coll_name)
@@ -68,14 +83,15 @@ class Repository:
                     obj = _MODEL_BY_NAME[model_name](**item["data"])
                     coll[getattr(obj, key)] = obj
                     success_count += 1
-                except Exception:
-                    continue
-            if total_count > 0:
+                except Exception as exc:
+                    logging.warning(
+                        "Skipping corrupt record in collection '%s': %s",
+                        coll_name, exc,
+                    )
+            if total_count > 0 and success_count < total_count:
                 logging.warning(
-                    "Loaded %d/%d records from collection '%s'",
-                    success_count,
-                    total_count,
-                    coll_name,
+                    "Loaded %d/%d records from collection '%s' (%d corrupt records skipped)",
+                    success_count, total_count, coll_name, total_count - success_count,
                 )
         self.metrics = raw.get("metrics", {}) or {}
         if not isinstance(self.metrics, dict):
@@ -86,6 +102,9 @@ class Repository:
         self.research_records = raw.get("research_records", {}) or {}
         if not isinstance(self.research_records, dict):
             self.research_records = {}
+        self.open_approvals = raw.get("open_approvals", {}) or {}
+        if not isinstance(self.open_approvals, dict):
+            self.open_approvals = {}
 
     def _persist(self) -> None:
         """Write the whole store to disk atomically. Caller must hold ``self._lock``."""
@@ -101,6 +120,7 @@ class Repository:
         payload["metrics"] = self.metrics
         payload["events"] = self.events
         payload["research_records"] = self.research_records
+        payload["open_approvals"] = self.open_approvals
         self._store_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._store_path.with_name(self._store_path.name + ".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
@@ -109,6 +129,10 @@ class Repository:
     def _save(self) -> None:
         with self._lock:
             self._persist()
+
+    def persist_now(self) -> None:
+        """Public persist — call after modifying non-model-backed state (e.g. open_approvals)."""
+        self._save()
 
     def next_id(self, prefix: str) -> str:
         return f"{prefix}-{uuid4().hex[:12]}"

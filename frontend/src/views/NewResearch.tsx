@@ -670,13 +670,20 @@ export function NewResearch({
     setBusy(true);
     setError("");
     try {
-      // Keep top-level model/fe for backward-compatible display; full config lives in inner_loop.
+      // inner_loop is the single source of truth for model/fe/agent_cli/collaboration;
+      // top-level duplicates are only kept in the backend as a fallback for legacy payloads.
       const payload: LaunchConfig = {
         audit_threshold: config.audit_threshold,
         max_outer_iters: config.max_outer_iters,
+        inner_loop: {
+          ...inner,
+          collaboration_mode: inner.collaboration_mode || "autonomous",
+          agent_cli: inner.mode === "agent" ? (inner.agent_cli ?? null) : null,
+        },
+        // Legacy fallback fields — kept for backward compat with older backend versions that
+        // construct InnerLoopConfig from cfg.model/cfg.fe when cfg.inner_loop is missing.
         model: inner.model,
         fe: inner.fe === "rich",
-        inner_loop: { ...inner, collaboration_mode: inner.collaboration_mode || "autonomous" },
         agent_cli: inner.mode === "agent" ? (inner.agent_cli ?? null) : null,
       };
       const r = await launchBenchmarkTask(selected.task_id, payload, !autoRun);
@@ -818,13 +825,18 @@ export function NewResearch({
           </div>
 
           <div className="row" style={{ marginTop: 16, justifyContent: "flex-end", gap: 10 }}>
-            <label className="tool-item" style={{ marginRight: "auto" }}>
-              <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} />
-              <span>立即运行完整实验</span>
-            </label>
-            <span className="muted small" style={{ marginRight: 10, maxWidth: 200 }}>
-              取消勾选可先<b>调试内/外循环</b>，调试通过后再从仪表盘启动完整实验。
-            </span>
+            <div style={{ marginRight: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+              <label className="tool-item">
+                <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} />
+                <span><b>立即运行完整实验</b></span>
+              </label>
+              <span className="muted small" style={{ paddingLeft: 24 }}>
+                {autoRun
+                  ? "创建后自动启动双循环：内循环实验 → 外审计验证 → 递归改进，直到通过或被预算耗尽。"
+                  : "仅创建研究任务（状态：已请求）。可在仪表盘「调试」面板中先验证内/外循环，确认无误后再手动启动。"
+                }
+              </span>
+            </div>
             <button className="btn" onClick={onCancel}>
               取消
             </button>

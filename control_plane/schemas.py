@@ -31,6 +31,20 @@ class DualLoopRequest(BaseModel):
     agent_inner: bool = False
 
 
+class EvolutionRequest(BaseModel):
+    """Body for the evolutionary-search driver (Phase 3 parallel population search)."""
+
+    inner_capability: str = "kaggle_eval"
+    inner_params: dict[str, Any] = Field(default_factory=dict)
+    audit_params: dict[str, Any] = Field(default_factory=dict)
+    population_size: int = 4
+    generations: int = 2
+    max_workers: int = 4
+    novelty_threshold: float = 0.92
+    budget: dict[str, Any] = Field(default_factory=dict)
+    seed: int = 42
+
+
 class InnerLoopConfig(BaseModel):
     """Researcher-facing configuration of the *inner research loop*.
 
