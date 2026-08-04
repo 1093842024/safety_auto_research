@@ -83,6 +83,17 @@ class OpenMLETaskAdapter(Task):
         target = self.cfg.target
         id_col = self.cfg.id_col
 
+        # P2-4 fix: numeric target labels pass through unchanged; string / object
+        # (categorical) labels are label-encoded into stable ints so the sklearn
+        # pipelines and the int-based submission comparison work. The encoded target
+        # is also written into train.csv, so operator programs train/predict in the
+        # same code space (previously `astype(int)` on object dtype raised ValueError).
+        if not pd.api.types.is_numeric_dtype(df[target]):
+            from sklearn.preprocessing import LabelEncoder
+
+            le = LabelEncoder()
+            df = df.assign(**{target: le.fit_transform(df[target].astype(str))})
+
         # Build an 80/20 fit/eval split; eval ground truth is held by the task.
         rng = np.random.default_rng(self.cfg.random_state)
         idx = np.arange(len(df))
@@ -241,7 +252,15 @@ class OpenMLETaskAdapter(Task):
                     AUX_EVAL_INFO: {"exit_code": exit_code},
                 }
             else:
-                preds = merged[f"{target}_pred"].astype(int).values
+                try:
+                    preds = merged[f"{target}_pred"].astype(int).values
+                except (ValueError, TypeError):
+                    outcome = {
+                        TEST_FITNESS: None,
+                        VALID_SOLUTION: False,
+                        VALID_SOLUTION_FEEDBACK: "cannot convert id-aligned predictions to int (missing/NaN preds)",
+                        AUX_EVAL_INFO: {"exit_code": exit_code},
+                    }
         else:
             # Fallback: positional alignment — validate shape before comparing
             if target not in sub.columns:

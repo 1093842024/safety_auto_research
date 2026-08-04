@@ -205,7 +205,7 @@ def mutate(
     """Single-point mutation on the editable surface (bounded edit, Self-Harness)."""
 
     params = dict(parent.params)
-    editable = [k for k in surface if k in params or True]
+    editable = [k for k in surface if k in params]
     key = rng.choice(editable)
     allowed = [v for v in surface[key] if v != params.get(key)]
     if allowed:
@@ -433,7 +433,7 @@ class IslandModel:
         evaluated = [c for c in self.all_candidates() if c.fitness is not None]
         return max(evaluated, key=lambda c: c.fitness or 0.0) if evaluated else None
 
-    def migrate(self, top_k: int = 1, current_generation: int | None = None) -> None:
+    def migrate(self, top_k: int = 1, current_generation: int | None = None, archive: Any = None) -> None:
         ranked = sorted(
             (c for c in self.all_candidates() if c.fitness is not None),
             key=lambda c: c.fitness or 0.0, reverse=True,
@@ -455,8 +455,20 @@ class IslandModel:
                     code=champ.code,
                     operator=champ.operator,
                     parent_ids=list(champ.parent_ids or [champ.candidate_id]),
+                    # P2-6 fix: carry the champion's known fitness/metrics and mark
+                    # the clone evaluated so it is imported as a known-good parent
+                    # on the destination island (not silently re-evaluated).
+                    fitness=champ.fitness,
+                    metrics=dict(champ.metrics or {}),
+                    status="evaluated",
                 )
                 isl.append(clone)
+                # P2-6 fix: register the clone in the archive so the exact-code
+                # novelty filter (archive.list_by_kind(..., "program")) can de-dup
+                # against it; without this, migrated champions could seed duplicate
+                # programs across islands.
+                if archive is not None:
+                    archive.add(clone)
 
 
 # ---------------------------------------------------------------------- archive

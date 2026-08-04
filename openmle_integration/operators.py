@@ -21,6 +21,7 @@ external audit (``layer_11``) or the meta-loop (``layer_09``).
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from dataclasses import dataclass, field
@@ -97,6 +98,16 @@ def _fit_predict(tail: str) -> str:
     ) + tail
 
 
+def _hash_int(text: Optional[str]) -> int:
+    """Deterministic, content-derived seed so the offline operators vary their output
+    by the parent / current program (instead of emitting byte-identical templates that
+    the exact-code novelty filter would reject). Uses md5 (not ``hash()``) so the seed is
+    stable across processes / runs.
+    """
+
+    return int(hashlib.md5((text or "").encode("utf-8")).hexdigest(), 16)
+
+
 # Diverse base models for the seed population (the "model space" the Draft operator
 # explores offline; a real LLM backend would explore architectures freely).
 _DRAFT_MODELS = [
@@ -114,22 +125,38 @@ def _draft_program(target: str, id_col: str, variant: int = 0) -> str:
     ) + _fit_predict("")
 
 
-def _improve_program(target: str, id_col: str, feedback: Optional[str]) -> str:
-    # Richer model family + gradient boosting; feedback is surfaced as a code comment
-    # so a real LLM backend would see it, while the offline backend stays deterministic.
+def _improve_program(
+    target: str, id_col: str, feedback: Optional[str], current_program: Optional[str] = None
+) -> str:
+    # Vary the model family / capacity by the parent's identity (current_program) so
+    # each improve step produces a distinct, parent-dependent program instead of a
+    # byte-identical template (which the exact-code novelty filter would reject).
+    h = _hash_int(current_program)
+    family = (
+        "GradientBoostingClassifier(n_estimators=300, learning_rate=0.05, random_state=42)",
+        "RandomForestClassifier(n_estimators=300, max_depth=10, random_state=7)",
+        "GradientBoostingClassifier(n_estimators=200, random_state=42)",
+    )[h % 3]
     note = f"# improvement feedback: {TemplateOperatorBackend._sanitize_comment(feedback)}\n" if feedback else ""
+    note += f"# improved-from parent(hash={h & 0xffff:04x})\n"
     return _header(target, id_col) + note + (
-        "clf = Pipeline([('pre', pre), ('clf', GradientBoostingClassifier(n_estimators=200, random_state=42))])\n"
+        f"clf = Pipeline([('pre', pre), ('clf', {family})])\n"
     ) + _fit_predict("")
 
 
-def _debug_program(target: str, id_col: str, feedback: Optional[str]) -> str:
+def _debug_program(
+    target: str, id_col: str, feedback: Optional[str], current_program: Optional[str] = None
+) -> str:
     # Robust variant: wraps training in try/except and falls back to the majority
-    # class, so a previously buggy program becomes a valid solution.
+    # class. The parent's identity seeds the random_state so each debug step yields a
+    # distinct (still-valid) program rather than a byte-identical template.
+    h = _hash_int(current_program)
+    rs = (0, 7, 42, 123)[h % 4]
     note = f"# debug feedback: {TemplateOperatorBackend._sanitize_comment(feedback)}\n" if feedback else ""
+    note += f"# debugged-from parent(hash={h & 0xffff:04x})\n"
     return _header(target, id_col) + note + (
         "try:\n"
-        "    clf = Pipeline([('pre', pre), ('clf', RandomForestClassifier(n_estimators=200, random_state=42))])\n"
+        f"    clf = Pipeline([('pre', pre), ('clf', RandomForestClassifier(n_estimators=200, random_state={rs}))])\n"
         "    clf.fit(X, y)\n"
         "    preds = clf.predict(X_eval)\n"
         "except Exception as exc:\n"
@@ -141,13 +168,24 @@ def _debug_program(target: str, id_col: str, feedback: Optional[str]) -> str:
     )
 
 
-def _crossover_program(target: str, id_col: str) -> str:
-    # Blend two parent pipelines (RF + GBM) by averaging predicted probabilities --
-    # a deterministic offline analogue of dojo's Crossover combining two solutions.
-    # A real LLM backend would synthesize from the two parents' actual source.
+def _crossover_program(
+    target: str, id_col: str, parent_programs: Tuple[str, ...] = ()
+) -> str:
+    # Blend two parent pipelines (RF + GBM) by averaging predicted probabilities -- a
+    # deterministic offline analogue of dojo's Crossover. Both parents' identities seed
+    # the two random_states, so different parent pairs yield distinct (novel) programs
+    # instead of one byte-identical blend. A real LLM backend synthesizes from the
+    # parents' actual source.
+    h = _hash_int("\n---\n".join(parent_programs))
+    rs1 = (0, 7, 42, 123)[h % 4]
+    rs2 = (0, 7, 42, 123)[(h >> 4) % 4]
+    parents_note = "".join(
+        f"#   parent[{i}] src_len={len(p)}\n" for i, p in enumerate(parent_programs[:2])
+    )
     return _header(target, id_col) + (
-        "rf = Pipeline([('pre', pre), ('clf', RandomForestClassifier(n_estimators=200, random_state=42))])\n"
-        "gbm = Pipeline([('pre', pre), ('clf', GradientBoostingClassifier(n_estimators=200, random_state=42))])\n"
+        f"# crossover of {len(parent_programs)} parent(s):\n{parents_note}"
+        f"rf = Pipeline([('pre', pre), ('clf', RandomForestClassifier(n_estimators=200, random_state={rs1}))])\n"
+        f"gbm = Pipeline([('pre', pre), ('clf', GradientBoostingClassifier(n_estimators=200, random_state={rs2}))])\n"
         "rf.fit(X, y); gbm.fit(X, y)\n"
         "p1 = rf.predict_proba(X_eval); p2 = gbm.predict_proba(X_eval)\n"
         "avg = (p1 + p2) / 2.0\n"
@@ -174,11 +212,11 @@ class TemplateOperatorBackend:
         if prompt.operator == "draft":
             return _draft_program(t, i, variant=prompt.variant)
         if prompt.operator == "improve":
-            return _improve_program(t, i, prompt.feedback)
+            return _improve_program(t, i, prompt.feedback, prompt.current_program)
         if prompt.operator == "debug":
-            return _debug_program(t, i, prompt.feedback)
+            return _debug_program(t, i, prompt.feedback, prompt.current_program)
         if prompt.operator == "crossover":
-            return _crossover_program(t, i)
+            return _crossover_program(t, i, prompt.parent_programs)
         raise ValueError(f"unknown operator {prompt.operator!r}")
 
 

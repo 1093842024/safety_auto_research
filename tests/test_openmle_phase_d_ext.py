@@ -158,6 +158,7 @@ class ApiBackendTests(unittest.TestCase):
             out = draft_program(
                 backend, target="Survived", id_col="PassengerId",
                 task_description="classify titanic",
+                caller_stage="inner_program_evolution",
             )
         self.assertEqual(out, program)
         # inner-loop guard is still enforced (no forbidden caller)

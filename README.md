@@ -309,9 +309,10 @@ cd /Users/glennge/work/github/AI_research
 - `doc/dual_loop_upgrade_plan.md` — 双循环升级方案
 - `doc/harness_gap_analysis_and_upgrade_plan.md` — **Harness 工程差距分析与三期升级规划**（对照 Weng 综述，三期全部落地）
 - `doc/code_review_2026-07-30_round3.md` — 全项目代码审查 Round3（32 项缺陷 + 批 1→4 修复执行结果）
+- `doc/code_review_2026-08-04.md` — 全项目代码审查（P1×4 + P2×12 修复执行记录 + 五.3 补测试 5 项落地）
 - `doc/benchmark_suites_integration.md` — 基准套件（SAB / MLE-bench）集成说明
 - `doc/benchmark_tasks.md` — **内置 18 个研究任务的逐任务详解**（定义/数据/模型/指标/基线/性能）
 
 ---
 
-*最后更新：2026-07-30 · Harness 工程三期升级（ACE Playbook / 策略可证伪闭环 / held-out 审计 / 真实 LLM judge / 经验生命周期 / 多维预算 / 并行进化搜索）+ 全项目代码审查 Round3 修复（32 项缺陷批 1→4）+ 基准套件集成 + SSE 实时进度 + 实验对比；测试基线 132 passed、前端 tsc 0 errors。*
+*最后更新：2026-08-04 · 全项目代码审查（P1×4 程序循环方向 / 算子消费父程序 / 榜单 lower-is-better 回退 / reward NaN + P2×12 功能与隔离加固）+ 五.3 补测试 5 项落地；回归 177 passed + 补测试 49 passed，前端 tsc 0 errors。详见 `doc/code_review_2026-08-04.md`。*

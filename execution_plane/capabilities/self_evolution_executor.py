@@ -161,9 +161,17 @@ class SelfEvolutionExecutor(StageExecutor):
 
         # Falsifiable prediction (AHE decision observability): what we expect this edit
         # to do, verified by the orchestrator against the NEXT inner-loop metric.
+        # P2-10 fix: derive the predicted direction from the task's optimization
+        # direction (op) rather than hardcoding "higher". For lower-is-better tasks
+        # (op == "le") an improvement means the metric *decreases*, so the prediction
+        # must claim "lower" or the orchestrator's verification would be inverted.
+        _run = sdk.service._repo.get_workflow_run(stage_run.run_id)
+        _obj = getattr(_run, "objective_snapshot", None) or {}
+        _op = str(_obj.get("op", "ge") or "ge")
+        _direction = "lower" if _op == "le" else "higher"
         prediction = {
             "metric": "accuracy",
-            "direction": "higher",
+            "direction": _direction,
             "baseline": mechanism["best_accuracy"],
             "min_delta": min_delta,
             "tolerance": VERIFY_TOLERANCE,

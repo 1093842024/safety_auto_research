@@ -1250,6 +1250,19 @@ class ClosedLoopOrchestrator:
                     "best_candidate": _cand_dict(champion),
                 }
 
+            # P2-12 fix: the audit above incremented the capability-call budget
+            # (run_capability). The per-generation check at the top of the loop ran
+            # BEFORE the audit, so re-check here to prevent one generation from
+            # overrunning the cap by a single extra audit invocation.
+            over = _budget_exceeded()
+            if over:
+                self.sdk.record_metric(run_id, "budget.exceeded", 1.0, tags={"reason": over})
+                _emit("finished", reason="budget_exceeded", detail=over)
+                return {
+                    **self._summary(run_id, steps, "exited_budget", detail=over),
+                    "best_candidate": _cand_dict(archive.best(run_id)),
+                }
+
             # ---- breed the next generation ----
             if gen + 1 < generations:
                 archived_params = [c.params for c in archive.list(run_id)]
@@ -1421,19 +1434,26 @@ class ClosedLoopOrchestrator:
                     state, outcome = adapter.step_task(state, c.code)
                     fitness = outcome.get(TEST_FITNESS)
                     valid = bool(outcome.get(VALID_SOLUTION, False))
-                    c.fitness = float(fitness) if (valid and fitness is not None) else None
+                    raw_fitness = float(fitness) if (valid and fitness is not None) else None
+                    # P1-1 fix: normalize to higher-is-better so that IslandModel.best /
+                    # migrate / _breed (all select by c.fitness with reverse=True) are
+                    # correct for lower-is-better objectives (op == "le"). The real
+                    # objective value is kept in metrics["primary"] for audit / display.
+                    # NOTE: _primary_score expects the metrics *dict* (reads "accuracy"
+                    # then "primary"), so we build c.metrics first and pass it through.
                     c.metrics = {
-                        "primary": c.fitness,
+                        "primary": raw_fitness,
                         "accuracy": fitness,
                         "valid": valid,
                         "feedback": outcome.get(VALID_SOLUTION_FEEDBACK, ""),
                     }
+                    c.fitness = _primary_score(c.metrics, op) if raw_fitness is not None else None
                     c.status = "evaluated" if valid else "error"
                     archive.update(
                         c.candidate_id, fitness=c.fitness, metrics=c.metrics, status=c.status
                     )
                     self.sdk.record_metric(
-                        run_id, "program_fitness", c.fitness or 0.0,
+                        run_id, "program_fitness", float(c.metrics.get("primary") or 0.0),
                         tags={"operator": c.operator or "draft", "gen": str(c.generation)},
                     )
                     if self.state_store is not None:
@@ -1444,7 +1464,10 @@ class ClosedLoopOrchestrator:
                             ),
                             evidence_refs=[],
                             branch=c.branch,
-                            score=max(0.0, min(1.0, c.fitness or 0.0)),
+                            # score from the *raw* objective value (metrics["primary"])
+                            # so lower-is-better (op=="le") candidates still get a
+                            # meaningful 0..1 observation score instead of 0.0.
+                            score=max(0.0, min(1.0, (c.metrics or {}).get("primary") or 0.0)),
                             run_id=run_id,
                             node_kind="program",
                         )
@@ -1457,21 +1480,31 @@ class ClosedLoopOrchestrator:
                         "best_candidate": None,
                     }
                 archive.update(champion.candidate_id, status="champion")
+                _raw = champion.metrics.get("primary")
+                _raw_s = f"{_raw:.4f}" if isinstance(_raw, (int, float)) else str(_raw)
                 steps.append({
                     "stage": f"program_population[{gen}]",
                     "evaluated": len([c for c in model.all_candidates() if c.status == "evaluated"]),
                     "champion": champion.candidate_id,
                     "champion_fitness": champion.fitness,
                     "champion_operator": champion.operator,
-                    "detail": f"gen{gen}: best={champion.fitness:.4f} ({champion.operator})",
+                    "detail": f"gen{gen}: best={_raw_s} ({champion.operator})",
                 })
                 _emit("generation_done", generation=gen, champion_fitness=champion.fitness)
 
                 # ---- generation champion faces the frozen external audit ----
                 if audit:
+                    # P2-11 fix: the champion's metrics dict carries a `feedback`
+                    # field (the adapter's raw stderr / diagnostic text). That is not a
+                    # metric and must not leak into the frozen audit input (which is
+                    # allowed to see only curated champion metrics, never code, identity,
+                    # or raw diagnostics -- isolation invariant).
+                    _audit_metrics = {
+                        k: v for k, v in (champion.metrics or {}).items() if k != "feedback"
+                    }
                     audit_input = {
                         "objective": base_goal,
-                        "result_metrics": champion.metrics,
+                        "result_metrics": _audit_metrics,
                         "result_report_ref": None,
                         "result_gate_passed": True,
                         "result_real_eval": True,
@@ -1501,13 +1534,26 @@ class ClosedLoopOrchestrator:
                             "best_candidate": _cand_dict(champion),
                         }
 
+                # P2-12 fix: the audit above incremented the capability-call budget
+                # (run_capability). The per-generation check at the top of the loop ran
+                # BEFORE the audit, so re-check here to prevent one generation from
+                # overrunning the cap by a single extra audit invocation.
+                over = _budget_exceeded()
+                if over:
+                    self.sdk.record_metric(run_id, "budget.exceeded", 1.0, tags={"reason": over})
+                    _emit("finished", reason="budget_exceeded", detail=over)
+                    return {
+                        **self._summary(run_id, steps, "exited_budget", detail=over),
+                        "best_candidate": _cand_dict(model.best() or champion),
+                    }
+
                 # ---- breed the next generation (Improve/Debug + Crossover) ----
                 if gen + 1 < generations:
                     self._breed_program_generation(
                         model, backend, gen + 1, rng, target, id_col, feature_cols,
                         task_description, novelty_threshold, archive, run_id, op,
                     )
-                    model.migrate(top_k=1, current_generation=gen + 1)
+                    model.migrate(top_k=1, current_generation=gen + 1, archive=archive)
         finally:
             try:
                 adapter.close(state)
@@ -1587,9 +1633,13 @@ class ClosedLoopOrchestrator:
                 ))
             archived_codes = [c.code for c in archive.list_by_kind(run_id, "program") if c.code]
             kept = _evo_novelty_filter(children, archived_codes=archived_codes, threshold=novelty_threshold)
-            # diversity-collapse guard: never let novelty filtering kill the whole island
-            if not kept:
-                kept = list(children)
+            # diversity-collapse guard: never let novelty filtering leave the island
+            # empty, BUT do not reintroduce the entire (duplicate) child set -- that
+            # would defeat the novelty filter. Fall back to a single best child so the
+            # island survives while keeping diversity intact (the elite parent is added
+            # just below regardless).
+            if not kept and children:
+                kept = [max(children, key=lambda c: c.fitness or 0.0)]
             for c in children:
                 c.branch = f"gen{generation}.isl{idx}"
                 archive.add(c)

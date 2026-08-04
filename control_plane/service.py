@@ -45,6 +45,15 @@ _STAGE_EVENT_TYPE: dict[StageStatus, EventType] = {
 # All workflow terminal statuses collapse to a single "run closed" signal;
 # the specific outcome is captured in the event's `to_status` field.
 _WORKFLOW_TERMINAL_TYPE = EventType.WORKFLOW_FINISHED
+_TERMINAL_STATUSES = frozenset(
+    {
+        WorkflowStatus.SUCCEEDED,
+        WorkflowStatus.FAILED,
+        WorkflowStatus.EXITED_BUDGET,
+        WorkflowStatus.EXITED_CONVERGED,
+        WorkflowStatus.CANCELLED,
+    }
+)
 
 
 class NotFoundError(Exception):
@@ -156,20 +165,41 @@ class ControlPlaneService:
         self._emit_workflow_status_change(run, WorkflowStatus.CANCELLED, _WORKFLOW_TERMINAL_TYPE)
         return run
 
+    @staticmethod
+    def _event_type_for_status(status: WorkflowStatus) -> EventType:
+        """Map a workflow status to the EventType it should emit (P2-8).
+
+        Terminal / completed states emit WORKFLOW_FINISHED (consistent with
+        ``cancel_workflow_run``); RUNNING emits WORKFLOW_STARTED; everything else
+        (requested / queued / waiting_approval) emits WORKFLOW_REQUESTED.
+        """
+        if status == WorkflowStatus.RUNNING:
+            return EventType.WORKFLOW_STARTED
+        if status in _TERMINAL_STATUSES:
+            return _WORKFLOW_TERMINAL_TYPE
+        return EventType.WORKFLOW_REQUESTED
+
     def set_run_status(
         self,
         run_id: str,
         status: str,
-        event_type: EventType = EventType.WORKFLOW_REQUESTED,
+        event_type: EventType | None = None,
         detail: str | None = None,
     ) -> WorkflowRun:
         """Force/complete a run's workflow status (used by async dual-loop driver).
 
         ``detail`` lets the async driver attach a human-readable reason for a terminal
         state (e.g. why an agent-mode run was rejected because no remote agent is wired).
+
+        P2-8 fix: when the caller does not pass an explicit ``event_type``, the emitted
+        EventType is derived from ``status`` (see :meth:`_event_type_for_status`). The
+        old default of ``WORKFLOW_REQUESTED`` meant terminal states (failed /
+        exited_budget / exited_converged / succeeded / cancelled) were logged as
+        REQUESTED events, distorting observability.
         """
         run = self._require_workflow_run(run_id)
-        self._emit_workflow_status_change(run, WorkflowStatus(status), event_type)
+        et = event_type or self._event_type_for_status(WorkflowStatus(status))
+        self._emit_workflow_status_change(run, WorkflowStatus(status), et)
         if detail is not None:
             run.status_detail = detail
             self._repo.put_workflow_run(run)
@@ -213,24 +243,36 @@ class ControlPlaneService:
         if not scores:
             return None
 
-        def _best(vals: list[float]) -> float:
+        def _best_dir(vals: list[float]) -> float:
+            # Apply the task's optimization direction to the REAL objective.
             return max(vals) if direction == "higher" else min(vals)
 
-        # Prefer an exact (prefix-insensitive) match on the task's declared metric.
+        def _best_higher(vals: list[float]) -> float:
+            # Accuracy-like metrics are always higher-is-better; never invert direction.
+            return max(vals)
+
+        # 1) exact (prefix-insensitive) match on the task's declared metric
         target: float | None = None
         for nm, vals in scores.items():
             base = nm.lower().replace("eval.", "")
             if base == metric_name or nm.lower() == metric_name:
-                target = _best(vals)
+                target = _best_dir(vals)
                 break
-        if target is None:  # fall back to accuracy-like, then any available metric
+        # 2) the executor's "primary" metric carries the real objective value -> use it
+        #    (direction-aware) before falling back to accuracy (P1-3 fix: avoids picking
+        #    the WORST run for lower-is-better tasks whose declared metric isn't a key).
+        if target is None and "primary" in scores:
+            target = _best_dir(scores["primary"])
+        # 3) accuracy-like fallback (always higher-is-better; never invert direction)
+        if target is None:
             for cand in ("accuracy", "eval.accuracy", "cv_accuracy", "score"):
                 if cand in scores:
-                    target = _best(scores[cand])
+                    target = _best_higher(scores[cand])
                     break
+        # 4) last resort: any available metric, direction-aware
         if target is None:
             nm = next(iter(scores))
-            target = _best(scores[nm])
+            target = _best_dir(scores[nm])
 
         artifacts = self._repo.list_artifacts(run_id)
         artifact_ids = [a.artifact_id for a in artifacts]

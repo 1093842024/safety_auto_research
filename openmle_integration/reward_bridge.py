@@ -23,6 +23,8 @@ clamped to [min_reward, max_reward].
 
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
@@ -68,6 +70,10 @@ class RewardConfig:
     baseline: float = 0.0
     min_reward: float = -1.0
     max_reward: float = 5.0
+    # P2-1 fix: whether a *higher* fitness is better. For lower-is-better objectives
+    # (op == "le", e.g. log_loss / rmse) set this to False so a genuine improvement
+    # (fitness decreasing) yields positive improvement reward instead of 0.
+    maximize: bool = True
 
 
 def _code_complexity(program: Optional[str]) -> float:
@@ -106,11 +112,20 @@ def reward_func(
     w = cfg.weights
 
     validity = cfg.validity_bonus if valid else 0.0
-    fit = fitness if fitness is not None else 0.0
+    # Guard NaN / None fitness so a corrupt metric can't silently poison the RL signal
+    # (max/min propagate NaN, which would corrupt downstream training).
+    if fitness is None or (isinstance(fitness, (int, float)) and math.isnan(fitness)):
+        fit = 0.0
+    else:
+        fit = float(fitness)
     improvement = 0.0
-    if prev_fitness is not None:
-        improvement = max(0.0, (fit - prev_fitness) * cfg.improvement_scale)
-    diversity = max(0.0, min(1.0, novelty)) * cfg.diversity_scale
+    if prev_fitness is not None and not math.isnan(prev_fitness):
+        # P2-1 fix: sign the delta by the optimization direction. For lower-is-better
+        # objectives (maximize=False) a *decrease* in fitness is the real improvement.
+        signed = (fit - prev_fitness) if cfg.maximize else (prev_fitness - fit)
+        improvement = max(0.0, signed * cfg.improvement_scale)
+    nov = novelty if (novelty is not None and not math.isnan(novelty)) else 0.0
+    diversity = max(0.0, min(1.0, nov)) * cfg.diversity_scale
     parsimony = _code_complexity(program) * cfg.complexity_penalty_per_kloc
 
     total = (

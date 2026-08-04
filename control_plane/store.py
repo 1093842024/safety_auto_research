@@ -193,8 +193,18 @@ class Repository:
         with self._lock:
             if run_id is None:
                 return list(self.artifacts.values())
-            # Artifacts are referenced by stage_run_id via lineage; filter by producer match.
-            return [a for a in self.artifacts.values() if run_id in str(a.producer_ref)]
+            # P2-9 fix: exact-match against this run's own stage_run_ids (plus the
+            # workflow run_id itself) instead of a *substring* scan. A substring match
+            # leaks artifacts from unrelated runs whose stage_run_id merely contains
+            # `run_id` as a substring (e.g. "run_1" vs "run_10_stage_2"). Inlining the
+            # stage-id collection avoids re-acquiring the non-reentrant lock.
+            stage_ids = {
+                s.stage_run_id
+                for s in self.stage_runs.values()
+                if getattr(s, "run_id", None) == run_id
+            }
+            allowed = stage_ids | {run_id}
+            return [a for a in self.artifacts.values() if str(a.producer_ref) in allowed]
 
     # ----- LessonCard (spec §9.4 register_lesson -> reinjection) -----
     def put_lesson(self, lesson: Any) -> None:
