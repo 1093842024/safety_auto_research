@@ -10,7 +10,11 @@
         "model_checkpoint",
         "eval_report",
         "attack_report",
-        "lesson_card"
+        "lesson_card",
+        "audit_report",
+        "improvement_report",
+        "hypothesis_tree",
+        "experience_bank"
       ],
       "title": "ArtifactType",
       "type": "string"

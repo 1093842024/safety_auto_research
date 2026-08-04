@@ -1,0 +1,71 @@
+{
+  "additionalProperties": false,
+  "description": "Constraint-wise external audit of an inner-loop answer (dual-loop outer loop).",
+  "properties": {
+    "audit_confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Audit Confidence",
+      "type": "number"
+    },
+    "audit_id": {
+      "title": "Audit Id",
+      "type": "string"
+    },
+    "audited_target": {
+      "title": "Audited Target",
+      "type": "string"
+    },
+    "confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "constraints": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Constraints",
+      "type": "array"
+    },
+    "recommendation": {
+      "title": "Recommendation",
+      "type": "string"
+    },
+    "recoverable": {
+      "default": true,
+      "title": "Recoverable",
+      "type": "boolean"
+    },
+    "rejected_candidates": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Rejected Candidates",
+      "type": "array"
+    },
+    "report_ref": {
+      "title": "Report Ref",
+      "type": "string"
+    },
+    "unresolved_claims": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unresolved Claims",
+      "type": "array"
+    }
+  },
+  "required": [
+    "audit_id",
+    "audited_target",
+    "confidence",
+    "audit_confidence",
+    "recommendation",
+    "report_ref"
+  ],
+  "title": "AuditReport",
+  "type": "object"
+}

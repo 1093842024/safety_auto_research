@@ -60,6 +60,9 @@ class PopulationOpsTest(unittest.TestCase):
         picks = [select_parent(pop, rng=rng).candidate_id for _ in range(300)]
         self.assertGreater(picks.count(pop[0].candidate_id), picks.count(pop[2].candidate_id))
         # after the top candidate produces many offspring it loses its edge
+        # Reset accumulated offspring counts from round 1, then impose a heavy penalty
+        for c in pop:
+            c.offspring_count = 0
         pop[0].offspring_count = 50
         picks2 = [select_parent(pop, rng=rng).candidate_id for _ in range(300)]
         self.assertLess(picks2.count(pop[0].candidate_id), picks.count(pop[0].candidate_id))

@@ -187,6 +187,7 @@ class HypothesisNode(ContractModel):
     score: float = Field(ge=0.0, le=1.0, default=0.0)
     status: str = "active"
     branch: str = "main"
+    node_kind: str = "config"  # "config" | "program" (program = OpenMLE atomic-operator node)
     run_id: str | None = None  # owning workflow run (per-run HypothesisTree isolation)
 
 

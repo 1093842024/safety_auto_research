@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { getEvents } from "../api/client";
+import { getEvents, resolveApproval } from "../api/client";
 
 /** HITL approval console: resolve open approval gates (risk-tiered). */
 export function ApprovalConsole({ runId }: { runId: string }) {
@@ -25,11 +25,7 @@ export function ApprovalConsole({ runId }: { runId: string }) {
   const resolve = async (approvalId: string, resolution: "approved" | "rejected") => {
     setBusy(approvalId);
     try {
-      await fetch(`/api/workflow-runs/${runId}/resolve-approval`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resolution, resolved_by: "frontend_user" }),
-      });
+      await resolveApproval(runId, resolution);
       await load();
     } catch (err: any) {
       console.warn("[Polling] Failed to fetch data for ApprovalConsole:", err);

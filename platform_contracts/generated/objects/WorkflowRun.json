@@ -74,6 +74,18 @@
     "status": {
       "$ref": "#/$defs/WorkflowStatus"
     },
+    "status_detail": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Status Detail"
+    },
     "target_id": {
       "title": "Target Id",
       "type": "string"

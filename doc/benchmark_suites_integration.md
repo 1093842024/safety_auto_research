@@ -26,7 +26,9 @@
   - 最佳独立：Claude-3.5-Sonnet + self-debug **SR 32.4%**（带专家知识 34.3%）
   - o1-preview + self-debug **SR 42.2%**（>10× 成本）← 目录条目 reference
 - **数据获取**：HF annotation sheet（公开）+ GitHub README 的 SharePoint zip
-  （datasets/eval_programs/gold_programs/scoring_rubrics，解压密码 `scienceagentbench`，禁止再分发）。
+  （datasets/eval_programs/gold_programs/scoring_rubrics，官方解压密码 `scienceagentbench`，禁止再分发）。
+  本机实际落地的是用户自备的 `benchmark_verified.zip`（整包 ZipCrypto 加密，形态与官方明文不同），
+  用密码解压后已验证结构/接口/端到端流程（详见 `vendor/ScienceAgentBench/benchmark/SAB_EVAL_VERIFICATION.md`）。
 - **污染缓解**：测试数据/标签相对公开源做过修改；verified split 修复假阴性。
 
 ## MLE-bench（arXiv:2410.07095, OpenAI, ICLR 2025）
@@ -41,7 +43,8 @@
   - 后续 SOTA 参考：R&D-Agent+o1 22.4（2025-05）、MLEvolve+Gemini-3-Pro 61.33（2026-02）、Famou-Agent 2.0 64.44
 - **资源规模分析**：推荐 24h / 36 vCPU / 440 GB RAM / A10 24GB；性能随尝试次数与时长预算上升（论文 §3.3/3.4）。
 - **污染分析**：论文验证 GPT-4o 对竞赛讨论的熟悉度与成绩无显著相关 + 代码抄袭检测；
-  官方承认的 12 个泄漏/准备缺陷竞赛已逐条标进 manifest 的 `known_issue` 字段。
+  官方承认的 11 个泄漏/准备缺陷竞赛（标 `excluded`）+ 3 个拥挤排行榜竞赛（标 `noisy_leaderboard`）
+  已逐条标进 manifest 的 `known_issue` / `noisy_leaderboard` 字段。
 - **数据获取**：`pip install -e .`（git-lfs）+ `~/.kaggle/kaggle.json` + `mlebench prepare --lite|--all|-c <id>`；
   评分 `mlebench grade` / `grade-sample`。
 - 与既有条目的关系：`mlevolve.mle_bench` 是本仓库的**运行 harness**（无数据）；`platform.titanic/spaceship`
@@ -60,26 +63,26 @@
 `tests/test_benchmark_suites.py`：18 项（manifest 完整性 102/75、学科与 split 分布、headline 数字
 42.2/32.4/16.9/17.12、污染标记、目录集成、4+ 个 API 端点、已知问题剔除策略）。全量回归 **132 passed**。
 
-## 本地数据落地（2026-07-30）
+## 本地数据落地（2026-07-31）
 
-两个基准的**代码仓库与可再分发数据已拉取到本地** `benchmark_tasks/suites/data/`，供后续研究使用
-（已加入 `.gitignore`，不纳入 git 跟踪）：
+两个基准的**代码仓库、可再分发数据集、以及完整评测数据均已在本地就绪**
+`benchmark_tasks/suites/data/`，供后续研究使用（已加入 `.gitignore`，不纳入 git 跟踪）：
 
 - `vendor/ScienceAgentBench/` — SAB 官方代码仓库（MIT）main 分支，含 `agent.py`、`run_eval.py`、
   `evaluation/harness`、`calculate_metrics.py` 等评估/运行代码。
+- `vendor/ScienceAgentBench/benchmark/` — **SAB 完整评测数据**（2026-07-31 下载+解压+验证完成）：
+  `datasets/`(414 文件/3.8G)、`gold_programs/`(103)、`eval_programs/`(224=110 顶层脚本+`gold_results`)、
+  `scoring_rubrics/`(102)。结构一致性 0 缺失、110 个 eval 脚本语法+接口全过、任务 #92 端到端冒烟测试
+  `success=1`；验证报告见 `vendor/ScienceAgentBench/benchmark/SAB_EVAL_VERIFICATION.md`。
 - `vendor/mle-bench/` — MLE-bench 官方代码仓库 main 分支，含 `mlebench/` 包、`run_agent.py`、
   `experiments/splits/*.txt`、`agents/` 脚手架等（因本机代理拒绝直连 `github.com`，改用经 `gh` token 的
   GitHub Contents API 逐文件重建）。
 - `science_agent_bench_hf/` — SAB HuggingFace 数据集 verified split（102 任务输入，CSV+parquet，可再分发）。
+- `mle_bench_data/` — **已下载 9 个 lite ∩ <100MB ∩ 非已知问题竞赛**（约 3.2GB），详见 DATA_ACQUISITION.md。
 - `*.json` — 任务/竞赛 manifest（已结构化入库）。
 
-**未能自动获取（需手动 / 凭证）**：
-- SAB 完整评测数据（真实数据集 + eval/gold 程序）：密码保护 SharePoint zip，密码 `scienceagentbench`，
-  上游标注**禁止再分发**；需人工登录下载并解压到 `vendor/ScienceAgentBench/benchmark/`。
-- MLE-bench 竞赛数据（~3.3 TB 全量 / lite 较小）：需 `~/.kaggle/kaggle.json` + `mlebench prepare [lite]`；
-  已用正确的 API token 下载 **lite ∩ <100MB ∩ 非已知问题 共 9 个**（约 3.2GB，落 `mle_bench_data/`），详见 DATA_ACQUISITION.md。
-
-获取细节与命令见 `benchmark_tasks/suites/data/DATA_ACQUISITION.md`。
+获取细节、Kaggle 规则手动接受、SAB 评测数据加密解压与验证流程见
+`benchmark_tasks/suites/data/DATA_ACQUISITION.md`。
 
 ## MLE-bench Known-Issues 剔除策略
 

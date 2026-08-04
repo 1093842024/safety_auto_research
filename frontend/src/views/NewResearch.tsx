@@ -8,22 +8,9 @@ import {
   getBenchmarkTasks,
   getProtocol,
   launchBenchmarkTask,
+  CATEGORY_LABELS,
 } from "../api/client";
 import { RegisterTask } from "./RegisterTask";
-
-const CATEGORY_LABELS: Record<string, string> = {
-  model_dev: "模型开发",
-  system_opt: "系统优化",
-  puzzle: "谜题/挑战",
-  cuda: "CUDA 内核",
-  adversarial: "对抗/越狱",
-  efficiency: "效率基准",
-  agent_eval: "科研 Agent 评测",
-  idea_eval: "想法质量评测",
-  tooling: "工具型元评测",
-  platform_native: "平台原生(可实跑)",
-  custom: "自定义注册任务",
-};
 
 // Inner-loop agents may NOT drive the reserved OUTER-loop capabilities (they would
 // let the inner loop judge its own work). Mirror of harness.OUTER_LOOP_RESERVED_CAPS.

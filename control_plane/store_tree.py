@@ -83,6 +83,7 @@ class HypoTreeStore:
         branch: str = "main",
         score: float = 0.0,
         run_id: str | None = None,
+        node_kind: str = "config",
     ) -> HypothesisNode:
         """Add a hypothesis node (Arbor ``observe`` / ``ideate``)."""
 
@@ -95,6 +96,7 @@ class HypoTreeStore:
             branch=branch,
             score=score,
             status="active",
+            node_kind=node_kind,
             run_id=run_id,
         )
         self._nodes[node.node_id] = node

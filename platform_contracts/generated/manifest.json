@@ -1,12 +1,16 @@
 {
   "events": {
+    "AgentStepEvent": "events/AgentStepEvent.json",
     "ApprovalRequiredEvent": "events/ApprovalRequiredEvent.json",
     "ApprovalResolvedEvent": "events/ApprovalResolvedEvent.json",
     "ArtifactPublishedEvent": "events/ArtifactPublishedEvent.json",
     "AttackCompletedEvent": "events/AttackCompletedEvent.json",
+    "AuditCompletedEvent": "events/AuditCompletedEvent.json",
     "BasePlatformEvent": "events/BasePlatformEvent.json",
+    "DebugEvent": "events/DebugEvent.json",
     "DecisionRecordedEvent": "events/DecisionRecordedEvent.json",
     "EvalCompletedEvent": "events/EvalCompletedEvent.json",
+    "ImprovementAppliedEvent": "events/ImprovementAppliedEvent.json",
     "LessonPromotedEvent": "events/LessonPromotedEvent.json",
     "StageStatusChangedEvent": "events/StageStatusChangedEvent.json",
     "WorkflowStatusChangedEvent": "events/WorkflowStatusChangedEvent.json"
@@ -14,9 +18,13 @@
   "objects": {
     "Artifact": "objects/Artifact.json",
     "AttackCampaign": "objects/AttackCampaign.json",
+    "AuditReport": "objects/AuditReport.json",
     "DatasetRelease": "objects/DatasetRelease.json",
     "DecisionRecord": "objects/DecisionRecord.json",
     "EvalSuite": "objects/EvalSuite.json",
+    "ExperienceEntry": "objects/ExperienceEntry.json",
+    "HypothesisNode": "objects/HypothesisNode.json",
+    "ImprovementProposal": "objects/ImprovementProposal.json",
     "LessonCard": "objects/LessonCard.json",
     "ModelVersion": "objects/ModelVersion.json",
     "PolicyPack": "objects/PolicyPack.json",

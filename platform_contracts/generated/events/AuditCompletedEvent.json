@@ -1,0 +1,117 @@
+{
+  "$defs": {
+    "EventType": {
+      "enum": [
+        "program_created",
+        "workflow_requested",
+        "workflow_started",
+        "stage_queued",
+        "stage_started",
+        "artifact_published",
+        "gate_passed",
+        "gate_failed",
+        "eval_completed",
+        "attack_completed",
+        "decision_issued",
+        "lesson_promoted",
+        "approval_required",
+        "approval_resolved",
+        "workflow_finished",
+        "stage_cancelled",
+        "audit_completed",
+        "improvement_applied",
+        "agent_step",
+        "debug_result"
+      ],
+      "title": "EventType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Outer-loop external audit of an inner-loop answer (dual-loop architecture).\n\nImplements AREX-style constraint-wise audit: the objective is decomposed into\ncheckable constraints, each verified/partial/conflict/missing, and the audit emits a\nconfidence ``s`` and a recoverability flag ``v`` that drive the\nAccept / Refine / Restart decision. The auditor runs on an *independent* model/context\nfrom the inner loop to break self-confirmation.",
+  "properties": {
+    "audit_confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Audit Confidence",
+      "type": "number"
+    },
+    "audit_id": {
+      "title": "Audit Id",
+      "type": "string"
+    },
+    "audited_target": {
+      "title": "Audited Target",
+      "type": "string"
+    },
+    "confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "constraints": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Constraints",
+      "type": "array"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "$ref": "#/$defs/EventType",
+      "default": "audit_completed"
+    },
+    "gate_passed": {
+      "default": true,
+      "title": "Gate Passed",
+      "type": "boolean"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "recoverable": {
+      "default": true,
+      "title": "Recoverable",
+      "type": "boolean"
+    },
+    "rejected_candidates": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Rejected Candidates",
+      "type": "array"
+    },
+    "report_ref": {
+      "title": "Report Ref",
+      "type": "string"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "unresolved_claims": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unresolved Claims",
+      "type": "array"
+    }
+  },
+  "required": [
+    "run_id",
+    "audit_id",
+    "audited_target",
+    "confidence",
+    "audit_confidence",
+    "report_ref"
+  ],
+  "title": "AuditCompletedEvent",
+  "type": "object"
+}

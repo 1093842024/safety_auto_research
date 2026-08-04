@@ -1,0 +1,127 @@
+{
+  "$defs": {
+    "EventType": {
+      "enum": [
+        "program_created",
+        "workflow_requested",
+        "workflow_started",
+        "stage_queued",
+        "stage_started",
+        "artifact_published",
+        "gate_passed",
+        "gate_failed",
+        "eval_completed",
+        "attack_completed",
+        "decision_issued",
+        "lesson_promoted",
+        "approval_required",
+        "approval_resolved",
+        "workflow_finished",
+        "stage_cancelled",
+        "audit_completed",
+        "improvement_applied",
+        "agent_step",
+        "debug_result"
+      ],
+      "title": "EventType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A single-stage debug result (inner-loop / outer-audit isolation).\n\nWhen the researcher runs a debug against a single stage of the dual loop \u2014\ninner loop (eval) or outer audit \u2014 the result is persisted as a ``DebugEvent``\nso the frontend \"\u8c03\u8bd5\" panel can show the outcome before the full autonomous\nexperiment is launched.",
+  "properties": {
+    "detail": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Detail"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "$ref": "#/$defs/EventType",
+      "default": "debug_result"
+    },
+    "metrics": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Metrics",
+      "type": "object"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "ok": {
+      "default": true,
+      "title": "Ok",
+      "type": "boolean"
+    },
+    "report_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Report Ref"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "stage": {
+      "title": "Stage",
+      "type": "string"
+    },
+    "summary": {
+      "default": "",
+      "title": "Summary",
+      "type": "string"
+    },
+    "verdict": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Verdict"
+    }
+  },
+  "required": [
+    "run_id",
+    "stage"
+  ],
+  "title": "DebugEvent",
+  "type": "object"
+}

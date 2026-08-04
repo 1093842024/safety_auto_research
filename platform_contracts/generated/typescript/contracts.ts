@@ -15,7 +15,7 @@ export const DecisionType = z.enum(['continue', 'revisit', 'exit_success', 'exit
 export type DecisionType = z.infer<typeof DecisionType>;
 
 
-export const EventType = z.enum(['program_created', 'workflow_requested', 'workflow_started', 'stage_queued', 'stage_started', 'artifact_published', 'gate_passed', 'gate_failed', 'eval_completed', 'attack_completed', 'decision_issued', 'lesson_promoted', 'approval_required', 'approval_resolved', 'workflow_finished', 'stage_cancelled', 'audit_completed', 'improvement_applied'] as const);
+export const EventType = z.enum(['program_created', 'workflow_requested', 'workflow_started', 'stage_queued', 'stage_started', 'artifact_published', 'gate_passed', 'gate_failed', 'eval_completed', 'attack_completed', 'decision_issued', 'lesson_promoted', 'approval_required', 'approval_resolved', 'workflow_finished', 'stage_cancelled', 'audit_completed', 'improvement_applied', 'agent_step', 'debug_result'] as const);
 export type EventType = z.infer<typeof EventType>;
 
 
@@ -99,6 +99,7 @@ export const WorkflowRunSchema = z.object({
   status: WorkflowStatus,
   started_at: z.string(),
   ended_at: z.string().optional(),
+  status_detail: z.string().optional(),
 });
 export type WorkflowRun = z.infer<typeof WorkflowRunSchema>;
 
@@ -258,6 +259,9 @@ export const ExperienceEntrySchema = z.object({
   lesson: z.string(),
   applicable_stages: z.array(z.string()).optional(),
   confidence: z.number().min(0.0).max(1.0).optional(),
+  uses: z.number().int().optional(),
+  seq: z.number().int().optional(),
+  source_run_id: z.string().optional(),
 });
 export type ExperienceEntry = z.infer<typeof ExperienceEntrySchema>;
 
@@ -404,6 +408,36 @@ export const AuditCompletedEventSchema = z.object({
   report_ref: z.string(),
 });
 export type AuditCompletedEvent = z.infer<typeof AuditCompletedEventSchema>;
+
+export const AgentStepEventSchema = z.object({
+  event_id: z.string().optional(),
+  event_type: EventType.optional(),
+  run_id: z.string(),
+  occurred_at: z.string().optional(),
+  seq: z.number().int().min(0).optional(),
+  kind: z.string(),
+  tool: z.string().optional(),
+  args_summary: z.string().optional(),
+  result_summary: z.string().optional(),
+  detail: z.string().optional(),
+});
+export type AgentStepEvent = z.infer<typeof AgentStepEventSchema>;
+
+export const DebugEventSchema = z.object({
+  event_id: z.string().optional(),
+  event_type: EventType.optional(),
+  run_id: z.string(),
+  occurred_at: z.string().optional(),
+  stage: z.string(),
+  ok: z.boolean().optional(),
+  summary: z.string().optional(),
+  metrics: z.record(z.string(), z.number()).optional(),
+  verdict: z.record(z.string(), z.any()).optional(),
+  report_ref: z.string().optional(),
+  detail: z.string().optional(),
+  error: z.string().optional(),
+});
+export type DebugEvent = z.infer<typeof DebugEventSchema>;
 
 export const ImprovementAppliedEventSchema = z.object({
   event_id: z.string().optional(),

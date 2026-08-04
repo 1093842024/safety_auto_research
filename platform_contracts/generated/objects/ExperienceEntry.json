@@ -1,0 +1,66 @@
+{
+  "additionalProperties": false,
+  "description": "A pass/fail lesson in the cross-run ExperienceBank (training-free replay).",
+  "properties": {
+    "applicable_stages": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Applicable Stages",
+      "type": "array"
+    },
+    "confidence": {
+      "default": 0.5,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "context": {
+      "title": "Context",
+      "type": "string"
+    },
+    "entry_id": {
+      "title": "Entry Id",
+      "type": "string"
+    },
+    "kind": {
+      "title": "Kind",
+      "type": "string"
+    },
+    "lesson": {
+      "title": "Lesson",
+      "type": "string"
+    },
+    "seq": {
+      "default": 0,
+      "title": "Seq",
+      "type": "integer"
+    },
+    "source_run_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Run Id"
+    },
+    "uses": {
+      "default": 0,
+      "title": "Uses",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "entry_id",
+    "kind",
+    "context",
+    "lesson"
+  ],
+  "title": "ExperienceEntry",
+  "type": "object"
+}

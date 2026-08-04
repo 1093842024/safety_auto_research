@@ -1,0 +1,85 @@
+{
+  "additionalProperties": false,
+  "description": "A node in the cumulative HypothesisTree (Arbor-style persistence).",
+  "properties": {
+    "artifact_ref": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artifact Ref"
+    },
+    "branch": {
+      "default": "main",
+      "title": "Branch",
+      "type": "string"
+    },
+    "evidence_refs": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "hypothesis": {
+      "title": "Hypothesis",
+      "type": "string"
+    },
+    "insight": {
+      "default": "",
+      "title": "Insight",
+      "type": "string"
+    },
+    "node_id": {
+      "title": "Node Id",
+      "type": "string"
+    },
+    "parent_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parent Id"
+    },
+    "run_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Run Id"
+    },
+    "score": {
+      "default": 0.0,
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Score",
+      "type": "number"
+    },
+    "status": {
+      "default": "active",
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "node_id",
+    "hypothesis"
+  ],
+  "title": "HypothesisNode",
+  "type": "object"
+}

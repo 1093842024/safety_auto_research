@@ -2,6 +2,11 @@
 // proxy configured in vite.config.ts (which forwards to the FastAPI server).
 
 import { z } from "zod";
+import { WorkflowStatus } from "../contracts";
+
+// Re-export the canonical platform status enum so views can pull the single
+// source of truth from the client module instead of the generated file.
+export { WorkflowStatus };
 
 // ---------------------------------------------------------------------------
 // Runtime validation — catches backend schema drift before it corrupts the UI.
@@ -115,15 +120,12 @@ export interface ExperienceEntry {
   confidence: number;
 }
 
+const runSummarySchema = z.object({ run_id: z.string(), status: z.string() });
+
 export const getRuns = async () => {
   const data = await apiGet<any[]>("/workflow-runs");
-  // Light validation: each run must have at least run_id and status.
-  for (const r of data) {
-    if (typeof r?.run_id !== "string" || typeof r?.status !== "string") {
-      console.error("[Schema Violation] getRuns: item missing run_id/status", r);
-    }
-  }
-  return data as WorkflowRunSummary[];
+  // Non-blocking schema check (logs drift, never throws) via safeParse.
+  return data.map((r) => safeParse(runSummarySchema, r, "getRuns.item")) as WorkflowRunSummary[];
 };
 export const getRun = (id: string) =>
   apiGet<
@@ -135,20 +137,16 @@ export const getRun = (id: string) =>
   >(`/workflow-runs/${encodeURIComponent(id)}`);
 export const getEvents = (runId: string) =>
   apiGet<Array<Record<string, any>>>(`/events?run_id=${encodeURIComponent(runId)}`);
+const auditItemSchema = z.object({ audit_id: z.string() });
+
 export const getAudit = async (runId: string) => {
   const data = await apiGet<any[]>(`/workflow-runs/${runId}/audit`);
-  for (const a of data) {
-    if (typeof a?.audit_id !== "string") {
-      console.error("[Schema Violation] getAudit: item missing audit_id", a);
-    }
-  }
-  return data as AuditEvent[];
+  return data.map((a) => safeParse(auditItemSchema, a, "getAudit.item")) as AuditEvent[];
 };
 export const getImprovements = (runId: string) =>
   apiGet<ImprovementEvent[]>(`/workflow-runs/${runId}/improvements`);
 export const getHypoTree = (runId: string) =>
   apiGet<{ nodes: HypoNode[] }>(`/workflow-runs/${runId}/hypo-tree`);
-export const getExperiences = () => apiGet<ExperienceEntry[]>("/experiences");
 export const getProtocol = () => apiGet<Record<string, any>>("/agent/protocol");
 
 // ----- Benchmark task catalog (mined from the OSS projects) -----
@@ -403,6 +401,11 @@ export interface EvolutionCandidate {
   status: string;
   metrics?: Record<string, unknown>;
   offspring_count: number;
+  // Phase A / OpenMLE-Evo: program-level grain (code candidates) -- optional on config nodes
+  node_kind?: string;
+  code?: string | null;
+  operator?: string | null;
+  parent_ids?: string[] | null;
 }
 
 export const getPlaybook = (scope?: string) =>
@@ -414,36 +417,12 @@ export const getStrategies = (runId?: string) =>
 export const getEvolution = (runId: string) =>
   apiGet<EvolutionCandidate[]>(`/workflow-runs/${encodeURIComponent(runId)}/evolution`);
 
-/** Launch parallel evolutionary search for a run (Phase 3). */
-export const runEvolution = (runId: string, params: Record<string, unknown> = {}) =>
-  apiPost<Record<string, unknown>>(`/workflow-runs/${encodeURIComponent(runId)}/evolution`, params);
-
-/** Benchmark-suite catalog (ScienceAgentBench / MLE-bench metadata). */
-export const getBenchmarkSuites = () => apiGet<Array<Record<string, unknown>>>("/benchmark-suites");
-
 /** Validate a task registration payload; returns errors without persisting. */
 export const validateTask = (taskType: string, values: Record<string, any>) =>
   apiPost<ValidateResult>("/benchmark-tasks/validate", {
     task_type: taskType,
     values,
   });
-
-/** Compute a metric for a tracked (non-executable) task from held-out eval/predictions. */
-export const evaluateRun = (runId: string, params: Record<string, any>) =>
-  apiPost<ResearchRecord>(
-    `/workflow-runs/${encodeURIComponent(runId)}/evaluate`,
-    params,
-  );
-
-/** Self-report a final metric for a tracked task (enters the leaderboard). */
-export const reportRunMetric = (
-  runId: string,
-  params: { metric_name: string; direction: string; score: number; config_snapshot?: Record<string, any> },
-) =>
-  apiPost<ResearchRecord>(
-    `/workflow-runs/${encodeURIComponent(runId)}/report-metric`,
-    params,
-  );
 
 /** A richer run object, including the launch-time configuration stored in objective_snapshot. */
 export interface RunDetail extends WorkflowRunSummary {
@@ -577,3 +556,45 @@ export const DECISION_CLASS: Record<string, string> = {
   audit_refine: "warn",
   audit_restart: "bad",
 };
+
+// ---------------------------------------------------------------------------
+// Canonical task-category labels — single source of truth (superset of all
+// views that previously defined their own copies of this map).
+// ---------------------------------------------------------------------------
+export const CATEGORY_LABELS: Record<string, string> = {
+  model_dev: "模型开发",
+  system_opt: "系统优化",
+  puzzle: "谜题/挑战",
+  cuda: "CUDA 内核",
+  adversarial: "对抗/越狱",
+  efficiency: "效率基准",
+  agent_eval: "科研 Agent 评测",
+  idea_eval: "想法质量评测",
+  tooling: "工具型元评测",
+  platform_native: "平台原生(可实跑)",
+  custom: "自定义注册任务",
+};
+
+// ---------------------------------------------------------------------------
+// Dev guard: every canonical WorkflowStatus must have a display label. Surfaces
+// contract drift immediately (a blank status pill) instead of failing silently.
+// ---------------------------------------------------------------------------
+for (const s of WorkflowStatus.options as readonly string[]) {
+  if (!(s in STATUS_LABEL)) {
+    console.warn(`[contracts] STATUS_LABEL is missing a label for WorkflowStatus "${s}"`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Research-record comparison + HITL approval resolution, wrapped over the raw
+// REST endpoints so every call funnels through the shared apiGet/apiPost path
+// (instead of ad-hoc raw fetch calls scattered across views).
+// ---------------------------------------------------------------------------
+export const compareRuns = (ids: string[]) =>
+  apiGet<Array<Record<string, any>>>(`/research-records/compare?ids=${encodeURIComponent(ids.join(","))}`);
+
+export const resolveApproval = (runId: string, resolution: "approved" | "rejected") =>
+  apiPost<Record<string, any>>(`/workflow-runs/${encodeURIComponent(runId)}/resolve-approval`, {
+    resolution,
+    resolved_by: "frontend_user",
+  });

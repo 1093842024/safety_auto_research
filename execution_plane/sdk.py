@@ -173,6 +173,7 @@ class PlatformSDK:
         branch: str = "main",
         score: float = 0.0,
         run_id: str | None = None,
+        node_kind: str = "config",
     ) -> str | None:
         """Add / extend a node in the cumulative HypothesisTree (Arbor-style)."""
 
@@ -186,6 +187,7 @@ class PlatformSDK:
             branch=branch,
             score=score,
             run_id=run_id,
+            node_kind=node_kind,
         )
         return node.node_id
 

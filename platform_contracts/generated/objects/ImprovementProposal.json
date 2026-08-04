@@ -1,0 +1,55 @@
+{
+  "additionalProperties": false,
+  "description": "A proposed change to the research *process* (meta-loop), not the artifact.",
+  "properties": {
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "expected_effect": {
+      "title": "Expected Effect",
+      "type": "string"
+    },
+    "improvement_id": {
+      "title": "Improvement Id",
+      "type": "string"
+    },
+    "patch": {
+      "additionalProperties": true,
+      "title": "Patch",
+      "type": "object"
+    },
+    "proposed_by": {
+      "default": "self_evolution",
+      "title": "Proposed By",
+      "type": "string"
+    },
+    "rationale": {
+      "title": "Rationale",
+      "type": "string"
+    },
+    "rollback_id": {
+      "title": "Rollback Id",
+      "type": "string"
+    },
+    "target_mechanism": {
+      "title": "Target Mechanism",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    }
+  },
+  "required": [
+    "improvement_id",
+    "target_mechanism",
+    "title",
+    "description",
+    "rationale",
+    "expected_effect",
+    "rollback_id"
+  ],
+  "title": "ImprovementProposal",
+  "type": "object"
+}

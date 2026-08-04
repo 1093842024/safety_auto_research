@@ -17,6 +17,12 @@ dual-loop primitives:
     (SQLite table ``evolution_candidates``); every entry carries ``run_id``
     (isolation invariant #3).
 
+  * **Phase A — dual evolution grain** — each ``Candidate`` now carries ``node_kind``
+    (``"config"`` for the legacy hyperparameter surface, ``"program"`` for code candidates
+    produced by an atomic operator). ``code`` / ``operator`` / ``parent_ids`` support the
+    program-level grain introduced by OpenMLE-Evo; all fields are defaulted so existing
+    config nodes and persisted JSON remain valid. ``list_by_kind`` filters by grain.
+
 The heavy lifting (parallel fitness evaluation, audit of generation champions) lives
 in ``ClosedLoopOrchestrator.run_evolutionary_loop``; this module stays free of
 control-plane side effects so it is unit-testable in isolation.
@@ -61,6 +67,15 @@ class Candidate:
     status: str = "proposed"  # proposed | evaluated | rejected_novelty | champion
     metrics: dict[str, Any] = field(default_factory=dict)
     offspring_count: int = 0
+    # --- Phase A: program-level evolution extension (OpenMLE-Evo alignment) ---
+    # node_kind distinguishes the two evolution grains that now coexist in one archive:
+    #   "config"  -> hyperparameter-config candidate (legacy, deterministic)
+    #   "program" -> code candidate produced by an atomic operator (Draft/Improve/Debug/Crossover)
+    # All new fields are defaulted so existing config nodes and persisted JSON remain valid.
+    node_kind: str = "config"
+    code: str | None = None
+    operator: str | None = None  # draft | improve | debug | crossover (program nodes only)
+    parent_ids: list[str] | None = None  # multi-parent support for Crossover
 
 
 # ---------------------------------------------------------------------- embedding
@@ -89,6 +104,21 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 def candidate_text(params: dict[str, Any]) -> str:
     return json.dumps(params, sort_keys=True, ensure_ascii=False)
+
+
+def parse_island_index(branch: str) -> int:
+    """Extract the island index from a branch tag.
+
+    Program-level (OpenMLE-Evo) branches are ``gen{g}.isl{i}`` -> returns ``i``.
+    Config-level branches are ``gen{g}`` (no island) -> returns ``0``.
+
+    Used by the frontend "island view" to colour nodes by island of origin.
+    """
+
+    if not branch:
+        return 0
+    m = re.search(r"isl(\d+)", branch)
+    return int(m.group(1)) if m else 0
 
 
 def max_similarity(params: dict[str, Any], archived: list[dict[str, Any]]) -> float:
@@ -158,7 +188,10 @@ def select_parent(
     weights = [
         ((n - rank) / n) / (1.0 + c.offspring_count) for rank, c in enumerate(pool)
     ]
-    return rng.choices(pool, weights=weights, k=1)[0]
+    idx = rng.choices(range(n), weights=weights, k=1)[0]
+    chosen = pool[idx]
+    chosen.offspring_count += 1
+    return chosen
 
 
 def mutate(
@@ -187,25 +220,243 @@ def mutate(
     )
 
 
+def candidate_signature(c: Candidate) -> str:
+    """The comparison key for novelty: program code for program nodes, else config."""
+
+    if c.node_kind == "program" and c.code:
+        return c.code
+    return candidate_text(c.params)
+
+
 def novelty_filter(
     candidates: list[Candidate],
     *,
-    archived_params: list[dict[str, Any]],
+    archived_params: list[dict[str, Any]] | None = None,
+    archived_codes: list[str] | None = None,
     threshold: float = 0.92,
 ) -> list[Candidate]:
-    """Reject near-duplicates before evaluation (diversity-collapse guard)."""
+    """Reject near-duplicates before evaluation (diversity-collapse guard).
+
+    Two grains, two rules:
+      * **config** nodes -- cosine similarity over the param dict (legacy rule); a
+        candidate within ``threshold`` of any archived config is rejected.
+      * **program** nodes -- EXACT source-code dedup. Our operator templates share
+        ~95% boilerplate, so a cosine-over-bag-of-tokens metric cannot tell a RandomForest
+        draft from a GradientBoosting draft (sim ~1.0); exact-code membership correctly
+        rejects only truly identical programs while keeping different models/operators.
+    """
 
     kept: list[Candidate] = []
-    seen = list(archived_params)
+    seen_params = list(archived_params or [])
+    seen_code_set = set(archived_codes or [])
     for c in candidates:
-        sim = max_similarity(c.params, seen)
-        c.novelty = round(1.0 - sim, 4)
-        if sim >= threshold:
+        if c.node_kind == "program":
+            sig = candidate_signature(c)
+            is_dup = sig in seen_code_set
+            c.novelty = 0.0 if is_dup else 1.0
+        else:
+            sim = max_similarity(c.params, seen_params) if seen_params else 0.0
+            is_dup = sim >= threshold
+            c.novelty = round(1.0 - sim, 4)
+        if is_dup:
             c.status = "rejected_novelty"
             continue
         kept.append(c)
-        seen.append(c.params)
+        seen_params.append(c.params)
+        seen_code_set.add(candidate_signature(c))
     return kept
+
+
+# ---------------------------------------------------------------------- program-level operators (Phase B/C)
+# The SAME EvolutionArchive now holds two grains: "config" (hyperparameter surface,
+# legacy) and "program" (code produced by the atomic operators Draft/Improve/Debug/
+# Crossover). These helpers are pure (no execution); the caller runs the code via the
+# OpenMLETaskAdapter and fills in ``fitness``. All generated candidates carry
+# node_kind="program" + code + operator + parent_ids so the tree/archive stay coherent.
+def seed_program_population(
+    backend: Any,
+    *,
+    size: int,
+    run_id: str,
+    rng: Any,
+    target: str = "Survived",
+    id_col: str = "PassengerId",
+    feature_cols: tuple[str, ...] = (),
+    task_description: str = "",
+    generation: int = 0,
+) -> list[Candidate]:
+    """Generation 0 of program nodes: Draft produces ``size`` distinct solution programs."""
+
+    from ..openmle_integration.operators import draft_program
+
+    pop: list[Candidate] = []
+    seen: set[str] = set()
+    guard = 0
+    while len(pop) < size and guard < size * 20:
+        guard += 1
+        variant = rng.randrange(4)  # explore the model space for a diverse seed pop
+        code = draft_program(
+            backend, target=target, id_col=id_col, task_description=task_description,
+            variant=variant, caller_stage="inner_program_evolution",
+        )
+        if code in seen:
+            continue
+        seen.add(code)
+        pop.append(Candidate(
+            candidate_id=_new_id("prog"),
+            run_id=run_id,
+            params={"operator": "draft"},
+            generation=generation,
+            branch=f"gen{generation}",
+            node_kind="program",
+            code=code,
+            operator="draft",
+        ))
+    return pop
+
+
+def mutate_program(
+    parent: Candidate,
+    operator: str,
+    backend: Any,
+    *,
+    run_id: str,
+    generation: int,
+    rng: Any,
+    target: str = "Survived",
+    id_col: str = "PassengerId",
+    feature_cols: tuple[str, ...] = (),
+    task_description: str = "",
+    feedback: str | None = None,
+) -> Candidate:
+    """Improve or Debug a parent program node into a child (single-parent transform)."""
+
+    if operator not in ("improve", "debug"):
+        raise ValueError(f"mutate_program operator must be improve/debug, got {operator!r}")
+    from ..openmle_integration.operators import debug_program, improve_program
+
+    base = parent.code or ""
+    if operator == "improve":
+        code = improve_program(
+            backend, target=target, id_col=id_col, task_description=task_description,
+            current_program=base, feedback=feedback, caller_stage="inner_program_evolution",
+        )
+    else:
+        code = debug_program(
+            backend, target=target, id_col=id_col, task_description=task_description,
+            current_program=base, feedback=feedback, caller_stage="inner_program_evolution",
+        )
+    return Candidate(
+        candidate_id=_new_id("prog"),
+        run_id=run_id,
+        params={"operator": operator, "parent": parent.candidate_id},
+        generation=generation,
+        parent_id=parent.candidate_id,
+        branch=f"gen{generation}",
+        node_kind="program",
+        code=code,
+        operator=operator,
+        parent_ids=[parent.candidate_id],
+    )
+
+
+def crossover_programs(
+    a: Candidate,
+    b: Candidate,
+    backend: Any,
+    *,
+    run_id: str,
+    generation: int,
+    target: str = "Survived",
+    id_col: str = "PassengerId",
+    feature_cols: tuple[str, ...] = (),
+    task_description: str = "",
+) -> Candidate:
+    """Combine two program nodes into a child (multi-parent transform, OpenMLE Crossover)."""
+
+    from ..openmle_integration.operators import crossover_program
+
+    code = crossover_program(
+        backend, target=target, id_col=id_col, task_description=task_description,
+        parent_programs=(a.code or "", b.code or ""), caller_stage="inner_program_evolution",
+    )
+    return Candidate(
+        candidate_id=_new_id("prog"),
+        run_id=run_id,
+        params={"operator": "crossover", "parents": [a.candidate_id, b.candidate_id]},
+        generation=generation,
+        parent_id=a.candidate_id,
+        branch=f"gen{generation}",
+        node_kind="program",
+        code=code,
+        operator="crossover",
+        parent_ids=[a.candidate_id, b.candidate_id],
+    )
+
+
+class IslandModel:
+    """OpenMLE-Evo island model over program populations (Phase C).
+
+    Each island evolves its own program population; ``migrate`` injects the global
+    top-k program candidates into every *other* island, providing the cross-island
+    gene flow that prevents premature convergence. Island origin is encoded in the
+    candidate branch tag (``gen{g}.isl{i}``) so ``migrate`` can exclude it.
+    """
+
+    def __init__(self, n_islands: int, run_id: str) -> None:
+        self.n_islands = n_islands
+        self.run_id = run_id
+        self.islands: list[list[Candidate]] = [[] for _ in range(n_islands)]
+
+    @staticmethod
+    def _island_of(branch: str) -> int | None:
+        if ".isl" in branch:
+            try:
+                return int(branch.rsplit(".isl", 1)[1])
+            except ValueError:
+                return None
+        return None
+
+    def seed(self, seeder: Any, *, size: int, generation: int = 0) -> None:
+        for idx, island in enumerate(self.islands):
+            for c in seeder(size=size, generation=generation):
+                c.branch = f"gen{generation}.isl{idx}"
+                island.append(c)
+
+    def all_candidates(self) -> list[Candidate]:
+        out: list[Candidate] = []
+        for isl in self.islands:
+            out.extend(isl)
+        return out
+
+    def best(self) -> Candidate | None:
+        evaluated = [c for c in self.all_candidates() if c.fitness is not None]
+        return max(evaluated, key=lambda c: c.fitness or 0.0) if evaluated else None
+
+    def migrate(self, top_k: int = 1, current_generation: int | None = None) -> None:
+        ranked = sorted(
+            (c for c in self.all_candidates() if c.fitness is not None),
+            key=lambda c: c.fitness or 0.0, reverse=True,
+        )[:top_k]
+        for champ in ranked:
+            origin = self._island_of(champ.branch)
+            for idx, isl in enumerate(self.islands):
+                if idx == origin:
+                    continue
+                dest_gen = current_generation if current_generation is not None else champ.generation
+                clone = Candidate(
+                    candidate_id=_new_id("mig"),
+                    run_id=self.run_id,
+                    params=dict(champ.params),
+                    generation=dest_gen,  # use destination island's current generation
+                    parent_id=champ.candidate_id,
+                    branch=f"gen{dest_gen}.isl{idx}",  # relabel to destination island
+                    node_kind=champ.node_kind,
+                    code=champ.code,
+                    operator=champ.operator,
+                    parent_ids=list(champ.parent_ids or [champ.candidate_id]),
+                )
+                isl.append(clone)
 
 
 # ---------------------------------------------------------------------- archive
@@ -262,6 +513,14 @@ class EvolutionArchive:
         if run_id is not None:
             out = [c for c in out if c.run_id == run_id]
         return out
+
+    def list_by_kind(self, run_id: str, kind: str) -> list[Candidate]:
+        """Return only candidates of a given ``node_kind`` (config | program) for a run.
+
+        Enables the frontend/EvolutionPanel to show the two evolution grains separately
+        without mixing hyperparameter-config nodes with code-operator nodes.
+        """
+        return [c for c in self.list(run_id) if c.node_kind == kind]
 
     def best(self, run_id: str) -> Candidate | None:
         evaluated = [c for c in self.list(run_id) if c.fitness is not None]

@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>safety_auto_research · 技术架构图（详细版）</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#30363d;
+    --txt:#e6edf3; --muted:#8b949e;
+    --fe:#f0883e; --cp:#3fb950; --ep:#bc8cff; --ct:#39c5cf; --inf:#d29922;
+    --persist:#db61a2; --ext:#f85149; --accent:#58a6ff; --warn:#e3b341;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Helvetica,Arial,sans-serif;
+    line-height:1.55;}
+  header{padding:28px 28px 12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:10}
+  header h1{margin:0 0 4px;font-size:22px}
+  header p{margin:0;color:var(--muted);font-size:13px}
+  nav{display:flex;flex-wrap:wrap;gap:8px;padding:14px 28px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:9}
+  nav a{font-size:12px;color:var(--accent);text-decoration:none;border:1px solid var(--border);
+    padding:4px 10px;border-radius:999px;background:var(--panel)}
+  nav a:hover{background:var(--panel2)}
+  main{padding:24px 28px 80px;max-width:1240px;margin:0 auto}
+  section{margin:0 0 36px;scroll-margin-top:120px}
+  section h2{font-size:18px;border-left:4px solid var(--accent);padding-left:10px;margin:0 0 6px}
+  section .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;overflow-x:auto}
+  svg{display:block;max-width:100%;height:auto;font-family:inherit}
+  .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);padding:10px 0 0}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:14px;height:14px;border-radius:3px;display:inline-block}
+  .notes{background:var(--panel);border:1px solid var(--border);border-left:4px solid var(--warn);
+    border-radius:8px;padding:12px 16px;font-size:13px;margin-top:12px}
+  .notes b{color:var(--warn)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
+  th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--txt)}
+  td code,code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px;color:#ffd9a0}
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:900px){.twocol{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>safety_auto_research · 平台技术架构图（详细版）</h1>
+  <p>面向 AI 安全研发的自动化研究平台 · 双循环 + 闭环 + 进化搜索 + 自递归改进元循环 · 控制平面 / 执行平面 / 平台契约 / 前端 SPA</p>
+</header>
+<nav>
+  <a href="#overview">① 全局分层架构</a>
+  <a href="#backend">② 后端模块依赖与调用流</a>
+  <a href="#dual">③ 双循环 / 元循环编排</a>
+  <a href="#cap">④ 能力注册表与护栏</a>
+  <a href="#contract">⑤ 平台契约生成链</a>
+  <a href="#frontend">⑥ 前端组件树与数据流</a>
+  <a href="#persist">⑦ 持久化结构</a>
+  <a href="#patterns">⑧ 设计模式总结</a>
+  <a href="#debt">⑨ 技术债与待同步项</a>
+</nav>
+<main>
+
+<!-- ===================== ① 全局分层架构 ===================== -->
+<section id="overview">
+  <h2>① 全局分层架构总览</h2>
+  <p class="sub">从用户浏览器到外部 Agent / 持久化，自顶向下 7 层 + 2 个横切面（平台契约、护栏）。箭头表示主要调用 / 数据流方向。</p>
+  <div class="card">
+  <svg viewBox="0 0 1120 980" xmlns="http://www.w3.org/2000/svg" font-size="12">
+    <defs>
+      <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/>
+      </marker>
+      <style>
+        .bx{fill:#161b22;stroke:#30363d;stroke-width:1.3;rx:8}
+        .t{fill:#e6edf3}
+        .m{fill:#8b949e}
+        .lbl{fill:#e6edf3;font-weight:600}
+      </style>
+    </defs>
+
+    <!-- External Agent -->
+    <g>
+      <rect class="bx" x="820" y="24" width="270" height="86" rx="8" fill="#2a1418" stroke="#f85149"/>
+      <text x="836" y="48" class="lbl" fill="#f85149">🌐 外部 Agent 接入（可选）</text>
+      <text x="836" y="68" class="m">RemoteAgentHarness · Transport 层</text>
+      <text x="836" y="84" class="m">Codex / Claude Code / WorkBuddy CLI</text>
+      <text x="836" y="100" class="m">env: AGENT_COMMAND</text>
+    </g>
+    <line x1="820" y1="110" x2="700" y2="205" stroke="#f85149" stroke-width="1.5" marker-end="url(#arr)"/>
+
+    <!-- Frontend -->
+    <g>
+      <rect class="bx" x="40" y="24" width="760" height="86" rx="8" fill="#241a10" stroke="#f0883e"/>
+      <text x="56" y="48" class="lbl" fill="#f0883e">🖥️ 前端层 · React 18 + Vite + TypeScript（极简 SPA，5173）</text>
+      <text x="56" y="68" class="m">App.tsx（自研路由/侧边栏）</text>
+      <text x="320" y="68" class="m">views/（13 视图：NewResearch·RunDashboard·Leaderboard·CompareRuns·…）</text>
+      <text x="56" y="86" class="m">api/client.ts（fetch 封装）</text>
+      <text x="360" y="86" class="m">api/useSSE.ts（EventSource）</text>
+      <text x="600" y="86" class="m">src/contracts.ts（zod，当前未引用）</text>
+    </g>
+
+    <!-- API boundary -->
+    <g>
+      <rect class="bx" x="40" y="130" width="760" height="66" rx="8" fill="#1a2030" stroke="#58a6ff"/>
+      <text x="56" y="154" class="lbl" fill="#58a6ff">🔌 API 边界</text>
+      <text x="200" y="154" class="m">Vite dev proxy: /api → rewrite → http://127.0.0.1:8000</text>
+      <text x="56" y="176" class="m">FastAPI（uvicorn, 同步 + ThreadPoolExecutor）</text>
+      <text x="430" y="176" class="m">约 27 端点 · SSE /workflow-runs/{id}/stream</text>
+    </g>
+    <line x1="420" y1="110" x2="420" y2="130" stroke="#8b949e" marker-end="url(#arr)"/>
+    <line x1="420" y1="196" x2="420" y2="218" stroke="#8b949e" marker-end="url(#arr)"/>
+
+    <!-- Control Plane -->
+    <g>
+      <rect class="bx" x="40" y="218" width="760" height="150" rx="8" fill="#102216" stroke="#3fb950"/>
+      <text x="56" y="242" class="lbl" fill="#3fb950">🎛️ 控制平面 control_plane/（编排 + 状态机 + 持久化）</text>
+      <rect class="bx" x="56" y="254" width="220" height="46" fill="#161b22"/>
+      <text x="66" y="272" class="t">api.py</text><text x="66" y="290" class="m">FastAPI 应用 · create_app</text>
+      <rect class="bx" x="290" y="254" width="220" height="46" fill="#161b22"/>
+      <text x="300" y="272" class="t">service.py</text><text x="300" y="290" class="m">ControlPlaneService 状态机</text>
+      <rect class="bx" x="524" y="254" width="258" height="46" fill="#161b22"/>
+      <text x="534" y="272" class="t">store.py</text><text x="534" y="290" class="m">Repository（JSON 原子落盘）</text>
+      <rect class="bx" x="56" y="308" width="220" height="46" fill="#161b22"/>
+      <text x="66" y="326" class="t">store_tree.py</text><text x="66" y="344" class="m">ResearchStateStore (SQLite)</text>
+      <rect class="bx" x="290" y="308" width="220" height="46" fill="#161b22"/>
+      <text x="300" y="326" class="t">schemas.py</text><text x="300" y="344" class="m">请求/响应 pydantic 模型</text>
+      <rect class="bx" x="524" y="308" width="258" height="46" fill="#161b22"/>
+      <text x="534" y="326" class="t">progress_bus.py</text><text x="534" y="344" class="m">SSE 进度总线（多订阅者）</text>
+    </g>
+    <line x1="420" y1="368" x2="420" y2="392" stroke="#8b949e" marker-end="url(#arr)"/>
+
+    <!-- Execution Plane -->
+    <g>
+      <rect class="bx" x="40" y="392" width="760" height="208" rx="8" fill="#1d1430" stroke="#bc8cff"/>
+      <text x="56" y="416" class="lbl" fill="#bc8cff">⚙️ 执行平面 execution_plane/（运行时 + 记忆 + 决策）</text>
+      <rect class="bx" x="56" y="428" width="240" height="50" fill="#161b22"/>
+      <text x="66" y="446" class="t">orchestrator.py</text><text x="66" y="464" class="m">ClosedLoopOrchestrator</text>
+      <rect class="bx" x="310" y="428" width="240" height="50" fill="#161b22"/>
+      <text x="320" y="446" class="t">sdk.py</text><text x="320" y="464" class="m">PlatformSDK（唯一通道）</text>
+      <rect class="bx" x="564" y="428" width="218" height="50" fill="#161b22"/>
+      <text x="574" y="446" class="t">agent/harness.py</text><text x="574" y="464" class="m">AgentHarness（决策）</text>
+
+      <rect class="bx" x="56" y="484" width="240" height="50" fill="#161b22"/>
+      <text x="66" y="502" class="t">capabilities/</text><text x="66" y="520" class="m">11 能力 + 执行器</text>
+      <rect class="bx" x="310" y="484" width="240" height="50" fill="#161b22"/>
+      <text x="320" y="502" class="t">executors/</text><text x="320" y="520" class="m">eval/attack/lesson</text>
+      <rect class="bx" x="564" y="484" width="218" height="50" fill="#161b22"/>
+      <text x="574" y="502" class="t">decision/router.py</text><text x="574" y="520" class="m">IterationRouter + 护栏</text>
+
+      <rect class="bx" x="56" y="540" width="240" height="50" fill="#161b22"/>
+      <text x="66" y="558" class="t">agent/protocol.py</text><text x="66" y="576" class="m">线协议（6 消息）</text>
+      <rect class="bx" x="310" y="540" width="240" height="50" fill="#161b22"/>
+      <text x="320" y="558" class="t">agent/transport.py</text><text x="320" y="576" class="m">Callable/Sub/CLI/HTTP</text>
+      <rect class="bx" x="564" y="540" width="218" height="50" fill="#161b22"/>
+      <text x="574" y="558" class="t">registry.py</text><text x="574" y="576" class="m">AdapterRegistry</text>
+    </g>
+
+    <!-- Platform Contracts (cross-cutting) -->
+    <g>
+      <rect class="bx" x="820" y="218" width="270" height="382" rx="8" fill="#0e2626" stroke="#39c5cf"/>
+      <text x="836" y="242" class="lbl" fill="#39c5cf">📜 平台契约层 platform_contracts/</text>
+      <text x="836" y="266" class="m">objects.py（16 对象模型）</text>
+      <text x="836" y="286" class="m">events.py（14 事件模型）</text>
+      <text x="836" y="306" class="m">enums.py（14 枚举）</text>
+      <text x="836" y="326" class="m">transitions.py（状态机校验）</text>
+      <text x="836" y="346" class="m">base.py · models.py</text>
+      <text x="836" y="372" class="lbl" fill="#39c5cf">↧ 导出</text>
+      <text x="836" y="392" class="m">export.py → JSON Schema</text>
+      <text x="836" y="412" class="m">export_typescript.py</text>
+      <text x="836" y="432" class="m">→ generated/typescript/contracts.ts</text>
+      <text x="836" y="456" class="m">→ frontend/src/contracts.ts</text>
+      <text x="836" y="482" class="lbl" fill="#39c5cf">↧ 输入到</text>
+      <text x="836" y="502" class="m">前端 TS 类型</text>
+      <text x="836" y="522" class="m">后端 pydantic 校验</text>
+      <text x="836" y="544" class="m">（extra="forbid" 强约束）</text>
+    </g>
+    <line x1="820" y1="300" x2="800" y2="300" stroke="#39c5cf" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+    <line x1="820" y1="600" x2="800" y2="600" stroke="#39c5cf" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+
+    <!-- Infrastructure -->
+    <g>
+      <rect class="bx" x="40" y="612" width="760" height="100" rx="8" fill="#241d0a" stroke="#d29922"/>
+      <text x="56" y="636" class="lbl" fill="#d29922">🧱 基础设施层 infrastructure/（10 研究环节可复用资产）</text>
+      <text x="56" y="658" class="m">①文献检索 ②idea生成 ③基准评测 ④实验设计 ⑤数据清洗</text>
+      <text x="56" y="678" class="m">⑥代码开发 ⑦实验执行 ⑧结果分析/经验 ⑨自迭代进化 ⑩对抗数据生成</text>
+      <text x="56" y="698" class="m">skill / agent / 数据集任务 / 评测 · 由 capabilities 注册为可调工具</text>
+    </g>
+    <line x1="420" y1="600" x2="420" y2="612" stroke="#8b949e" marker-end="url(#arr)"/>
+
+    <!-- Persistence -->
+    <g>
+      <rect class="bx" x="40" y="724" width="760" height="86" rx="8" fill="#2a1422" stroke="#db61a2"/>
+      <text x="56" y="748" class="lbl" fill="#db61a2">💾 持久化层 data/</text>
+      <text x="56" y="770" class="m">control_plane_store.json（Repository）</text>
+      <text x="330" y="770" class="m">research_state.db（SQLite）</text>
+      <text x="600" y="770" class="m">custom_tasks.json（自定义任务）</text>
+      <text x="56" y="792" class="m">workflow_runs·stage_runs·decisions·artifacts·events·research_records…</text>
+      <text x="330" y="792" class="m">hypo_nodes·experiences·strategies·playbook_entries·evolution_candidates</text>
+    </g>
+    <line x1="300" y1="368" x2="280" y2="724" stroke="#db61a2" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+    <line x1="500" y1="498" x2="500" y2="724" stroke="#db61a2" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+
+    <!-- benchmark_tasks floating -->
+    <g>
+      <rect class="bx" x="820" y="612" width="270" height="100" rx="8" fill="#161b22" stroke="#30363d"/>
+      <text x="836" y="636" class="lbl">📚 benchmark_tasks/</text>
+      <text x="836" y="658" class="m">18 任务 / 11 类别</text>
+      <text x="836" y="678" class="m">registry.py（8 类型 Schema 驱动）</text>
+      <text x="836" y="698" class="m">suites/（SAB·MLE-bench）</text>
+    </g>
+
+    <!-- guardrail note -->
+    <text x="40" y="846" class="m" font-size="11">横切护栏：</text>
+    <text x="110" y="846" class="m" font-size="11" fill="#f85149">① 内/外环隔离（OUTER_LOOP_RESERVED_CAPS）· ② 决策护栏 validate_route · ③ 状态机 transitions · ④ 冻结验证器 _FROZEN_KEYS · ⑤ 预算三维硬停</text>
+  </svg>
+  <div class="legend">
+    <span><i style="background:#f0883e"></i>前端</span>
+    <span><i style="background:#58a6ff"></i>API 边界</span>
+    <span><i style="background:#3fb950"></i>控制平面</span>
+    <span><i style="background:#bc8cff"></i>执行平面</span>
+    <span><i style="background:#39c5cf"></i>平台契约</span>
+    <span><i style="background:#d29922"></i>基础设施</span>
+    <span><i style="background:#db61a2"></i>持久化</span>
+    <span><i style="background:#f85149"></i>外部 Agent</span>
+  </div>
+  </div>
+</section>
+
+<!-- ===================== ② 后端模块依赖与调用流 ===================== -->
+<section id="backend">
+  <h2>② 后端模块依赖与调用流</h2>
+  <p class="sub">谁持有谁、谁调用谁。api.py 暴露 HTTP，内部组合 ControlPlaneService + ResearchStateStore + ClosedLoopOrchestrator；执行面经 PlatformSDK 唯一通道回写控制面。</p>
+  <div class="card">
+  <svg viewBox="0 0 1120 720" xmlns="http://www.w3.org/2000/svg" font-size="12">
+    <defs><marker id="a2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker></defs>
+
+    <!-- api.py -->
+    <rect x="40" y="30" width="300" height="64" rx="8" fill="#102216" stroke="#3fb950"/>
+    <text x="56" y="54" fill="#3fb950" font-weight="600">api.py · create_app()</text>
+    <text x="56" y="74" fill="#8b949e">FastAPI 应用 · ~27 端点 · SSE</text>
+
+    <!-- service -->
+    <rect x="40" y="140" width="230" height="58" rx="8" fill="#161b22" stroke="#3fb950"/>
+    <text x="56" y="164" fill="#e6edf3" font-weight="600">ControlPlaneService</text>
+    <text x="56" y="184" fill="#8b949e">状态机 · 榜单 · 审批</text>
+
+    <!-- repository -->
+    <rect x="40" y="240" width="230" height="58" rx="8" fill="#161b22" stroke="#3fb950"/>
+    <text x="56" y="264" fill="#e6edf3" font-weight="600">Repository (store.py)</text>
+    <text x="56" y="284" fill="#8b949e">JSON 原子写 + 锁</text>
+
+    <!-- state store -->
+    <rect x="290" y="240" width="250" height="58" rx="8" fill="#161b22" stroke="#3fb950"/>
+    <text x="306" y="264" fill="#e6edf3" font-weight="600">ResearchStateStore</text>
+    <text x="306" y="284" fill="#8b949e">SQLite：hypo/experiences/strategies/playbook/evolution</text>
+
+    <!-- orchestrator -->
+    <rect x="700" y="30" width="360" height="64" rx="8" fill="#1d1430" stroke="#bc8cff"/>
+    <text x="716" y="54" fill="#bc8cff" font-weight="600">ClosedLoopOrchestrator</text>
+    <text x="716" y="74" fill="#8b949e">run_dual_loop / run_closed_loop / run_evolutionary_loop / run_self_evolution</text>
+
+    <!-- sdk -->
+    <rect x="700" y="140" width="360" height="58" rx="8" fill="#161b22" stroke="#bc8cff"/>
+    <text x="716" y="164" fill="#e6edf3" font-weight="600">PlatformSDK (sdk.py)</text>
+    <text x="716" y="184" fill="#8b949e">执行面↔控制面 唯一通道：load/publish/emit/request_approval/record_metric/register_lesson</text>
+
+    <!-- registry + router + harness -->
+    <rect x="700" y="240" width="170" height="120" rx="8" fill="#161b22" stroke="#bc8cff"/>
+    <text x="712" y="262" fill="#e6edf3" font-weight="600">CapabilityRegistry</text>
+    <text x="712" y="282" fill="#8b949e">11 能力</text>
+    <text x="712" y="302" fill="#e6edf3" font-weight="600">AdapterRegistry</text>
+    <text x="712" y="322" fill="#8b949e">eval/attack/lesson</text>
+    <text x="712" y="342" fill="#e6edf3" font-weight="600">IterationRouter</text>
+
+    <rect x="890" y="240" width="170" height="120" rx="8" fill="#161b22" stroke="#bc8cff"/>
+    <text x="902" y="262" fill="#e6edf3" font-weight="600">AgentHarness</text>
+    <text x="902" y="282" fill="#8b949e">Local / Remote</text>
+    <text x="902" y="302" fill="#e6edf3" font-weight="600">protocol.py</text>
+    <text x="902" y="322" fill="#8b949e">6 消息</text>
+    <text x="902" y="342" fill="#e6edf3" font-weight="600">transport.py</text>
+
+    <!-- executors/capabilities box -->
+    <rect x="700" y="388" width="360" height="120" rx="8" fill="#241d0a" stroke="#d29922"/>
+    <text x="716" y="410" fill="#d29922" font-weight="600">capabilities/ (基础设施层执行器)</text>
+    <text x="716" y="430" fill="#8b949e">kaggle_eval_executor（真实 CV/held-out）</text>
+    <text x="716" y="450" fill="#8b949e">audit_executor（layer_11 外环审计）</text>
+    <text x="716" y="470" fill="#8b949e">self_evolution_executor（layer_09 元循环）</text>
+    <text x="716" y="490" fill="#8b949e">attack_executor · eval_executor · lesson_executor</text>
+
+    <!-- evolution / failure_miner / playbook -->
+    <rect x="40" y="360" width="560" height="150" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="56" y="382" fill="#e6edf3" font-weight="600">双循环支撑模块（control_plane/）</text>
+    <text x="56" y="404" fill="#8b949e">evolution.py — 种群/选择/变异/新颖性拒绝/EvolutionArchive</text>
+    <text x="56" y="426" fill="#8b949e">failure_miner.py — 事件日志聚类失败模式</text>
+    <text x="56" y="448" fill="#8b949e">playbook.py — ACE 式 Playbook（确定性去重合并）</text>
+    <text x="56" y="470" fill="#8b949e">llm_judge.py — 真实 LLM judge（score/rationale/evidence_refs）</text>
+    <text x="56" y="492" fill="#8b949e">eval_runner.py — 基准评测分发（F1/embedding recall@K）</text>
+
+    <!-- progress_bus -->
+    <rect x="40" y="540" width="560" height="64" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="56" y="562" fill="#e6edf3" font-weight="600">progress_bus.py · ProgressBus（单例）</text>
+    <text x="56" y="582" fill="#8b949e">per-run asyncio.Queue 集合 · emit 线程安全 · SSE /stream 订阅</text>
+
+    <!-- arrows -->
+    <line x1="190" y1="94" x2="155" y2="140" stroke="#8b949e" marker-end="url(#a2)"/>
+    <line x1="155" y1="198" x2="155" y2="240" stroke="#8b949e" marker-end="url(#a2)"/>
+    <line x1="270" y1="269" x2="290" y2="269" stroke="#8b949e" marker-end="url(#a2)"/>
+    <line x1="400" y1="60" x2="700" y2="60" stroke="#8b949e" marker-end="url(#a2)"/>
+    <line x1="880" y1="94" x2="880" y2="140" stroke="#8b949e" marker-end="url(#a2)"/>
+    <line x1="880" y1="198" x2="880" y2="240" stroke="#8b949e" marker-end="url(#a2)"/>
+    <line x1="785" y1="300" x2="785" y2="388" stroke="#8b949e" marker-end="url(#a2)"/>
+    <line x1="155" y1="298" x2="155" y2="360" stroke="#8b949e" marker-end="url(#a2)"/>
+    <line x1="155" y1="510" x2="155" y2="540" stroke="#8b949e" marker-end="url(#a2)"/>
+    <line x1="420" y1="440" x2="700" y2="300" stroke="#d29922" stroke-dasharray="4 3" marker-end="url(#a2)"/>
+    <line x1="700" y1="448" x2="500" y2="448" stroke="#bc8cff" stroke-dasharray="4 3" marker-end="url(#a2)"/>
+  </svg>
+  </div>
+  <div class="notes">
+    <b>关键调用链：</b> <code>api.py</code> 持有单例 <code>ControlPlaneService</code> + <code>ResearchStateStore</code> + <code>ClosedLoopOrchestrator</code>。耗时操作（dual-loop / evolution）经后台线程 <code>_drive</code> 执行，通过 <code>ProgressBus.emit</code> 推 SSE。执行面所有动作必须经 <code>PlatformSDK</code> 回写控制面（门面模式），保证被审计、被护栏约束。<code>orchestrator.run_capability</code> 是 agent 工具调用入口，能力计数在方法本体（agent 内部调用无法绕过预算）。
+  </div>
+</section>
+
+<!-- ===================== ③ 双循环编排 ===================== -->
+<section id="dual">
+  <h2>③ 双循环 + 元循环编排时序</h2>
+  <p class="sub">内循环做研究 → 外循环（layer_11）约束审计 Accept/Refine/Restart → 元循环（layer_09）自递归改进（冻结验证器 + 可证伪预测 + 回滚）；反馈回灌内循环下一轮。</p>
+  <div class="card">
+  <svg viewBox="0 0 1120 760" xmlns="http://www.w3.org/2000/svg" font-size="12">
+    <defs><marker id="a3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker></defs>
+
+    <!-- Inner loop box -->
+    <rect x="40" y="40" width="430" height="300" rx="10" fill="#102216" stroke="#3fb950"/>
+    <text x="60" y="64" fill="#3fb950" font-weight="700">内循环 INNER LOOP（研究执行）</text>
+    <rect x="60" y="80" width="390" height="48" rx="6" fill="#161b22"/>
+    <text x="74" y="100" fill="#e6edf3">run_capability(kaggle_eval) → KaggleEvalExecutor</text>
+    <text x="74" y="118" fill="#8b949e">特征工程 / CV / held-out 一次性打分</text>
+    <rect x="60" y="138" width="390" height="40" rx="6" fill="#161b22"/>
+    <text x="74" y="162" fill="#e6edf3">emit EvalCompletedEvent + publish eval_report + record metric</text>
+    <rect x="60" y="188" width="390" height="40" rx="6" fill="#161b22"/>
+    <text x="74" y="212" fill="#e6edf3">decide_and_record → router.propose_route + harness.decide</text>
+    <rect x="60" y="238" width="390" height="40" rx="6" fill="#161b22"/>
+    <text x="74" y="262" fill="#e6edf3">validate_route 护栏（拒绝非法决策）</text>
+    <rect x="60" y="288" width="390" height="40" rx="6" fill="#161b22"/>
+    <text x="74" y="312" fill="#e6edf3">observe_hypothesis / register_experience（跨轮记忆）</text>
+
+    <!-- Outer loop box -->
+    <rect x="500" y="40" width="430" height="210" rx="10" fill="#1d1430" stroke="#bc8cff"/>
+    <text x="520" y="64" fill="#bc8cff" font-weight="700">外循环 OUTER LOOP（layer_11 约束审计）</text>
+    <rect x="520" y="80" width="390" height="48" rx="6" fill="#161b22"/>
+    <text x="534" y="100" fill="#e6edf3">run_capability(layer_11_external_audit)</text>
+    <text x="534" y="118" fill="#8b949e">只读策展输入，不读内循环事件（隔离）</text>
+    <rect x="520" y="138" width="390" height="40" rx="6" fill="#161b22"/>
+    <text x="534" y="162" fill="#e6edf3">约束分解 + 聚合置信度 → AREX 律</text>
+    <rect x="520" y="188" width="390" height="48" rx="6" fill="#161b22"/>
+    <text x="534" y="208" fill="#e6edf3">Accept(conf≥0.8) / Refine / Restart(≤0.4)</text>
+    <text x="534" y="226" fill="#8b949e">emit AuditCompletedEvent(recoverable)</text>
+
+    <!-- Meta loop box -->
+    <rect x="500" y="270" width="430" height="190" rx="10" fill="#2a1418" stroke="#f85149"/>
+    <text x="520" y="294" fill="#f85149" font-weight="700">元循环 META LOOP（layer_09 自递归改进）</text>
+    <rect x="520" y="308" width="390" height="44" rx="6" fill="#161b22"/>
+    <text x="534" y="328" fill="#e6edf3">run_self_evolution → StrategyArchive.commit</text>
+    <text x="534" y="346" fill="#8b949e">只改可编辑白名单（fe/model/cv_folds）</text>
+    <rect x="520" y="360" width="390" height="40" rx="6" fill="#161b22"/>
+    <text x="534" y="384" fill="#e6edf3">带可证伪预测（baseline+Δ+tolerance）</text>
+    <rect x="520" y="408" width="390" height="40" rx="6" fill="#161b22"/>
+    <text x="534" y="432" fill="#e6edf3">下轮 apply + 事后 verify；回归→真回滚</text>
+
+    <!-- feedback arrows -->
+    <path d="M470,360 C480,360 480,200 500,200" fill="none" stroke="#bc8cff" marker-end="url(#a3)"/>
+    <text x="476" y="300" fill="#bc8cff" font-size="11">Refine 改内循环参数</text>
+    <path d="M930,130 C970,130 970,360 930,360" fill="none" stroke="#f85149" marker-end="url(#a3)"/>
+    <text x="936" y="250" fill="#f85149" font-size="11">策略补丁</text>
+    <path d="M520,460 C400,520 300,520 200,400" fill="none" stroke="#3fb950" stroke-dasharray="5 4" marker-end="url(#a3)"/>
+    <text x="300" y="540" fill="#3fb950" font-size="11">playbook+experience 回流内循环</text>
+
+    <!-- budget / evolution outer -->
+    <rect x="40" y="370" width="430" height="120" rx="10" fill="#241d0a" stroke="#d29922"/>
+    <text x="60" y="394" fill="#d29922" font-weight="700">并行进化搜索（run_evolutionary_loop）</text>
+    <text x="60" y="416" fill="#8b949e">线程池并行评估（BufferedSDK 缓冲）</text>
+    <text x="60" y="438" fill="#8b949e">seed → select_parent(适应度加权) → mutate → novelty_filter(≥0.92 拒)</text>
+    <text x="60" y="460" fill="#8b949e">每代冠军过冻结审计 → EvolutionArchive</text>
+    <text x="60" y="480" fill="#8b949e">候选写入 gen{g} 分支假设树</text>
+
+    <!-- budget guard -->
+    <rect x="40" y="510" width="890" height="60" rx="10" fill="#161b22" stroke="#f85149"/>
+    <text x="60" y="534" fill="#f85149" font-weight="700">预算三维硬停（exited_budget）</text>
+    <text x="60" y="556" fill="#8b949e">max_seconds · max_capability_calls（_cap_call_counts，agent 调用也计数）· max_cost（cost_per_call）— 任一超额即停。</text>
+
+    <!-- guardrails -->
+    <rect x="40" y="590" width="890" height="120" rx="10" fill="#161b22" stroke="#39c5cf"/>
+    <text x="60" y="614" fill="#39c5cf" font-weight="700">隔离不变量 / 护栏（强制）</text>
+    <text x="60" y="636" fill="#8b949e">① 审计只读策展输入，不读内循环事件日志（hypothesis/experience/lesson）</text>
+    <text x="60" y="658" fill="#8b949e">② 内循环 agent 禁止集 = {layer_11, layer_09}（assert_inner_capability_allowed 守卫 CLI/transport）</text>
+    <text x="60" y="680" fill="#8b949e">③ 累积对象必带 run_id 按 run 过滤；④ 终态必须为合法 WorkflowStatus 枚举（如 exited_budget）</text>
+    <text x="60" y="702" fill="#8b949e">⑤ 连续 REFINE streak≥3 → Restart（recoverable=False）抛弃无进展轨迹</text>
+  </svg>
+  </div>
+</section>
+
+<!-- ===================== ④ 能力注册表与护栏 ===================== -->
+<section id="cap">
+  <h2>④ 能力注册表、Agent 工具面与护栏</h2>
+  <p class="sub">基础设施层 10 环节 + kaggle_eval + layer_11 审计 = 11 个注册能力。Agent 通过 PlatformSDK 调用 run_capability；内环工具白名单剔除外环/元循环能力，杜绝自证。</p>
+  <div class="card">
+  <svg viewBox="0 0 1120 500" xmlns="http://www.w3.org/2000/svg" font-size="12">
+    <defs><marker id="a4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker></defs>
+
+    <!-- capability registry -->
+    <rect x="40" y="30" width="520" height="430" rx="10" fill="#241d0a" stroke="#d29922"/>
+    <text x="60" y="54" fill="#d29922" font-weight="700">CapabilityRegistry（default_capability_registry）</text>
+    <g font-family="monospace" fill="#e6edf3">
+      <text x="60" y="82">layer_01 文献检索</text>
+      <text x="60" y="104">layer_02 idea 生成</text>
+      <text x="60" y="126">layer_03 基准评测 (EvalExecutor)</text>
+      <text x="60" y="148">layer_04 实验设计</text>
+      <text x="60" y="170">layer_05 数据清洗</text>
+      <text x="60" y="192">layer_06 代码开发</text>
+      <text x="60" y="214">layer_07 实验执行</text>
+      <text x="60" y="236">layer_08 结果分析/经验 (LessonExecutor)</text>
+      <text x="60" y="258">layer_09 自迭代进化 ⛔(外环预留)</text>
+      <text x="60" y="280">layer_10 对抗数据生成 (AttackExecutor)</text>
+      <text x="60" y="302">layer_11 外部审计 ⛔(外环预留)</text>
+      <text x="60" y="324" fill="#3fb950">kaggle_eval（真实端到端评测）</text>
+    </g>
+    <text x="60" y="356" fill="#8b949e">_NON_INFRA = {kaggle_eval, layer_11_external_audit}</text>
+    <text x="60" y="378" fill="#8b949e">AGENT_TOOL_NAMES（12 工具白名单）</text>
+    <text x="60" y="400" fill="#8b949e">配置内环工具时自动剔除 layer_11 / layer_09</text>
+    <text x="60" y="426" fill="#8b949e">OUTER_LOOP_RESERVED_CAPS（harness.py:77）</text>
+
+    <!-- agent tool surface -->
+    <rect x="600" y="30" width="480" height="200" rx="10" fill="#1d1430" stroke="#bc8cff"/>
+    <text x="620" y="54" fill="#bc8cff" font-weight="700">Agent 工具面（run_capability）</text>
+    <text x="620" y="80" fill="#8b949e">harness._tool_handler → PlatformSDK / orchestrator.run_capability</text>
+    <text x="620" y="104" fill="#e6edf3">GET /agent/protocol → 能力目录 + JSON Schema</text>
+    <text x="620" y="128" fill="#e6edf3">接入 Codex / Claude Code / WorkBuddy</text>
+    <text x="620" y="152" fill="#8b949e">LocalAgentHarness（默认自动驾驶）</text>
+    <text x="620" y="176" fill="#8b949e">RemoteAgentHarness（has_real_agent 区分，防静默降级）</text>
+    <text x="620" y="200" fill="#f85149">无 AGENT_COMMAND → agent 模式启动明确失败(FAILED)</text>
+
+    <!-- guardrail chain -->
+    <rect x="600" y="250" width="480" height="210" rx="10" fill="#161b22" stroke="#39c5cf"/>
+    <text x="620" y="274" fill="#39c5cf" font-weight="700">调用链护栏</text>
+    <text x="620" y="300" fill="#e6edf3">1. assert_inner_capability_allowed(cap)</text>
+    <text x="620" y="322" fill="#8b949e">   → 拒绝 layer_11/layer_09 被内环调用</text>
+    <text x="620" y="346" fill="#e6edf3">2. IterationRouter.validate_route(decision)</text>
+    <text x="620" y="368" fill="#8b949e">   → 拒绝非法 DecisionRecord（R1-R10 参考策略）</text>
+    <text x="620" y="392" fill="#e6edf3">3. transitions.validate_transition(status)</text>
+    <text x="620" y="414" fill="#8b949e">   → 状态机枚举校验（service 强制）</text>
+    <text x="620" y="438" fill="#e6edf3">4. _FROZEN_KEYS（冻结验证器）</text>
+    <text x="620" y="456" fill="#8b949e">   → 元循环严禁改 threshold/data_path</text>
+
+    <line x1="560" y1="120" x2="600" y2="120" stroke="#8b949e" marker-end="url(#a4)"/>
+    <line x1="560" y1="320" x2="600" y2="320" stroke="#8b949e" marker-end="url(#a4)"/>
+  </svg>
+  </div>
+</section>
+
+<!-- ===================== ⑤ 平台契约生成链 ===================== -->
+<section id="contract">
+  <h2>⑤ 平台契约生成链（前后端单一事实来源）</h2>
+  <p class="sub">pydantic 模型 → export_typescript.py → zod 类型。后端校验用 pydantic，前端理论用 contracts.ts，但实际运行时使用 client.ts 手写 interface（存在漂移，见⑨）。</p>
+  <div class="card">
+  <svg viewBox="0 0 1120 460" xmlns="http://www.w3.org/2000/svg" font-size="12">
+    <defs><marker id="a5" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#39c5cf"/></marker></defs>
+
+    <rect x="40" y="60" width="260" height="200" rx="10" fill="#0e2626" stroke="#39c5cf"/>
+    <text x="60" y="84" fill="#39c5cf" font-weight="700">platform_contracts/（权威）</text>
+    <text x="60" y="110" fill="#e6edf3">objects.py（16 对象）</text>
+    <text x="60" y="132" fill="#e6edf3">events.py（14 事件）</text>
+    <text x="60" y="154" fill="#e6edf3">enums.py（14 枚举）</text>
+    <text x="60" y="176" fill="#e6edf3">transitions.py</text>
+    <text x="60" y="198" fill="#e6edf3">base.py（extra="forbid"）</text>
+    <text x="60" y="220" fill="#8b949e">pydantic v2 强约束</text>
+
+    <rect x="360" y="60" width="240" height="200" rx="10" fill="#161b22" stroke="#39c5cf"/>
+    <text x="380" y="84" fill="#39c5cf" font-weight="700">export*.py（生成器）</text>
+    <text x="380" y="110" fill="#e6edf3">export.py</text>
+    <text x="380" y="132" fill="#8b949e">→ JSON Schema</text>
+    <text x="380" y="160" fill="#e6edf3">export_typescript.py</text>
+    <text x="380" y="182" fill="#8b949e">Python 注解 → zod</text>
+    <text x="380" y="204" fill="#8b949e">_scalar_core 映射</text>
+    <text x="380" y="226" fill="#8b949e">annotated_types → .min/.max</text>
+
+    <rect x="660" y="60" width="240" height="200" rx="10" fill="#161b22" stroke="#39c5cf"/>
+    <text x="680" y="84" fill="#39c5cf" font-weight="700">generated/</text>
+    <text x="680" y="110" fill="#e6edf3">objects/*.json</text>
+    <text x="680" y="132" fill="#e6edf3">events/*.json</text>
+    <text x="680" y="154" fill="#e6edf3">manifest.json</text>
+    <text x="680" y="176" fill="#e6edf3">typescript/contracts.ts</text>
+    <text x="680" y="198" fill="#8b949e">14 枚举 + 16 对象</text>
+    <text x="680" y="220" fill="#8b949e">+ 11 事件 schema</text>
+
+    <rect x="960" y="60" width="120" height="200" rx="10" fill="#241a10" stroke="#f0883e"/>
+    <text x="978" y="84" fill="#f0883e" font-weight="700">前端</text>
+    <text x="978" y="110" fill="#e6edf3">src/</text>
+    <text x="978" y="132" fill="#e6edf3">contracts.ts</text>
+    <text x="978" y="156" fill="#8b949e">⚠ 手工复制</text>
+    <text x="978" y="178" fill="#8b949e">⚠ 已漂移</text>
+    <text x="978" y="200" fill="#f85149">⚠ 未被引用</text>
+
+    <line x1="300" y1="160" x2="360" y2="160" stroke="#39c5cf" marker-end="url(#a5)"/>
+    <line x1="600" y1="160" x2="660" y2="160" stroke="#39c5cf" marker-end="url(#a5)"/>
+    <line x1="900" y1="160" x2="960" y2="160" stroke="#39c5cf" marker-end="url(#a5)"/>
+
+    <!-- backend usage -->
+    <rect x="40" y="300" width="520" height="120" rx="10" fill="#102216" stroke="#3fb950"/>
+    <text x="60" y="324" fill="#3fb950" font-weight="700">后端消费（实时）</text>
+    <text x="60" y="350" fill="#8b949e">api.py / service.py / sdk.py 直接 import pydantic 模型</text>
+    <text x="60" y="372" fill="#8b949e">events.emit → platform_contracts.events 模型</text>
+    <text x="60" y="394" fill="#8b949e">transitions.validate_*_transition 校验状态机</text>
+    <text x="60" y="416" fill="#8b949e">extra="forbid" 防止未知字段注入</text>
+
+    <rect x="600" y="300" width="480" height="120" rx="10" fill="#241a10" stroke="#f0883e"/>
+    <text x="620" y="324" fill="#f0883e" font-weight="700">前端实际消费（运行时）</text>
+    <text x="620" y="350" fill="#8b949e">api/client.ts 手写 TS interface（非生成）</text>
+    <text x="620" y="372" fill="#8b949e">safeParse 辅助（zod，实际未被调用→降级 console.error）</text>
+    <text x="620" y="394" fill="#8b949e">展示常量 STATUS_*/CATEGORY_LABELS 多处重复定义</text>
+    <text x="620" y="416" fill="#8b949e">⚠ contracts.ts 与 generated 已漂移（见⑨）</text>
+  </svg>
+  </div>
+</section>
+
+<!-- ===================== ⑥ 前端组件树与数据流 ===================== -->
+<section id="frontend">
+  <h2>⑥ 前端组件树与数据获取</h2>
+  <p class="sub">极简 SPA：React 18 + Vite + TS，零 UI/路由/状态库。App.tsx 自研路由 + 侧边栏；数据双通道 = REST 轮询（主）+ SSE（刷新触发器）。</p>
+  <div class="card">
+  <svg viewBox="0 0 1120 720" xmlns="http://www.w3.org/2000/svg" font-size="11.5">
+    <defs><marker id="a6" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker>
+      <marker id="s6" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#f0883e"/></marker></defs>
+
+    <!-- App -->
+    <rect x="430" y="20" width="260" height="60" rx="8" fill="#241a10" stroke="#f0883e"/>
+    <text x="446" y="44" fill="#f0883e" font-weight="700">App.tsx</text>
+    <text x="446" y="62" fill="#8b949e">自研路由 + 侧边栏 + 共享状态(runs/taskMap/runId)</text>
+
+    <!-- sidebar -->
+    <rect x="40" y="110" width="200" height="200" rx="8" fill="#161b22" stroke="#f0883e"/>
+    <text x="56" y="132" fill="#e6edf3" font-weight="600">侧边栏 sidebar</text>
+    <text x="56" y="154" fill="#8b949e">＋新建研究</text>
+    <text x="56" y="174" fill="#8b949e">📚 任务库</text>
+    <text x="56" y="194" fill="#8b949e">🏆 研究榜单</text>
+    <text x="56" y="214" fill="#8b949e">📊 实验对比</text>
+    <text x="56" y="234" fill="#8b949e">研究记录分组画廊</text>
+    <text x="56" y="254" fill="#8b949e">（按 category 折叠/排序）</text>
+    <text x="56" y="278" fill="#8b949e">foot: 后端:8000·前端:5173</text>
+
+    <!-- top views -->
+    <g font-family="monospace" fill="#e6edf3">
+      <rect x="270" y="110" width="180" height="56" rx="6" fill="#161b22" stroke="#f0883e"/><text x="284" y="138">NewResearch</text><text x="284" y="156" fill="#8b949e" font-family="sans-serif">两步向导</text>
+      <rect x="470" y="110" width="180" height="56" rx="6" fill="#161b22" stroke="#f0883e"/><text x="484" y="138">BenchmarkCatalog</text><text x="484" y="156" fill="#8b949e" font-family="sans-serif">任务库浏览</text>
+      <rect x="670" y="110" width="180" height="56" rx="6" fill="#161b22" stroke="#f0883e"/><text x="684" y="138">Leaderboard</text><text x="684" y="156" fill="#8b949e" font-family="sans-serif">研究榜单</text>
+      <rect x="870" y="110" width="180" height="56" rx="6" fill="#161b22" stroke="#f0883e"/><text x="884" y="138">CompareRuns</text><text x="884" y="156" fill="#8b949e" font-family="sans-serif">实验对比</text>
+    </g>
+
+    <!-- RunDashboard -->
+    <rect x="270" y="200" width="200" height="60" rx="8" fill="#241a10" stroke="#f0883e"/>
+    <text x="286" y="224" fill="#f0883e" font-weight="700">RunDashboard</text>
+    <text x="286" y="244" fill="#8b949e">run 中枢 + 9 子 tab</text>
+
+    <!-- sub tabs -->
+    <g font-family="monospace" fill="#e6edf3">
+      <rect x="40" y="300" width="200" height="40" rx="6" fill="#161b22" stroke="#f0883e"/><text x="54" y="324">DualLoopLive(总览)</text>
+      <rect x="40" y="348" width="200" height="40" rx="6" fill="#161b22" stroke="#f0883e"/><text x="54" y="372">DebugPanel(调试)</text>
+      <rect x="40" y="396" width="200" height="40" rx="6" fill="#161b22" stroke="#f0883e"/><text x="54" y="420">AuditBoard(审计)</text>
+      <rect x="40" y="444" width="200" height="40" rx="6" fill="#161b22" stroke="#f0883e"/><text x="54" y="468">HypothesisTree(假设树)</text>
+      <rect x="40" y="492" width="200" height="40" rx="6" fill="#161b22" stroke="#f0883e"/><text x="54" y="516">ImprovementTimeline</text>
+      <rect x="260" y="300" width="200" height="40" rx="6" fill="#161b22" stroke="#f0883e"/><text x="274" y="324">EvolutionPanel(进化)</text>
+      <rect x="260" y="348" width="200" height="40" rx="6" fill="#161b22" stroke="#f0883e"/><text x="274" y="372">ApprovalConsole(审批)</text>
+      <rect x="260" y="396" width="200" height="40" rx="6" fill="#161b22" stroke="#f0883e"/><text x="274" y="420">AgentTracePanel(agent)</text>
+      <rect x="260" y="444" width="200" height="40" rx="6" fill="#161b22" stroke="#f0883e"/><text x="274" y="468">EventStream(事件)</text>
+      <rect x="260" y="492" width="200" height="40" rx="6" fill="#161b22" stroke="#f0883e"/><text x="274" y="516">RegisterTask(注册，接管整屏)</text>
+    </g>
+
+    <!-- api layer -->
+    <rect x="560" y="300" width="300" height="120" rx="8" fill="#1a2030" stroke="#58a6ff"/>
+    <text x="576" y="324" fill="#58a6ff" font-weight="700">api/ 数据层</text>
+    <text x="576" y="348" fill="#e6edf3">client.ts — fetch 封装（apiGet/apiPost）</text>
+    <text x="576" y="370" fill="#e6edf3">useSSE.ts — EventSource(/stream)</text>
+    <text x="576" y="392" fill="#8b949e">手写 TS interface（非生成）</text>
+    <text x="576" y="414" fill="#8b949e">展示常量重复定义（技术债）</text>
+
+    <!-- data channels -->
+    <rect x="560" y="440" width="300" height="92" rx="8" fill="#161b22" stroke="#e3b341"/>
+    <text x="576" y="464" fill="#e3b341" font-weight="700">双通道数据获取</text>
+    <text x="576" y="488" fill="#8b949e">① REST 轮询 2.5–4s（主通道）</text>
+    <text x="576" y="510" fill="#8b949e">② SSE：仅作即时刷新触发器</text>
+    <text x="576" y="528" fill="#8b949e">   + 连接指示灯（非数据源）</text>
+
+    <!-- backend -->
+    <rect x="900" y="380" width="200" height="100" rx="8" fill="#102216" stroke="#3fb950"/>
+    <text x="916" y="404" fill="#3fb950" font-weight="700">后端 FastAPI</text>
+    <text x="916" y="426" fill="#8b949e">/api → :8000</text>
+    <text x="916" y="448" fill="#8b949e">~27 端点</text>
+    <text x="916" y="470" fill="#8b949e">SSE /stream</text>
+
+    <!-- arrows -->
+    <line x1="530" y1="50" x2="270" y2="110" stroke="#8b949e" marker-end="url(#a6)"/>
+    <line x1="530" y1="50" x2="470" y2="110" stroke="#8b949e" marker-end="url(#a6)"/>
+    <line x1="530" y1="50" x2="670" y2="110" stroke="#8b949e" marker-end="url(#a6)"/>
+    <line x1="530" y1="50" x2="870" y2="110" stroke="#8b949e" marker-end="url(#a6)"/>
+    <line x1="530" y1="80" x2="370" y2="200" stroke="#8b949e" marker-end="url(#a6)"/>
+    <line x1="240" y1="200" x2="240" y2="300" stroke="#8b949e" marker-end="url(#a6)"/>
+    <line x1="370" y1="260" x2="300" y2="300" stroke="#8b949e" marker-end="url(#a6)"/>
+    <line x1="460" y1="360" x2="560" y2="360" stroke="#58a6ff" marker-end="url(#s6)"/>
+    <line x1="860" y1="360" x2="900" y2="400" stroke="#58a6ff" marker-end="url(#s6)"/>
+    <text x="700" y="350" fill="#58a6ff" font-size="10">fetch /api/*</text>
+  </svg>
+  </div>
+  <div class="notes">
+    <b>前端技术栈（零依赖）：</b> react 18.3 / react-dom / zod（仅 3 个运行时依赖）。Vite 构建；CSS 变量手写暗色主题，无 UI 库、无图表库（对比条形图/树形/时间线均用 div+CSS 手工实现）。路由靠 App.tsx 的 <code>useState</code> 条件渲染，状态靠 props 上抛下传，无 Redux/Zustand。SSE 仅用于打断 3s 轮询立即重拉，真正数据来自 REST 轮询。
+  </div>
+</section>
+
+<!-- ===================== ⑦ 持久化结构 ===================== -->
+<section id="persist">
+  <h2>⑦ 持久化结构</h2>
+  <p class="sub">两层持久化：控制平面用 JSON 文件（Repository，原子写 + 线程锁），双循环累积记忆用 SQLite（ResearchStateStore）。自定义任务独立 JSON。</p>
+  <div class="card">
+  <svg viewBox="0 0 1120 460" xmlns="http://www.w3.org/2000/svg" font-size="12">
+    <defs><marker id="a7" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#db61a2"/></marker></defs>
+
+    <!-- JSON -->
+    <rect x="40" y="40" width="520" height="380" rx="10" fill="#2a1422" stroke="#db61a2"/>
+    <text x="60" y="64" fill="#db61a2" font-weight="700">control_plane_store.json（Repository · store.py）</text>
+    <text x="60" y="92" fill="#8b949e">_PERSIST_COLLECTIONS（内存 dict + 原子写 tmp→os.replace）</text>
+    <g fill="#e6edf3" font-family="monospace">
+      <text x="60" y="120">workflow_runs</text>
+      <text x="60" y="144">stage_runs</text>
+      <text x="60" y="168">decisions</text>
+      <text x="60" y="192">artifacts</text>
+      <text x="60" y="216">lessons</text>
+      <text x="60" y="240">metrics</text>
+      <text x="60" y="264">events</text>
+      <text x="60" y="288">research_records</text>
+      <text x="60" y="312">open_approvals</text>
+    </g>
+    <text x="60" y="344" fill="#8b949e">self._lock 线程锁保护所有写</text>
+    <text x="60" y="366" fill="#8b949e">损坏备份 → .corrupt</text>
+    <text x="60" y="392" fill="#8b949e">env: CONTROL_PLANE_STORE（默认 data/）</text>
+
+    <!-- SQLite -->
+    <rect x="600" y="40" width="480" height="380" rx="10" fill="#2a1422" stroke="#db61a2"/>
+    <text x="620" y="64" fill="#db61a2" font-weight="700">research_state.db（SQLite · store_tree.py）</text>
+    <text x="620" y="92" fill="#8b949e">ResearchStateStore（bundle 五件套）</text>
+    <g fill="#e6edf3" font-family="monospace">
+      <text x="620" y="120">hypo_nodes（假设树 AREX）</text>
+      <text x="620" y="144">experiences（DECAY=0.97 衰减）</text>
+      <text x="620" y="168">strategies（pending→verified/rolled_back）</text>
+      <text x="620" y="192">playbook_entries（确定性去重合并）</text>
+      <text x="620" y="216">evolution_candidates（EvolutionArchive）</text>
+    </g>
+    <text x="620" y="248" fill="#8b949e">全部带 run_id 按 run 过滤</text>
+    <text x="620" y="280" fill="#e6edf3" font-weight="600">HypoTreeStore / ExperienceBank</text>
+    <text x="620" y="302" fill="#e6edf3" font-weight="600">StrategyArchive / PlaybookStore</text>
+    <text x="620" y="324" fill="#8b949e">经验生命周期：去重合并 uses+1 / conf+0.05</text>
+    <text x="620" y="346" fill="#8b949e">策略生命周期：expire_pending_strategies 收尾</text>
+    <text x="620" y="372" fill="#8b949e">env: RESEARCH_STATE_DB（默认 data/）</text>
+
+    <!-- custom tasks -->
+    <rect x="40" y="440" width="1040" height="0" rx="0" fill="none"/>
+    <text x="40" y="448" fill="#8b949e" font-size="11">另：benchmark_tasks/registry.py → data/custom_tasks.json（_save_raw 原子写 + _LOCK）；env: CUSTOM_UPLOAD_DIR。</text>
+
+    <line x1="560" y1="230" x2="600" y2="230" stroke="#db61a2" stroke-dasharray="4 3" marker-end="url(#a7)"/>
+  </svg>
+  </div>
+</section>
+
+<!-- ===================== ⑧ 设计模式 ===================== -->
+<section id="patterns">
+  <h2>⑧ 关键设计模式总结</h2>
+  <div class="card">
+  <table>
+    <thead><tr><th>模式</th><th>落地位置</th><th>作用</th></tr></thead>
+    <tbody>
+      <tr><td>工厂 Factory</td><td><code>default_registry()</code> / <code>default_capability_registry()</code> / <code>create_app</code></td><td>按需注册执行器/能力，单例构建 orchestrator</td></tr>
+      <tr><td>策略 Strategy</td><td><code>IterationRouter.propose_route</code>(R1-R10) / <code>harness.decide</code></td><td>参考策略 + agent 覆盖改写</td></tr>
+      <tr><td>观察者 Observer</td><td><code>ProgressBus</code> / <code>append_event</code></td><td>per-run 队列集合，SSE 订阅推送</td></tr>
+      <tr><td>门面 Facade</td><td><code>PlatformSDK</code></td><td>执行面↔控制面唯一受控通道（6 规范操作）</td></tr>
+      <tr><td>仓储 Repository</td><td><code>Repository</code>(JSON) / <code>ResearchStateStore</code>(SQLite)</td><td>统一持久化 + 原子写 + 恢复</td></tr>
+      <tr><td>状态机 State Machine</td><td><code>transitions.validate_*_transition</code></td><td>WorkflowStatus/StageStatus 合法流转强制校验</td></tr>
+      <tr><td>护栏/守卫 Guardrail</td><td><code>validate_route</code> / <code>assert_inner_capability_allowed</code> / <code>_FROZEN_KEYS</code></td><td>拒绝非法决策、内环越权、冻结键篡改</td></tr>
+      <tr><td>能力门控 Capability Gating</td><td><code>CapabilityRegistry</code> + <code>OUTER_LOOP_RESERVED_CAPS</code> + <code>AGENT_TOOL_NAMES</code></td><td>内环工具白名单剔除外环/元循环能力</td></tr>
+      <tr><td>备忘录/回滚 Memento</td><td><code>StrategyArchive.rollback_id</code> + <code>ImprovementAppliedEvent.reverted</code></td><td>元循环 validate-and-revert</td></tr>
+      <tr><td>黑板 Blackboard</td><td>HypothesisTree / ExperienceBank / Playbook</td><td>跨 run 累积记忆，无关回放</td></tr>
+      <tr><td>依赖注入 DI</td><td><code>ClosedLoopOrchestrator</code> 构造注入</td><td>service/registry/harness/state_store 可替换（测试）</td></tr>
+      <tr><td>命令/线协议 Command</td><td><code>agent/protocol.py</code> + <code>transport.py</code></td><td>6 消息类型 + Callable/Sub/CLI/HTTP 传输</td></tr>
+      <tr><td>预算硬停 Budget</td><td><code>_cap_call_counts</code> / <code>budget</code> 三维</td><td>时间/能力调用/成本任一超额即停</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ===================== ⑨ 技术债 ===================== -->
+<section id="debt">
+  <h2>⑨ 技术债与待同步项</h2>
+  <div class="notes">
+    <p><b>1. 契约漂移（重要）：</b> <code>platform_contracts/generated/manifest.json</code> 落后于源码，缺 <code>AuditReport</code>/<code>ImprovementProposal</code>/<code>HypothesisNode</code>/<code>ExperienceEntry</code> 等新模型与若干事件；建议重跑 <code>export.py</code> + <code>export_typescript.py</code> 使 JSON 与 TS 完全一致。</p>
+    <p><b>2. 前端副本断链：</b> <code>frontend/src/contracts.ts</code> 是手工复制且已漂移（如 <code>ApprovalRequiredEvent</code> 缺 <code>run_id</code>、<code>AuditReport.constraints</code> 类型不一致），且<b>无任何文件 import 它</b>。运行时真正类型是 <code>api/client.ts</code> 的手写 interface，zod 的 <code>safeParse</code> 实际未被调用（降级为 <code>console.error</code>）。</p>
+    <p><b>3. 死代码：</b> <code>views/BenchmarkTasks.tsx</code>（132 行，已被 BenchmarkCatalog 取代）、<code>src/contracts.ts</code>；client.ts 中 <code>getExperiences</code>/<code>getBenchmarkSuites</code>/<code>runEvolution</code>/<code>evaluateRun</code>/<code>reportRunMetric</code> 已定义未消费。</p>
+    <p><b>4. 展示常量重复：</b> <code>STATUS_LABEL/STATUS_CLASS/DECISION_*</code> 在 client.ts 声明为"single source of truth"，但 App.tsx / RunDashboard.tsx / DualLoopLive.tsx 各存本地副本；<code>CATEGORY_LABELS</code> 重复 4 份。</p>
+    <p><b>5. 裸 fetch 绕过封装：</b> <code>CompareRuns</code> 直连 <code>/research-records/compare</code>、<code>ApprovalConsole</code> 直连 <code>resolve-approval</code>、<code>deleteBenchmarkTask</code>/<code>uploadDataset</code> 用裸 fetch，未走 client.ts 封装（DELETE/FormData 场景）。</p>
+    <p><b>6. evaluation/ 目录未承载独立模块：</b> 评测逻辑分散在 <code>eval_runner.py</code> 与 <code>kaggle_eval_executor.py</code>，如需统一评测抽象可在此收敛。</p>
+  </div>
+  <div class="notes" style="border-left-color:#3fb950">
+    <p><b>✅ 已解决（2026-07-31）：</b></p>
+    <p><b>① 契约漂移</b> → 重跑 <code>export.py</code> + <code>export_typescript.py</code>：<code>generated/</code> 现含 16 对象 / 14 事件（补齐 AuditReport·ImprovementProposal·HypothesisNode·ExperienceEntry + AuditCompletedEvent·AgentStepEvent·DebugEvent·ImprovementAppliedEvent），manifest.json 同步。</p>
+    <p><b>② 前端副本断链</b> → <code>frontend/src/contracts.ts</code> 已与生成物逐字节同步（修复 <code>run_id</code> / <code>constraints</code> 漂移），并被 <code>client.ts</code> 通过 <code>import { WorkflowStatus } from "../contracts"</code> + 重新导出引用；<code>safeParse</code> 现已实际用于 <code>getRuns</code>/<code>getAudit</code> 校验。</p>
+    <p><b>③ 死代码</b> → 删除孤儿 <code>views/BenchmarkTasks.tsx</code>；移除 client.ts 中 5 个未消费函数（getExperiences·getBenchmarkSuites·runEvolution·evaluateRun·reportRunMetric）。</p>
+    <p><b>④ 展示常量重复</b> → <code>STATUS_LABEL/STATUS_CLASS/DECISION_LABEL/DECISION_CLASS/CATEGORY_LABELS</code> 统一为 <code>client.ts</code> 单一来源；App·RunDashboard·BenchmarkCatalog·NewResearch 改为 import，删除本地副本（DualLoopLive 本已 import；EvolutionPanel 的策略状态标签属不同域，保留）。</p>
+    <p><b>⑤ 裸 fetch 绕过</b> → 新增 <code>compareRuns(ids)</code> 与 <code>resolveApproval(runId, resolution)</code> 封装，CompareRuns·ApprovalConsole 改用之。</p>
+    <p style="color:#8b949e">验证：前端 <code>tsc --noEmit</code> 0 errors；后端 pytest <b>132 passed</b>。另在 <code>frontend/package.json</code> 增加 <code>gen:contracts</code> 脚本，使契约再生成可一键复现。</p>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

@@ -22,6 +22,8 @@ benchmark_tasks/suites/data/
 ├── acquire_mle_bench_lite.py     # 批量下载+准备脚本（lite ∩ <100MB ∩ 非已知问题）
 ├── mle_bench_acquire_report.json # 下载报告（9/9 prepared）
 ├── mle_bench_rule_acceptance_checklist.md  # 竞赛规则接受与下载记录
+├── sab_eval_crosscheck.json      # SAB 评测文件交叉核对明细
+├── sab_eval_syntax_check.json    # SAB eval 脚本语法/接口校验明细
 └── DATA_ACQUISITION.md           # 本文件
 ```
 
@@ -42,16 +44,30 @@ benchmark_tasks/suites/data/
   字段含 `task_inst`、`domain_knowledge`、`dataset_folder_tree`、`dataset_preview`、
   `gold_program_name`、`eval_script_name` 等——即“运行 agent 所需的全部输入”，可再分发。
 
-### 未能自动拉取（需手动）
-- **完整评测数据**（真实数据集 + eval/gold 程序）：存放于密码保护的 OneDrive/SharePoint zip，
-  上游明确标注 **“Please DO NOT redistribute the unzipped data files online.”**
-  - 下载页：https://huggingface.co/datasets/osunlp/ScienceAgentBench （页面中的
-    “benchmark artifacts” 链接）
-  - 解压密码：`scienceagentbench`
-  - 解压后把内容放到 `vendor/ScienceAgentBench/benchmark/` 下，目录应形如
-    `benchmark/datasets/`、`benchmark/eval_programs/`。
-  - 该 zip 无法用脚本自动下载（SharePoint 返回登录页，需人工登录 OSU 账号）。
-- 完成上述后，即可按官方 README 跑 `bash run_evaluation.sh` 等评测流程。
+### 完整评测数据（已下载 + 解压 + 验证完成，2026-07-31）
+
+- **现状**：用户已将评测数据落到 `vendor/ScienceAgentBench/benchmark/benchmark_verified.zip`
+  （1.7GB）。该 zip **整体加密**（955 个条目中 845 个真实数据文件带传统 ZipCrypto 加密标志，
+  仅 110 个目录占位符为明文），与官方 GitHub/HF 的明文发布形态不同——属于该下载源/打包时
+  额外加密。用户用密码解压成功后，内部顶层目录恰为 `benchmark/`，出现嵌套
+  `benchmark/benchmark/`，已**拍平**为官方布局：
+  - `benchmark/datasets/` 414 文件 / 3.8G（76 个任务数据子目录）
+  - `benchmark/gold_programs/` 103 文件
+  - `benchmark/eval_programs/` 224 文件（110 顶层 eval 脚本 + `gold_results/` 参考输出）
+  - `benchmark/scoring_rubrics/` 102 文件（gated LLM-judge 资源，确定性评测不依赖）
+  - 上游许可：*"Please DO NOT redistribute the unzipped data files online."* 仅限本地使用。
+- **验证结果**（详见同目录 `SAB_EVAL_VERIFICATION.md` 及 `sab_eval_crosscheck.json` / `sab_eval_syntax_check.json`）：
+  1. **结构一致性**：102 个 verified 任务的 `gold_program_name` / `eval_script_name` 在对应目录
+     **0 缺失**；gold 103 / eval 224 / rubric 102 全部就位。
+  2. **语法与接口**：110 个顶层 eval 脚本 `py_compile` 全部通过，且每个都定义 `eval()` 并返回
+     `(int, str)` 二元组（符合 `run_eval.py` / `compute_scores.py` 调用契约）。
+  3. **端到端冒烟测试**：选依赖最轻的任务 #92（`h_importances`，仅 numpy+json）——gold 程序运行成功
+     产出 `pred_results/jnmf_h_importances.json`，`eval_h_importances.eval()` 对比参考输出返回
+     `(1, 'N/A')` 即 **success=1**。**评测流程正确**。
+- **限制（不影响流程正确性）**：仅 1 个轻量任务端到端跑通；其余 101 个 gold/eval 多依赖重科学栈
+  （rdkit / torch / scipy / scikit-image / geopandas 等），需官方 `conda env sci-agent-eval` 才能
+  全量运行。`scoring_rubrics/` 仅用于 LLM-judge 模式。
+- 完成上述后，即可按官方 README 跑 `bash run_evaluation.sh`（或 `run_eval.py` / `compute_scores.py`）等评测流程。
 
 ---
 

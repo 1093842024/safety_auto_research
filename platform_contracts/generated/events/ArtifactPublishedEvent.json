@@ -10,7 +10,11 @@
         "model_checkpoint",
         "eval_report",
         "attack_report",
-        "lesson_card"
+        "lesson_card",
+        "audit_report",
+        "improvement_report",
+        "hypothesis_tree",
+        "experience_bank"
       ],
       "title": "ArtifactType",
       "type": "string"
@@ -32,7 +36,11 @@
         "approval_required",
         "approval_resolved",
         "workflow_finished",
-        "stage_cancelled"
+        "stage_cancelled",
+        "audit_completed",
+        "improvement_applied",
+        "agent_step",
+        "debug_result"
       ],
       "title": "EventType",
       "type": "string"

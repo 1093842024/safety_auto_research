@@ -10,6 +10,10 @@ import {
   CollaborationAdjustments,
   DebugResult,
   RunDetail,
+  STATUS_LABEL,
+  STATUS_CLASS,
+  DECISION_LABEL,
+  DECISION_CLASS,
 } from "../api/client";
 import { useSSE } from "../api/useSSE";
 import { DualLoopLive } from "./DualLoopLive";
@@ -33,42 +37,6 @@ const SUBS: Array<{ id: Sub; label: string }> = [
   { id: "agent", label: "Agent 执行流水" },
   { id: "events", label: "事件" },
 ];
-
-const STATUS_LABEL: Record<string, string> = {
-  running: "运行中",
-  requested: "已请求",
-  waiting_approval: "等待审批",
-  succeeded: "成功",
-  failed: "失败",
-  exited_budget: "已完成 · 已达最大轮数",
-  exited_converged: "已完成 · 审计通过",
-  cancelled: "已取消",
-};
-const STATUS_CLASS: Record<string, string> = {
-  running: "warn",
-  requested: "accent",
-  waiting_approval: "accent",
-  succeeded: "ok",
-  failed: "bad",
-  exited_budget: "ok",
-  exited_converged: "ok",
-  cancelled: "bad",
-};
-
-const DECISION_LABEL: Record<string, string> = {
-  accept: "ACCEPT · 接受",
-  revisit: "REFINE · 复核",
-  restart: "RESTART · 重启",
-  exit_success: "EXIT_SUCCESS",
-  continue: "继续",
-};
-const DECISION_CLASS: Record<string, string> = {
-  accept: "ok",
-  revisit: "warn",
-  restart: "bad",
-  exit_success: "ok",
-  continue: "accent",
-};
 
 export function RunDashboard({ runId }: { runId: string }) {
   const [run, setRun] = useState<RunDetail | null>(null);

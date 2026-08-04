@@ -15,6 +15,7 @@ import {
   BenchmarkTask,
   STATUS_LABEL,
   STATUS_CLASS,
+  compareRuns,
 } from "../api/client";
 
 interface CompareRow {
@@ -74,10 +75,7 @@ export function CompareRuns({
     setLoading(true);
     setError("");
     try {
-      const ids = [...selected].join(",");
-      const res = await fetch(`/api/research-records/compare?ids=${encodeURIComponent(ids)}`);
-      if (!res.ok) throw new Error(`${res.status}`);
-      const data = (await res.json()) as CompareRow[];
+      const data = (await compareRuns([...selected])) as CompareRow[];
       setRows(data);
     } catch (e: any) {
       setError(String(e?.message || e));

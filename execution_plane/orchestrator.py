@@ -51,9 +51,13 @@ from .capabilities.registry import CapabilityRegistry
 from ..control_plane.store_tree import ResearchStateStore
 from ..control_plane.evolution import DEFAULT_SURFACE
 from ..control_plane.evolution import EvolutionArchive
+from ..control_plane.evolution import IslandModel
+from ..control_plane.evolution import crossover_programs as _evo_crossover_programs
 from ..control_plane.evolution import mutate as _evo_mutate
+from ..control_plane.evolution import mutate_program as _evo_mutate_program
 from ..control_plane.evolution import novelty_filter as _evo_novelty_filter
 from ..control_plane.evolution import seed_population as _evo_seed_population
+from ..control_plane.evolution import seed_program_population as _evo_seed_program_population
 from ..control_plane.evolution import select_parent as _evo_select_parent
 from ..control_plane.failure_miner import mine_failure_modes
 from ..control_plane.playbook import reflect_round
@@ -95,6 +99,8 @@ def _cand_dict(c: Any) -> dict[str, Any] | None:
         "parent_id": c.parent_id,
         "status": c.status,
         "branch": c.branch,
+        "node_kind": getattr(c, "node_kind", "config"),
+        "operator": getattr(c, "operator", None),
     }
 
 
@@ -1286,6 +1292,314 @@ class ClosedLoopOrchestrator:
             # I7 fix: return the all-time global best, not the last generation's champion.
             "best_candidate": _cand_dict(archive.best(run_id) or champion),
         }
+
+    # ------------------------------------------------------- program-level evolution
+    def run_program_evolutionary_loop(
+        self,
+        run_id: str,
+        task_config: Any,
+        backend: Any,
+        *,
+        islands: int = 1,
+        pop_per_island: int = 3,
+        generations: int = 2,
+        max_workers: int = 1,  # sequential by design (avoids macOS OpenMP segfault on 3.13)
+        novelty_threshold: float = 0.92,
+        audit: bool = True,
+        audit_params: dict[str, Any] | None = None,
+        budget: dict[str, Any] | None = None,
+        seed: int = 42,
+        progress_callback: Any | None = None,
+        cancel_event: Any | None = None,
+    ) -> dict[str, Any]:
+        """PROGRAM-LEVEL EVOLUTIONARY SEARCH (Phase B/C) over the code space.
+
+        OpenMLE-Evo island model on top of the platform dual-loop primitives: the
+        atomic operators (Draft / Improve / Debug / Crossover) produce *program*
+        candidates (``node_kind="program"``) instead of hyperparameter configs. Each
+        candidate is executed in the verifiable tabular environment (``OpenMLETaskAdapter``)
+        and scored; the generation champion faces the SAME frozen external audit as the
+        config loop (Accept -> converged).
+
+        Isolation invariants preserved (same guarantees as ``run_evolutionary_loop``):
+          * operators run ONLY on the inner loop (``run_operator`` enforces this);
+          * ``audit_input`` is built from the champion's *metrics*, never the candidate
+            code / identity -- no population narrative leaks to the audit;
+          * every candidate carries ``run_id`` (archive + HypothesisTree filtering).
+        """
+
+        from ..openmle_integration.adapter import OpenMLETaskAdapter
+        from ..openmle_integration.contracts import (
+            TEST_FITNESS,
+            VALID_SOLUTION,
+            VALID_SOLUTION_FEEDBACK,
+        )
+
+        run = self.svc.get_workflow_run(run_id)
+        obj = run.objective_snapshot or {}
+        base_goal = obj.get("goal") or obj.get("objective") or run.target_id
+        archive = (
+            self.state_store.evolution if self.state_store is not None else EvolutionArchive()
+        )
+        rng = _random.Random(seed)
+        op = str(obj.get("op", "ge"))
+
+        # Build + prepare the verifiable task environment once; state reused per eval.
+        adapter = OpenMLETaskAdapter(task_config)
+        state, info = adapter.prepare()
+        target = info.get("target", "Survived")
+        id_col = info.get("id_col", "PassengerId")
+        feature_cols = tuple(info.get("feature_cols", []))
+        task_description = info.get("TASK_DESCRIPTION", "")
+        direction = "lower" if info.get("lower_is_better") else "higher"
+
+        budget_cfg = dict(budget or (obj.get("config") or {}).get("budget") or {})
+        _t0 = _time.monotonic()
+
+        def _budget_exceeded() -> str | None:
+            if budget_cfg.get("max_seconds") is not None and (
+                _time.monotonic() - _t0 > float(budget_cfg["max_seconds"])
+            ):
+                return f"时间预算耗尽（>{budget_cfg['max_seconds']}s）"
+            if budget_cfg.get("max_capability_calls") is not None and (
+                self._cap_count(run_id) >= int(budget_cfg["max_capability_calls"])
+            ):
+                return f"能力调用预算耗尽（≥{budget_cfg['max_capability_calls']} 次）"
+            if budget_cfg.get("max_cost") is not None and (
+                self._cap_count(run_id) * float(budget_cfg.get("cost_per_call", 1.0))
+                >= float(budget_cfg["max_cost"])
+            ):
+                return f"成本预算耗尽（≥{budget_cfg['max_cost']} 单位）"
+            return None
+
+        def _emit(kind: str, **extra: Any) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback(run_id, {"kind": kind, **extra})
+            except Exception:
+                pass
+
+        steps: list[dict[str, Any]] = []
+        prior_audits: list[dict[str, Any]] = []
+
+        # ---- seed the island model with Draft-produced program nodes ----
+        model = IslandModel(islands, run_id)
+        model.seed(
+            lambda size, generation=0: _evo_seed_program_population(
+                backend, size=size, run_id=run_id, rng=rng, target=target, id_col=id_col,
+                feature_cols=feature_cols, task_description=task_description, generation=generation,
+            ),
+            size=pop_per_island, generation=0,
+        )
+        for c in model.all_candidates():
+            archive.add(c)
+
+        champion: Any = None
+        try:
+            for gen in range(generations):
+                if cancel_event is not None and cancel_event.is_set():
+                    _emit("finished", reason="cancelled")
+                    return {
+                        **self._summary(run_id, steps, "cancelled",
+                                        detail="用户通过控制面板中止了本次程序进化搜索。"),
+                        "best_candidate": _cand_dict(model.best()),
+                    }
+                over = _budget_exceeded()
+                if over:
+                    self.sdk.record_metric(run_id, "budget.exceeded", 1.0, tags={"reason": over})
+                    _emit("finished", reason="budget_exceeded", detail=over)
+                    return {
+                        **self._summary(run_id, steps, "exited_budget", detail=over),
+                        "best_candidate": _cand_dict(model.best()),
+                    }
+
+                # ---- evaluate every program candidate (sequential, inner loop) ----
+                pending = [c for isl in model.islands for c in isl if c.status == "proposed"]
+                for c in pending:
+                    self._cap_call_counts[run_id] = self._cap_call_counts.get(run_id, 0) + 1
+                    state, outcome = adapter.step_task(state, c.code)
+                    fitness = outcome.get(TEST_FITNESS)
+                    valid = bool(outcome.get(VALID_SOLUTION, False))
+                    c.fitness = float(fitness) if (valid and fitness is not None) else None
+                    c.metrics = {
+                        "primary": c.fitness,
+                        "accuracy": fitness,
+                        "valid": valid,
+                        "feedback": outcome.get(VALID_SOLUTION_FEEDBACK, ""),
+                    }
+                    c.status = "evaluated" if valid else "error"
+                    archive.update(
+                        c.candidate_id, fitness=c.fitness, metrics=c.metrics, status=c.status
+                    )
+                    self.sdk.record_metric(
+                        run_id, "program_fitness", c.fitness or 0.0,
+                        tags={"operator": c.operator or "draft", "gen": str(c.generation)},
+                    )
+                    if self.state_store is not None:
+                        self.sdk.observe_hypothesis(
+                            hypothesis=(
+                                f"[prog {c.branch}] {c.operator} -> "
+                                f"fitness={c.fitness}"
+                            ),
+                            evidence_refs=[],
+                            branch=c.branch,
+                            score=max(0.0, min(1.0, c.fitness or 0.0)),
+                            run_id=run_id,
+                            node_kind="program",
+                        )
+
+                champion = model.best()
+                if champion is None:
+                    return {
+                        **self._summary(run_id, steps, "failed",
+                                        detail="所有程序候选评估失败，请检查算子后端与数据。"),
+                        "best_candidate": None,
+                    }
+                archive.update(champion.candidate_id, status="champion")
+                steps.append({
+                    "stage": f"program_population[{gen}]",
+                    "evaluated": len([c for c in model.all_candidates() if c.status == "evaluated"]),
+                    "champion": champion.candidate_id,
+                    "champion_fitness": champion.fitness,
+                    "champion_operator": champion.operator,
+                    "detail": f"gen{gen}: best={champion.fitness:.4f} ({champion.operator})",
+                })
+                _emit("generation_done", generation=gen, champion_fitness=champion.fitness)
+
+                # ---- generation champion faces the frozen external audit ----
+                if audit:
+                    audit_input = {
+                        "objective": base_goal,
+                        "result_metrics": champion.metrics,
+                        "result_report_ref": None,
+                        "result_gate_passed": True,
+                        "result_real_eval": True,
+                        "prior_audits": list(prior_audits),
+                        "constraints": (audit_params or {}).get("constraints", []),
+                    }
+                    audit_stage, audit_result = self.run_capability(
+                        run_id,
+                        "layer_11_external_audit",
+                        {**(audit_params or {}), "objective": base_goal, "audit_input": audit_input},
+                    )
+                    audit_event = audit_result.event
+                    _route, decision = self.decide_and_record(run_id, audit_event)
+                    prior_audits.append({
+                        "confidence": getattr(audit_event, "confidence", None),
+                        "recommendation": decision.decision_type.value,
+                        "unresolved": getattr(audit_event, "unresolved_claims", []),
+                    })
+                    steps.append(self._step(f"audit[{gen}]", audit_stage, audit_result, decision))
+                    _emit("audit_done", generation=gen,
+                          confidence=getattr(audit_event, "confidence", 0),
+                          recommendation=decision.decision_type.value)
+                    if decision.decision_type == DecisionType.EXIT_SUCCESS:
+                        _emit("finished", reason="accepted", champion=champion.candidate_id)
+                        return {
+                            **self._summary(run_id, steps, "exited_converged"),
+                            "best_candidate": _cand_dict(champion),
+                        }
+
+                # ---- breed the next generation (Improve/Debug + Crossover) ----
+                if gen + 1 < generations:
+                    self._breed_program_generation(
+                        model, backend, gen + 1, rng, target, id_col, feature_cols,
+                        task_description, novelty_threshold, archive, run_id, op,
+                    )
+                    model.migrate(top_k=1, current_generation=gen + 1)
+        finally:
+            try:
+                adapter.close(state)
+            except Exception:
+                pass
+
+        _emit("finished", reason="generations", best=champion.candidate_id if champion else None)
+        return {
+            **self._summary(run_id, steps, "exited_budget",
+                            detail=f"已完成 {generations} 代程序进化搜索，未触发审计通过。"),
+            "best_candidate": _cand_dict(model.best() or champion),
+        }
+
+    def _breed_program_generation(
+        self,
+        model: Any,
+        backend: Any,
+        generation: int,
+        rng: Any,
+        target: str,
+        id_col: str,
+        feature_cols: tuple[str, ...],
+        task_description: str,
+        novelty_threshold: float,
+        archive: Any,
+        run_id: str,
+        op: str,
+    ) -> None:
+        """Breed the next program generation per island: Improve valid parents, Debug
+        failed ones, Crossover the two best, then novelty-filter by source code."""
+
+        from ..openmle_integration.operators import build_debug_feedback
+
+        for idx, island in enumerate(model.islands):
+            evaluated = [c for c in island if c.fitness is not None]
+            if not evaluated:
+                # island collapsed: reseed it
+                fresh = _evo_seed_program_population(
+                    backend, size=max(len(island), 1), run_id=run_id,
+                    rng=rng, target=target, id_col=id_col, feature_cols=feature_cols,
+                    task_description=task_description, generation=generation,
+                )
+                for c in fresh:
+                    c.branch = f"gen{generation}.isl{idx}"
+                island[:] = fresh
+                for c in fresh:
+                    archive.add(c)
+                continue
+
+            children = []
+            while len(children) < max(len(island), 1):
+                parent = _evo_select_parent(evaluated, rng=rng)
+                if parent is None:
+                    break
+                if (parent.fitness or 0.0) < 0.4:
+                    child = _evo_mutate_program(
+                        parent, "debug", backend, run_id=run_id,
+                        generation=generation, rng=rng, target=target, id_col=id_col,
+                        feature_cols=feature_cols, task_description=task_description,
+                        feedback=build_debug_feedback(parent.metrics or {}, events=None),
+                    )
+                else:
+                    child = _evo_mutate_program(
+                        parent, "improve", backend, run_id=run_id,
+                        generation=generation, rng=rng, target=target, id_col=id_col,
+                        feature_cols=feature_cols, task_description=task_description,
+                        feedback=None,
+                    )
+                children.append(child)
+            # one Crossover of the two best parents (multi-parent transform)
+            if len(evaluated) >= 2:
+                best_two = sorted(evaluated, key=lambda c: c.fitness or 0.0, reverse=True)[:2]
+                children.append(_evo_crossover_programs(
+                    best_two[0], best_two[1], backend, run_id=run_id,
+                    generation=generation, target=target, id_col=id_col,
+                    feature_cols=feature_cols, task_description=task_description,
+                ))
+            archived_codes = [c.code for c in archive.list_by_kind(run_id, "program") if c.code]
+            kept = _evo_novelty_filter(children, archived_codes=archived_codes, threshold=novelty_threshold)
+            # diversity-collapse guard: never let novelty filtering kill the whole island
+            if not kept:
+                kept = list(children)
+            for c in children:
+                c.branch = f"gen{generation}.isl{idx}"
+                archive.add(c)
+            # elitism: carry the best parent forward so quality/diversity is retained
+            best_parent = max(evaluated, key=lambda c: c.fitness or 0.0)
+            best_parent.generation = generation
+            best_parent.branch = f"gen{generation}.isl{idx}"
+            if best_parent not in kept:
+                kept.append(best_parent)
+            island[:] = kept
 
     # --------------------------------------------------- human-in-the-loop collaboration
     def _collab_pause(self, run_id: str, step_context: dict[str, Any]) -> dict[str, Any] | None:

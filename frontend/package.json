@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "gen:contracts": "cd ../.. && python -m safety_auto_research.platform_contracts.export_typescript && cp platform_contracts/generated/typescript/contracts.ts safety_auto_research/frontend/src/contracts.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

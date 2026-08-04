@@ -29,7 +29,11 @@
         "approval_required",
         "approval_resolved",
         "workflow_finished",
-        "stage_cancelled"
+        "stage_cancelled",
+        "audit_completed",
+        "improvement_applied",
+        "agent_step",
+        "debug_result"
       ],
       "title": "EventType",
       "type": "string"

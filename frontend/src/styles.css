@@ -79,6 +79,7 @@ h3 { font-size: 13px; margin: 0 0 6px; color: var(--muted); text-transform: uppe
   padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px;
 }
 .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.btn.accent { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .error { color: var(--bad); }
 .refresh { display: flex; justify-content: space-between; align-items: center; }
 ul.tight { margin: 6px 0; padding-left: 18px; }
