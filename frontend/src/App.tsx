@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { getRuns, getBenchmarkTasks, BenchmarkTask, WorkflowRunSummary, STATUS_LABEL, STATUS_CLASS, CATEGORY_LABELS } from "./api/client";
 import { NewResearch } from "./views/NewResearch";
 import { RunDashboard } from "./views/RunDashboard";
@@ -36,7 +36,7 @@ export function App() {
   // When jumping from the catalog to "new research", pre-select this task.
   const [newInitialTaskId, setNewInitialTaskId] = useState<string | null>(null);
 
-  const refreshRuns = async () => {
+  const refreshRuns = useCallback(async () => {
     try {
       const r = await getRuns();
       setRuns(r);
@@ -44,7 +44,7 @@ export function App() {
     } catch (e: any) {
       setError(String(e?.message || e));
     }
-  };
+  }, []);
 
   useEffect(() => {
     refreshRuns();
@@ -60,7 +60,7 @@ export function App() {
         console.warn("[App] Failed to load benchmark tasks:", err);
       });
     return () => clearInterval(t);
-  }, []);
+  }, [refreshRuns]);
 
   const selectRun = (id: string) => {
     setRunId(id);

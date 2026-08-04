@@ -1,17 +1,24 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { getEvents, resolveApproval } from "../api/client";
 
 /** HITL approval console: resolve open approval gates (risk-tiered). */
 export function ApprovalConsole({ runId }: { runId: string }) {
   const [approvals, setApprovals] = useState<Array<Record<string, any>>>([]);
   const [busy, setBusy] = useState<string>("");
+  const aliveRef = useRef(true);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; };
+  }, []);
 
   const load = async () => {
     try {
       const evs = await getEvents(runId);
+      if (!aliveRef.current) return;
       setApprovals(evs.filter((e) => e.event_type === "approval_required"));
     } catch (err: any) {
-      console.warn("[Polling] Failed to fetch data for ApprovalConsole:", err);
+      console.warn("[ApprovalConsole] Failed to fetch approvals:", err);
     }
   };
 
@@ -28,7 +35,7 @@ export function ApprovalConsole({ runId }: { runId: string }) {
       await resolveApproval(runId, resolution);
       await load();
     } catch (err: any) {
-      console.warn("[Polling] Failed to fetch data for ApprovalConsole:", err);
+      console.warn("[ApprovalConsole] Failed to resolve approval:", err);
     } finally {
       setBusy("");
     }

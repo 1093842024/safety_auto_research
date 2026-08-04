@@ -156,6 +156,10 @@ class OpenMLETaskAdapter(Task):
     def _step_config(self, state: Dict[str, Any], config: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Run the built-in sklearn pipeline directly (no LLM) -- cheap config-evolution path."""
         model_name = config.get("model", "rf")
+        if model_name not in _MODEL_REGISTRY:
+            raise ValueError(
+                f"unknown model {model_name!r}; expected one of {sorted(_MODEL_REGISTRY)}"
+            )
         fe = config.get("fe", "basic")
         cv_folds = int(config.get("cv_folds", self.cfg.cv_folds))
         fit_df = pd.read_csv(state["work_train"])

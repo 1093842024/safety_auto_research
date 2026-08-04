@@ -34,6 +34,26 @@ interface CompareRow {
   started_at: string | null;
 }
 
+/** Validate an array of comparison objects at runtime, logging schema drift. */
+function validateCompareRows(raw: unknown): CompareRow[] {
+  if (!Array.isArray(raw)) {
+    console.warn("[CompareRuns] Expected array, got", typeof raw);
+    return [];
+  }
+  return raw.filter((item, i) => {
+    if (!item || typeof item !== "object") {
+      console.warn("[CompareRuns] Row", i, "is not an object:", item);
+      return false;
+    }
+    const r = item as Record<string, unknown>;
+    if (typeof r.run_id !== "string") {
+      console.warn("[CompareRuns] Row", i, "missing run_id:", r);
+      return false;
+    }
+    return true;
+  }) as CompareRow[];
+}
+
 export function CompareRuns({
   onOpenRun,
 }: {
@@ -47,14 +67,14 @@ export function CompareRuns({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    getRuns().then(setAllRuns).catch(() => {});
+    getRuns().then(setAllRuns).catch((e) => console.warn("[CompareRuns] Failed to load runs:", e));
     getBenchmarkTasks()
       .then((ts) => {
         const m: Record<string, BenchmarkTask> = {};
         for (const t of ts) m[t.task_id] = t;
         setTaskMap(m);
       })
-      .catch(() => {});
+      .catch((e) => console.warn("[CompareRuns] Failed to load benchmark tasks:", e));
   }, []);
 
   const taskName = (tid: string) => taskMap[tid]?.name || tid;
@@ -75,8 +95,8 @@ export function CompareRuns({
     setLoading(true);
     setError("");
     try {
-      const data = (await compareRuns([...selected])) as CompareRow[];
-      setRows(data);
+      const raw = await compareRuns([...selected]);
+      setRows(validateCompareRows(raw));
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {

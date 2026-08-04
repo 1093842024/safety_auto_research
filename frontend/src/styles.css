@@ -87,7 +87,7 @@ ul.tight li { margin: 2px 0; }
 
 /* ----- Benchmark task catalog view ----- */
 .task-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
-.task-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 13px; }
+.task-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 13px; text-align: left; cursor: pointer; position: relative; }
 .task-card .row { margin-bottom: 4px; }
 .metrics { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
 .desc { color: var(--muted); font-size: 12.5px; line-height: 1.55; margin: 8px 0; }
@@ -139,7 +139,6 @@ html, body, #root { height: 100%; }
 .wizard-steps .step { padding: 5px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); }
 .wizard-steps .step.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .step-arrow { color: var(--muted); }
-.task-card { text-align: left; cursor: pointer; }
 .task-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 
 .config-form { display: flex; flex-direction: column; gap: 14px; }
@@ -217,7 +216,6 @@ html, body, #root { height: 100%; }
 .tool-item input { accent-color: var(--accent); }
 
 /* ===== Task-card hover tooltip (data / model / baseline) ===== */
-.task-card { position: relative; }
 .task-tip {
   display: none;
   position: absolute;
@@ -311,7 +309,7 @@ html, body, #root { height: 100%; }
   background: var(--bg);
 }
 .debug-result.ok { border-color: var(--ok); }
-.debug-result.fail { border-color: var(--red); }
+.debug-result.fail { border-color: var(--bad); }
 
 /* ===== Collaboration form ===== */
 .collab-form {

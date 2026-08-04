@@ -26,6 +26,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional, Sequence
 
+from .contracts import FAILED_STATUSES
+
 # Reward component keys (mirror OpenMLE-RL's reward decomposition).
 VALIDITY = "validity"
 IMPROVEMENT = "improvement"
@@ -151,6 +153,8 @@ def reward_population(
         else:
             prev = prev_best_fitness
         valid = not (getattr(c, "status", "") or "").startswith("rejected")
+        status = getattr(c, "status", "")
+        valid = status not in FAILED_STATUSES and not (status or "").startswith("rejected")
         out.append(
             reward_func(
                 getattr(c, "fitness", None),

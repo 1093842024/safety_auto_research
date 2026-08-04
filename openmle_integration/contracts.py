@@ -82,7 +82,7 @@ class MetricValue:
     maximize: bool
     info: Dict[str, Any] = field(default_factory=dict)
 
-    def better_than(self, other: "MetricValue") -> bool:
+    def better_than(self, other: Optional["MetricValue"]) -> bool:
         if other is None:
             return True
         if self.maximize:
@@ -98,7 +98,7 @@ class WorstMetricValue(MetricValue):
     maximize: bool = True
     info: Dict[str, Any] = field(default_factory=dict)
 
-    def better_than(self, other: "MetricValue") -> bool:
+    def better_than(self, other: Optional["MetricValue"]) -> bool:
         return False
 
 

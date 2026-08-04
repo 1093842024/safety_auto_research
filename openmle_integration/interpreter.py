@@ -31,6 +31,16 @@ class PythonInterpreter(Interpreter):
     ) -> None:
         # Use the same interpreter that runs this project so sklearn/numpy are available.
         self.python_executable = python_executable or sys.executable
+        # Fast smoke test: ensure the target interpreter can import required packages.
+        try:
+            subprocess.run(
+                [self.python_executable, "-c", "import sklearn, pandas, numpy"],
+                capture_output=True, timeout=30, check=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            raise RuntimeError(
+                f"{self.python_executable} cannot import sklearn/pandas/numpy: {e}"
+            ) from e
         self.timeout = timeout
         self._tmp = tempfile.TemporaryDirectory() if workdir is None else None
         self.workdir = workdir or self._tmp.name  # type: ignore[union-attr]

@@ -60,10 +60,12 @@ function TaskCard({
 }) {
   const isCustom = t.task_id.startsWith("custom.");
   return (
-    <button
-      type="button"
+    <div
       className={`task-card ${selected ? "selected" : ""}`}
       onClick={onSelect}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelect(); }}
+      role="button"
+      tabIndex={0}
     >
       <div className="row">
         <strong>{t.name}</strong>
@@ -111,7 +113,7 @@ function TaskCard({
         <div className="tt-row"><span className="muted">门限</span><span className="mono">{Object.keys(t.gates || {}).length ? JSON.stringify(t.gates) : "无"}</span></div>
         <div className="tt-row"><span className="muted">执行</span><span>{t.execution_mode === "agent" ? "agent 模式（已剥离 docker/Arbor）" : "平台原生双循环"}</span></div>
       </div>
-    </button>
+    </div>
   );
 }
 

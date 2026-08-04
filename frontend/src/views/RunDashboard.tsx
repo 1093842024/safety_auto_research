@@ -177,7 +177,7 @@ export function RunDashboard({ runId }: { runId: string }) {
 
   // ---- Collaboration state ----
   const [collabLoading, setCollabLoading] = useState(false);
-  const collabCtx = collabMode !== "autonomous" && (["running", "waiting_approval"].includes(runStatus))
+  const collabCtx = collabMode !== "autonomous" && runStatus === "waiting_approval"
     ? events.find((e) => e.event_type === "approval_required" && e.subject_type === "collaboration")
     : null;
   const [collabAdj, setCollabAdj] = useState<CollaborationAdjustments>({});

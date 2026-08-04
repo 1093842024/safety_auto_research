@@ -500,24 +500,31 @@ def build_debug_feedback(failed_outcome: dict, events=None) -> str:
     if events:
         try:
             from ..control_plane.failure_miner import mine_failure_modes
-
-            modes = mine_failure_modes(list(events), top_n=2)
-            if modes:
-                return "; ".join(m["mode"] for m in modes)
-        except Exception:
-            pass
+        except ImportError:
+            mine_failure_modes = None
+        if mine_failure_modes is not None:
+            try:
+                modes = mine_failure_modes(list(events), top_n=2)
+                if modes:
+                    return "; ".join(m["mode"] for m in modes)
+            except Exception:
+                import logging
+                logging.warning("failure_miner failed for debug feedback", exc_info=True)
     return failed_outcome.get(VALID_SOLUTION_FEEDBACK) or "program failed to produce a valid submission"
 
 
-def select_crossover_parents(archive, run_id: str, k: int = 2):
+def select_crossover_parents(archive, run_id: str, k: int = 2, maximize: bool = True):
     """Pick ``k`` evaluated program candidates (with code) to crossover.
 
     Reads only from the run-scoped EvolutionArchive (program nodes) -- the local
     analogue of drawing parents from the StrategyArchive / search tree. Isolation
     invariant #3 (run_id filtering) is enforced by the archive query.
+
+    ``maximize=True`` sorts highest fitness first (typical for accuracy);
+    ``maximize=False`` sorts lowest first (for lower-is-better metrics).
     """
 
     progs = [c for c in archive.list_by_kind(run_id, "program")
              if c.code and c.fitness is not None]
-    progs.sort(key=lambda c: c.fitness or 0.0, reverse=True)
+    progs.sort(key=lambda c: c.fitness, reverse=maximize)
     return progs[:k]
