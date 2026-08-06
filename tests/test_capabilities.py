@@ -184,6 +184,42 @@ class ProtocolEndpointTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIsNotNone(resp.json()["stage_run_id"])
 
+    def test_capability_run_rejects_reserved_outer_caps(self) -> None:
+        """缺陷1 regression: the HTTP tool endpoint must NOT let an external caller
+        run the reserved OUTER-loop capabilities (audit / self-evolution) on its own
+        result — that would destroy the evaluation-bias / self-confirmation guarantee."""
+        from fastapi.testclient import TestClient
+
+        from safety_auto_research.control_plane.api import create_app
+
+        app = create_app(ControlPlaneService())
+        client = TestClient(app)
+        run = client.post(
+            "/workflow-runs",
+            json={
+                "program_id": "p1",
+                "run_type": "standard_research",
+                "entry_stage": "03_eval",
+                "target_id": "m1",
+                "objective_snapshot": {"target_metric": "accuracy", "target_threshold": 0.8},
+            },
+        ).json()
+        client.post(f"/workflow-runs/{run['run_id']}/start")
+        for reserved in ("layer_11_external_audit", "layer_09_self_iterative_evolution"):
+            resp = client.post(
+                f"/workflow-runs/{run['run_id']}/capabilities/{reserved}/run",
+                json={"params": {}},
+            )
+            self.assertEqual(
+                resp.status_code, 400, msg=f"reserved cap {reserved} should be rejected (400)"
+            )
+        # A legitimate inner capability must still be allowed through this endpoint.
+        ok = client.post(
+            f"/workflow-runs/{run['run_id']}/capabilities/layer_01_literature_research/run",
+            json={"params": {"label": "seed"}},
+        )
+        self.assertEqual(ok.status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

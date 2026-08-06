@@ -3,13 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>safety_auto_research · 技术架构图（详细版）</title>
+<title>safety_auto_research · 技术架构图（详细版 v2）</title>
 <style>
   :root{
     --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#30363d;
     --txt:#e6edf3; --muted:#8b949e;
     --fe:#f0883e; --cp:#3fb950; --ep:#bc8cff; --ct:#39c5cf; --inf:#d29922;
     --persist:#db61a2; --ext:#f85149; --accent:#58a6ff; --warn:#e3b341;
+    --openrsi:#7ee787; --mea:#ff7b72;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);
@@ -34,6 +35,8 @@
   .notes{background:var(--panel);border:1px solid var(--border);border-left:4px solid var(--warn);
     border-radius:8px;padding:12px 16px;font-size:13px;margin-top:12px}
   .notes b{color:var(--warn)}
+  .notes.ok{border-left-color:var(--cp)} .notes.ok b{color:var(--cp)}
+  .notes.bad{border-left-color:var(--ext)} .notes.bad b{color:var(--ext)}
   table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
   th,td{border:1px solid var(--border);padding:6px 9px;text-align:left;vertical-align:top}
   th{background:var(--panel2);color:var(--txt)}
@@ -44,14 +47,14 @@
 </head>
 <body>
 <header>
-  <h1>safety_auto_research · 平台技术架构图（详细版）</h1>
-  <p>面向 AI 安全研发的自动化研究平台 · 双循环 + 闭环 + 进化搜索 + 自递归改进元循环 · 控制平面 / 执行平面 / 平台契约 / 前端 SPA</p>
+  <h1>safety_auto_research · 平台技术架构图（详细版 v2 · @2026-08-05）</h1>
+  <p>面向 AI 安全研发的自动化研究平台 · 双循环 + 元循环 + <b style="color:var(--openrsi)">OpenRSI 程序级岛模型</b> + <b style="color:var(--mea)">MEA 控制循环</b> · 控制平面 / 执行平面 / 平台契约 / 前端 SPA · 已含 2026-08-04~05 代码审查加固</p>
 </header>
 <nav>
   <a href="#overview">① 全局分层架构</a>
   <a href="#backend">② 后端模块依赖与调用流</a>
-  <a href="#dual">③ 双循环 / 元循环编排</a>
-  <a href="#cap">④ 能力注册表与护栏</a>
+  <a href="#dual">③ 双循环 / 元循环 / MEA / 程序岛模型</a>
+  <a href="#cap">④ 能力注册表与护栏（含算子）</a>
   <a href="#contract">⑤ 平台契约生成链</a>
   <a href="#frontend">⑥ 前端组件树与数据流</a>
   <a href="#persist">⑦ 持久化结构</a>
@@ -63,19 +66,13 @@
 <!-- ===================== ① 全局分层架构 ===================== -->
 <section id="overview">
   <h2>① 全局分层架构总览</h2>
-  <p class="sub">从用户浏览器到外部 Agent / 持久化，自顶向下 7 层 + 2 个横切面（平台契约、护栏）。箭头表示主要调用 / 数据流方向。</p>
+  <p class="sub">自顶向下 7 层 + 2 个横切面（平台契约、护栏）。新增 <b style="color:var(--openrsi)">OpenRSI/OpenMLE 集成层</b> 与 <b style="color:var(--mea)">MEA 控制层</b>（2026-08-04~05）。箭头表示主要调用 / 数据流方向。</p>
   <div class="card">
-  <svg viewBox="0 0 1120 980" xmlns="http://www.w3.org/2000/svg" font-size="12">
+  <svg viewBox="0 0 1120 1100" xmlns="http://www.w3.org/2000/svg" font-size="12">
     <defs>
       <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
         <path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/>
       </marker>
-      <style>
-        .bx{fill:#161b22;stroke:#30363d;stroke-width:1.3;rx:8}
-        .t{fill:#e6edf3}
-        .m{fill:#8b949e}
-        .lbl{fill:#e6edf3;font-weight:600}
-      </style>
     </defs>
 
     <!-- External Agent -->
@@ -84,7 +81,7 @@
       <text x="836" y="48" class="lbl" fill="#f85149">🌐 外部 Agent 接入（可选）</text>
       <text x="836" y="68" class="m">RemoteAgentHarness · Transport 层</text>
       <text x="836" y="84" class="m">Codex / Claude Code / WorkBuddy CLI</text>
-      <text x="836" y="100" class="m">env: AGENT_COMMAND</text>
+      <text x="836" y="100" class="m">env: AGENT_COMMAND（缺失→FAILED）</text>
     </g>
     <line x1="820" y1="110" x2="700" y2="205" stroke="#f85149" stroke-width="1.5" marker-end="url(#arr)"/>
 
@@ -94,9 +91,9 @@
       <text x="56" y="48" class="lbl" fill="#f0883e">🖥️ 前端层 · React 18 + Vite + TypeScript（极简 SPA，5173）</text>
       <text x="56" y="68" class="m">App.tsx（自研路由/侧边栏）</text>
       <text x="320" y="68" class="m">views/（13 视图：NewResearch·RunDashboard·Leaderboard·CompareRuns·…）</text>
-      <text x="56" y="86" class="m">api/client.ts（fetch 封装）</text>
+      <text x="56" y="86" class="m">api/client.ts（fetch 封装 + 契约引用）</text>
       <text x="360" y="86" class="m">api/useSSE.ts（EventSource）</text>
-      <text x="600" y="86" class="m">src/contracts.ts（zod，当前未引用）</text>
+      <text x="600" y="86" class="m">src/contracts.ts（zod，已引用）</text>
     </g>
 
     <!-- API boundary -->
@@ -105,7 +102,7 @@
       <text x="56" y="154" class="lbl" fill="#58a6ff">🔌 API 边界</text>
       <text x="200" y="154" class="m">Vite dev proxy: /api → rewrite → http://127.0.0.1:8000</text>
       <text x="56" y="176" class="m">FastAPI（uvicorn, 同步 + ThreadPoolExecutor）</text>
-      <text x="430" y="176" class="m">约 27 端点 · SSE /workflow-runs/{id}/stream</text>
+      <text x="430" y="176" class="m">约 28 端点 · SSE /workflow-runs/{id}/stream · /mea</text>
     </g>
     <line x1="420" y1="110" x2="420" y2="130" stroke="#8b949e" marker-end="url(#arr)"/>
     <line x1="420" y1="196" x2="420" y2="218" stroke="#8b949e" marker-end="url(#arr)"/>
@@ -123,7 +120,7 @@
       <rect class="bx" x="56" y="308" width="220" height="46" fill="#161b22"/>
       <text x="66" y="326" class="t">store_tree.py</text><text x="66" y="344" class="m">ResearchStateStore (SQLite)</text>
       <rect class="bx" x="290" y="308" width="220" height="46" fill="#161b22"/>
-      <text x="300" y="326" class="t">schemas.py</text><text x="300" y="344" class="m">请求/响应 pydantic 模型</text>
+      <text x="300" y="326" class="t">task_state.py</text><text x="300" y="344" class="m">MEA TaskState（新增）</text>
       <rect class="bx" x="524" y="308" width="258" height="46" fill="#161b22"/>
       <text x="534" y="326" class="t">progress_bus.py</text><text x="534" y="344" class="m">SSE 进度总线（多订阅者）</text>
     </g>
@@ -148,16 +145,16 @@
       <text x="574" y="502" class="t">decision/router.py</text><text x="574" y="520" class="m">IterationRouter + 护栏</text>
 
       <rect class="bx" x="56" y="540" width="240" height="50" fill="#161b22"/>
-      <text x="66" y="558" class="t">agent/protocol.py</text><text x="66" y="576" class="m">线协议（6 消息）</text>
+      <text x="66" y="558" class="t">mea.py</text><text x="66" y="576" class="m">MEA 主控（新增）</text>
       <rect class="bx" x="310" y="540" width="240" height="50" fill="#161b22"/>
-      <text x="320" y="558" class="t">agent/transport.py</text><text x="320" y="576" class="m">Callable/Sub/CLI/HTTP</text>
+      <text x="320" y="558" class="t">agents/</text><text x="320" y="576" class="m">RoleAgent 注册/适配器</text>
       <rect class="bx" x="564" y="540" width="218" height="50" fill="#161b22"/>
       <text x="574" y="558" class="t">registry.py</text><text x="574" y="576" class="m">AdapterRegistry</text>
     </g>
 
     <!-- Platform Contracts (cross-cutting) -->
     <g>
-      <rect class="bx" x="820" y="218" width="270" height="382" rx="8" fill="#0e2626" stroke="#39c5cf"/>
+      <rect class="bx" x="820" y="218" width="270" height="290" rx="8" fill="#0e2626" stroke="#39c5cf"/>
       <text x="836" y="242" class="lbl" fill="#39c5cf">📜 平台契约层 platform_contracts/</text>
       <text x="836" y="266" class="m">objects.py（16 对象模型）</text>
       <text x="836" y="286" class="m">events.py（14 事件模型）</text>
@@ -172,46 +169,74 @@
       <text x="836" y="482" class="lbl" fill="#39c5cf">↧ 输入到</text>
       <text x="836" y="502" class="m">前端 TS 类型</text>
       <text x="836" y="522" class="m">后端 pydantic 校验</text>
-      <text x="836" y="544" class="m">（extra="forbid" 强约束）</text>
+      <text x="836" y="542" class="m">（extra="forbid" 强约束）</text>
     </g>
     <line x1="820" y1="300" x2="800" y2="300" stroke="#39c5cf" stroke-dasharray="4 3" marker-end="url(#arr)"/>
-    <line x1="820" y1="600" x2="800" y2="600" stroke="#39c5cf" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+    <line x1="820" y1="500" x2="800" y2="500" stroke="#39c5cf" stroke-dasharray="4 3" marker-end="url(#arr)"/>
 
     <!-- Infrastructure -->
     <g>
-      <rect class="bx" x="40" y="612" width="760" height="100" rx="8" fill="#241d0a" stroke="#d29922"/>
+      <rect class="bx" x="40" y="612" width="760" height="86" rx="8" fill="#241d0a" stroke="#d29922"/>
       <text x="56" y="636" class="lbl" fill="#d29922">🧱 基础设施层 infrastructure/（10 研究环节可复用资产）</text>
       <text x="56" y="658" class="m">①文献检索 ②idea生成 ③基准评测 ④实验设计 ⑤数据清洗</text>
       <text x="56" y="678" class="m">⑥代码开发 ⑦实验执行 ⑧结果分析/经验 ⑨自迭代进化 ⑩对抗数据生成</text>
-      <text x="56" y="698" class="m">skill / agent / 数据集任务 / 评测 · 由 capabilities 注册为可调工具</text>
+      <text x="56" y="692" class="m">skill / agent / 数据集任务 / 评测 · 由 capabilities 注册为可调工具</text>
     </g>
     <line x1="420" y1="600" x2="420" y2="612" stroke="#8b949e" marker-end="url(#arr)"/>
 
     <!-- Persistence -->
     <g>
-      <rect class="bx" x="40" y="724" width="760" height="86" rx="8" fill="#2a1422" stroke="#db61a2"/>
-      <text x="56" y="748" class="lbl" fill="#db61a2">💾 持久化层 data/</text>
-      <text x="56" y="770" class="m">control_plane_store.json（Repository）</text>
-      <text x="330" y="770" class="m">research_state.db（SQLite）</text>
-      <text x="600" y="770" class="m">custom_tasks.json（自定义任务）</text>
-      <text x="56" y="792" class="m">workflow_runs·stage_runs·decisions·artifacts·events·research_records…</text>
-      <text x="330" y="792" class="m">hypo_nodes·experiences·strategies·playbook_entries·evolution_candidates</text>
+      <rect class="bx" x="40" y="710" width="760" height="96" rx="8" fill="#2a1422" stroke="#db61a2"/>
+      <text x="56" y="734" class="lbl" fill="#db61a2">💾 持久化层 data/</text>
+      <text x="56" y="756" class="m">control_plane_store.json（Repository）</text>
+      <text x="330" y="756" class="m">research_state.db（SQLite）</text>
+      <text x="600" y="756" class="m">custom_tasks.json（自定义任务）</text>
+      <text x="56" y="780" class="m">workflow_runs·stage_runs·decisions·artifacts·events·research_records…</text>
+      <text x="56" y="800" class="m">hypo_nodes·experiences·strategies·playbook_entries·<b style="fill:var(--openrsi)">evolution_candidates(config+program)</b></text>
     </g>
-    <line x1="300" y1="368" x2="280" y2="724" stroke="#db61a2" stroke-dasharray="4 3" marker-end="url(#arr)"/>
-    <line x1="500" y1="498" x2="500" y2="724" stroke="#db61a2" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+    <line x1="300" y1="368" x2="280" y2="710" stroke="#db61a2" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+    <line x1="500" y1="498" x2="500" y2="710" stroke="#db61a2" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+
+    <!-- MEA control layer (new) -->
+    <g>
+      <rect class="bx" x="820" y="528" width="270" height="150" rx="8" fill="#2a1418" stroke="#ff7b72"/>
+      <text x="836" y="552" class="lbl" fill="#ff7b72">🔁 MEA 控制层（Manage-Execute-Audit）</text>
+      <text x="836" y="574" class="m">execution_plane/mea.py</text>
+      <text x="836" y="594" class="m">orchestrator.run_mea_loop</text>
+      <text x="836" y="616" class="m">三角色：Manager / Executor /</text>
+      <text x="836" y="634" class="m">Auditor（异模型 / 异后端）</text>
+      <text x="836" y="656" class="m">config/role_agents.yaml</text>
+      <text x="836" y="674" class="m">agents/{adapter,registry}.py</text>
+    </g>
+    <line x1="820" y1="580" x2="800" y2="430" stroke="#ff7b72" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+    <line x1="820" y1="640" x2="800" y2="520" stroke="#ff7b72" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+
+    <!-- OpenRSI integration layer (new) -->
+    <g>
+      <rect class="bx" x="820" y="688" width="270" height="150" rx="8" fill="#0e2620" stroke="#7ee787"/>
+      <text x="836" y="712" class="lbl" fill="#7ee787">🧬 OpenRSI/OpenMLE 集成层</text>
+      <text x="836" y="732" class="m">openmle_integration/（新增）</text>
+      <text x="836" y="752" class="m">contracts·operators·adapter</text>
+      <text x="836" y="772" class="m">interpreter·inner_capability</text>
+      <text x="836" y="792" class="m">reward_bridge·local_train</text>
+      <text x="836" y="812" class="m">vendor/openmle_dojo（参考副本）</text>
+    </g>
+    <line x1="820" y1="740" x2="800" y2="500" stroke="#7ee787" stroke-dasharray="4 3" marker-end="url(#arr)"/>
 
     <!-- benchmark_tasks floating -->
     <g>
-      <rect class="bx" x="820" y="612" width="270" height="100" rx="8" fill="#161b22" stroke="#30363d"/>
-      <text x="836" y="636" class="lbl">📚 benchmark_tasks/</text>
-      <text x="836" y="658" class="m">18 任务 / 11 类别</text>
-      <text x="836" y="678" class="m">registry.py（8 类型 Schema 驱动）</text>
-      <text x="836" y="698" class="m">suites/（SAB·MLE-bench）</text>
+      <rect class="bx" x="820" y="848" width="270" height="110" rx="8" fill="#161b22" stroke="#30363d"/>
+      <text x="836" y="872" class="lbl">📚 benchmark_tasks/</text>
+      <text x="836" y="894" class="m">18 任务 / 11 类别</text>
+      <text x="836" y="914" class="m">registry.py（8 类型 Schema 驱动）</text>
+      <text x="836" y="934" class="m">suites/（SAB·MLE-bench）</text>
+      <text x="836" y="954" class="m">evolution_candidates(岛模型)</text>
     </g>
 
     <!-- guardrail note -->
-    <text x="40" y="846" class="m" font-size="11">横切护栏：</text>
-    <text x="110" y="846" class="m" font-size="11" fill="#f85149">① 内/外环隔离（OUTER_LOOP_RESERVED_CAPS）· ② 决策护栏 validate_route · ③ 状态机 transitions · ④ 冻结验证器 _FROZEN_KEYS · ⑤ 预算三维硬停</text>
+    <text x="40" y="828" class="m" font-size="11">横切护栏：</text>
+    <text x="110" y="828" class="m" font-size="11" fill="#f85149">① 内/外环隔离（OUTER_LOOP_RESERVED_CAPS）· ② 决策护栏 validate_route · ③ 状态机 transitions · ④ 冻结验证器 _FROZEN_KEYS · ⑤ 预算三维硬停 · ⑥ 算子白名单 assert_operator_inner_only(fail-closed) · ⑦ MEA Auditor≠Executor(异模型)</text>
+    <text x="40" y="850" class="m" font-size="11" fill="#ff7b72">⚠ C1 待闭环：interpreter.py 把宿主全部 env（含 *_KEY/*_TOKEN）透传给 LLM 生成代码 → 需最小 env 白名单 + 沙箱。</text>
   </svg>
   <div class="legend">
     <span><i style="background:#f0883e"></i>前端</span>
@@ -222,6 +247,8 @@
     <span><i style="background:#d29922"></i>基础设施</span>
     <span><i style="background:#db61a2"></i>持久化</span>
     <span><i style="background:#f85149"></i>外部 Agent</span>
+    <span><i style="background:#7ee787"></i>OpenRSI/OpenMLE</span>
+    <span><i style="background:#ff7b72"></i>MEA 控制层</span>
   </div>
   </div>
 </section>
@@ -229,20 +256,22 @@
 <!-- ===================== ② 后端模块依赖与调用流 ===================== -->
 <section id="backend">
   <h2>② 后端模块依赖与调用流</h2>
-  <p class="sub">谁持有谁、谁调用谁。api.py 暴露 HTTP，内部组合 ControlPlaneService + ResearchStateStore + ClosedLoopOrchestrator；执行面经 PlatformSDK 唯一通道回写控制面。</p>
+  <p class="sub">api.py 暴露 HTTP，组合 ControlPlaneService + ResearchStateStore + ClosedLoopOrchestrator（+MEA）；执行面经 PlatformSDK 唯一通道回写。2026-08-04~05 新增 openmle_integration 包与 MEA 控制层。</p>
   <div class="card">
-  <svg viewBox="0 0 1120 720" xmlns="http://www.w3.org/2000/svg" font-size="12">
-    <defs><marker id="a2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker></defs>
+  <svg viewBox="0 0 1120 780" xmlns="http://www.w3.org/2000/svg" font-size="12">
+    <defs><marker id="a2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker>
+      <marker id="a2g" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#7ee787"/></marker>
+      <marker id="a2m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#ff7b72"/></marker></defs>
 
     <!-- api.py -->
     <rect x="40" y="30" width="300" height="64" rx="8" fill="#102216" stroke="#3fb950"/>
     <text x="56" y="54" fill="#3fb950" font-weight="600">api.py · create_app()</text>
-    <text x="56" y="74" fill="#8b949e">FastAPI 应用 · ~27 端点 · SSE</text>
+    <text x="56" y="74" fill="#8b949e">FastAPI 应用 · ~28 端点 · SSE · /mea</text>
 
     <!-- service -->
     <rect x="40" y="140" width="230" height="58" rx="8" fill="#161b22" stroke="#3fb950"/>
     <text x="56" y="164" fill="#e6edf3" font-weight="600">ControlPlaneService</text>
-    <text x="56" y="184" fill="#8b949e">状态机 · 榜单 · 审批</text>
+    <text x="56" y="184" fill="#8b949e">状态机 · 榜单 · 审批 · MEA 态</text>
 
     <!-- repository -->
     <rect x="40" y="240" width="230" height="58" rx="8" fill="#161b22" stroke="#3fb950"/>
@@ -257,7 +286,7 @@
     <!-- orchestrator -->
     <rect x="700" y="30" width="360" height="64" rx="8" fill="#1d1430" stroke="#bc8cff"/>
     <text x="716" y="54" fill="#bc8cff" font-weight="600">ClosedLoopOrchestrator</text>
-    <text x="716" y="74" fill="#8b949e">run_dual_loop / run_closed_loop / run_evolutionary_loop / run_self_evolution</text>
+    <text x="716" y="74" fill="#8b949e">run_dual_loop / run_evolutionary_loop / run_program_evolutionary_loop / run_mea_loop</text>
 
     <!-- sdk -->
     <rect x="700" y="140" width="360" height="58" rx="8" fill="#161b22" stroke="#bc8cff"/>
@@ -290,16 +319,35 @@
     <!-- evolution / failure_miner / playbook -->
     <rect x="40" y="360" width="560" height="150" rx="8" fill="#161b22" stroke="#30363d"/>
     <text x="56" y="382" fill="#e6edf3" font-weight="600">双循环支撑模块（control_plane/）</text>
-    <text x="56" y="404" fill="#8b949e">evolution.py — 种群/选择/变异/新颖性拒绝/EvolutionArchive</text>
+    <text x="56" y="404" fill="#8b949e">evolution.py — 种群/选择/变异/<b style="fill:var(--openrsi)">IslandModel 双粒度新颖性</b>/EvolutionArchive</text>
     <text x="56" y="426" fill="#8b949e">failure_miner.py — 事件日志聚类失败模式</text>
     <text x="56" y="448" fill="#8b949e">playbook.py — ACE 式 Playbook（确定性去重合并）</text>
     <text x="56" y="470" fill="#8b949e">llm_judge.py — 真实 LLM judge（score/rationale/evidence_refs）</text>
     <text x="56" y="492" fill="#8b949e">eval_runner.py — 基准评测分发（F1/embedding recall@K）</text>
 
+    <!-- openmle_integration (new) -->
+    <rect x="40" y="540" width="560" height="150" rx="8" fill="#0e2620" stroke="#7ee787"/>
+    <text x="56" y="562" fill="#7ee787" font-weight="600">openmle_integration/（OpenRSI/OpenMLE，新增顶层包）</text>
+    <text x="56" y="584" fill="#8b949e">contracts.py — 零依赖镜像 dojo（Task/Interpreter/MetricValue/Node/Journal）</text>
+    <text x="56" y="606" fill="#8b949e">operators.py — 四原子算子 Draft/Improve/Debug/Crossover + 各 LLM 后端</text>
+    <text x="56" y="628" fill="#8b949e">adapter.py — OpenMLETaskAdapter（sklearn 流水线 + step_task）</text>
+    <text x="56" y="650" fill="#8b949e">interpreter.py — PythonInterpreter（⚠ C1 沙箱待闭环）</text>
+    <text x="56" y="672" fill="#8b949e">inner_capability.py — assert_operator_inner_only（白名单）· reward_bridge · local_train</text>
+
+    <!-- MEA control (new) -->
+    <rect x="620" y="540" width="440" height="150" rx="8" fill="#2a1418" stroke="#ff7b72"/>
+    <text x="636" y="562" fill="#ff7b72" font-weight="600">MEA 控制层（Manage-Execute-Audit，新增）</text>
+    <text x="636" y="584" fill="#8b949e">execution_plane/mea.py — run_mea_loop_core + MeaMetrics</text>
+    <text x="636" y="606" fill="#8b949e">control_plane/task_state.py — StateRecord/TaskState/AuditVerdict</text>
+    <text x="636" y="628" fill="#8b949e">execution_plane/agents/ — RoleAgentAdapter + RoleAgentRegistry</text>
+    <text x="636" y="650" fill="#8b949e">  （require_different_from：Auditor≠Executor 异模型）</text>
+    <text x="636" y="672" fill="#8b949e">config/role_agents.yaml — role→backend/model/budget（R5 评测强制确定性）</text>
+
     <!-- progress_bus -->
-    <rect x="40" y="540" width="560" height="64" rx="8" fill="#161b22" stroke="#30363d"/>
-    <text x="56" y="562" fill="#e6edf3" font-weight="600">progress_bus.py · ProgressBus（单例）</text>
-    <text x="56" y="582" fill="#8b949e">per-run asyncio.Queue 集合 · emit 线程安全 · SSE /stream 订阅</text>
+    <rect x="40" y="610" width="0" height="0" fill="none"/>
+    <rect x="620" y="700" width="440" height="50" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="636" y="726" fill="#e6edf3" font-weight="600">progress_bus.py · ProgressBus（单例）</text>
+    <text x="636" y="744" fill="#8b949e">per-run asyncio.Queue 集合 · emit 线程安全 · SSE /stream 订阅</text>
 
     <!-- arrows -->
     <line x1="190" y1="94" x2="155" y2="140" stroke="#8b949e" marker-end="url(#a2)"/>
@@ -310,23 +358,26 @@
     <line x1="880" y1="198" x2="880" y2="240" stroke="#8b949e" marker-end="url(#a2)"/>
     <line x1="785" y1="300" x2="785" y2="388" stroke="#8b949e" marker-end="url(#a2)"/>
     <line x1="155" y1="298" x2="155" y2="360" stroke="#8b949e" marker-end="url(#a2)"/>
-    <line x1="155" y1="510" x2="155" y2="540" stroke="#8b949e" marker-end="url(#a2)"/>
     <line x1="420" y1="440" x2="700" y2="300" stroke="#d29922" stroke-dasharray="4 3" marker-end="url(#a2)"/>
     <line x1="700" y1="448" x2="500" y2="448" stroke="#bc8cff" stroke-dasharray="4 3" marker-end="url(#a2)"/>
+    <line x1="630" y1="68" x2="630" y2="540" stroke="#7ee787" stroke-dasharray="4 3" marker-end="url(#a2g)"/>
+    <line x1="700" y1="68" x2="700" y2="540" stroke="#ff7b72" stroke-dasharray="4 3" marker-end="url(#a2m)"/>
   </svg>
   </div>
   <div class="notes">
-    <b>关键调用链：</b> <code>api.py</code> 持有单例 <code>ControlPlaneService</code> + <code>ResearchStateStore</code> + <code>ClosedLoopOrchestrator</code>。耗时操作（dual-loop / evolution）经后台线程 <code>_drive</code> 执行，通过 <code>ProgressBus.emit</code> 推 SSE。执行面所有动作必须经 <code>PlatformSDK</code> 回写控制面（门面模式），保证被审计、被护栏约束。<code>orchestrator.run_capability</code> 是 agent 工具调用入口，能力计数在方法本体（agent 内部调用无法绕过预算）。
+    <b>关键调用链：</b> <code>api.py</code> 持有单例 <code>ControlPlaneService</code> + <code>ResearchStateStore</code> + <code>ClosedLoopOrchestrator</code>。耗时操作（dual-loop / evolution / mea）经后台线程 <code>_drive</code> 执行，通过 <code>ProgressBus.emit</code> 推 SSE。执行面所有动作经 <code>PlatformSDK</code> 回写控制面（门面模式），保证被审计、被护栏约束。<code>run_capability</code> 是 agent 工具调用入口，能力计数在方法本体（agent 内部调用无法绕过预算）。<b style="color:var(--openrsi)">新增</b>：<code>run_program_evolutionary_loop</code> 经 <code>openmle_integration</code> 包（OpenMLETaskAdapter + operators + IslandModel）实现程序级岛模型；<b style="color:var(--mea)">新增</b>：<code>run_mea_loop</code> 由 <code>execution_plane/mea.py</code> + <code>task_state.py</code> + <code>agents/</code> 承载三角色编排。
   </div>
 </section>
 
-<!-- ===================== ③ 双循环编排 ===================== -->
+<!-- ===================== ③ 双循环 + 元循环 + MEA + 程序岛模型 ===================== -->
 <section id="dual">
-  <h2>③ 双循环 + 元循环编排时序</h2>
-  <p class="sub">内循环做研究 → 外循环（layer_11）约束审计 Accept/Refine/Restart → 元循环（layer_09）自递归改进（冻结验证器 + 可证伪预测 + 回滚）；反馈回灌内循环下一轮。</p>
+  <h2>③ 双循环 + 元循环 + MEA + 程序级岛模型编排时序</h2>
+  <p class="sub">内循环做研究 → 外循环（layer_11）约束审计 Accept/Refine/Restart → 元循环（layer_09）自递归改进（冻结验证器 + 可证伪 + 回滚）；2026-08-05 新增 MEA（Manage-Execute-Audit）控制循环包裹，以及 OpenRSI 程序级岛模型（四算子 + IslandModel）作为并行的"程序进化"通道。</p>
   <div class="card">
-  <svg viewBox="0 0 1120 760" xmlns="http://www.w3.org/2000/svg" font-size="12">
-    <defs><marker id="a3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker></defs>
+  <svg viewBox="0 0 1120 960" xmlns="http://www.w3.org/2000/svg" font-size="12">
+    <defs><marker id="a3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker>
+      <marker id="a3g" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#7ee787"/></marker>
+      <marker id="a3m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#ff7b72"/></marker></defs>
 
     <!-- Inner loop box -->
     <rect x="40" y="40" width="430" height="300" rx="10" fill="#102216" stroke="#3fb950"/>
@@ -348,7 +399,7 @@
     <text x="520" y="64" fill="#bc8cff" font-weight="700">外循环 OUTER LOOP（layer_11 约束审计）</text>
     <rect x="520" y="80" width="390" height="48" rx="6" fill="#161b22"/>
     <text x="534" y="100" fill="#e6edf3">run_capability(layer_11_external_audit)</text>
-    <text x="534" y="118" fill="#8b949e">只读策展输入，不读内循环事件（隔离）</text>
+    <text x="534" y="118" fill="#8b949e">只读策展输入，不读内循环事件（隔离①）</text>
     <rect x="520" y="138" width="390" height="40" rx="6" fill="#161b22"/>
     <text x="534" y="162" fill="#e6edf3">约束分解 + 聚合置信度 → AREX 律</text>
     <rect x="520" y="188" width="390" height="48" rx="6" fill="#161b22"/>
@@ -374,40 +425,60 @@
     <path d="M520,460 C400,520 300,520 200,400" fill="none" stroke="#3fb950" stroke-dasharray="5 4" marker-end="url(#a3)"/>
     <text x="300" y="540" fill="#3fb950" font-size="11">playbook+experience 回流内循环</text>
 
+    <!-- MEA loop (new) -->
+    <rect x="500" y="470" width="600" height="120" rx="10" fill="#2a1418" stroke="#ff7b72"/>
+    <text x="520" y="494" fill="#ff7b72" font-weight="700">MEA 控制循环（Manage-Execute-Audit，2026-08-05 新增）</text>
+    <text x="520" y="516" fill="#8b949e">Manager：持 TaskState，产出有界子任务契约 c_i（goal+acceptance+boundary+prior-evidence），决策 {execute,done,blocked,ask}</text>
+    <text x="520" y="538" fill="#8b949e">Executor：唯一可改环境，fresh / budget-bounded context 只做当前子任务</text>
+    <text x="520" y="560" fill="#8b949e">Auditor：<b style="fill:var(--mea)">只读</b>独立检查，completion/integrity/state-update findings；<b style="fill:var(--mea)">必须异模型/异后端</b>（require_different_from）</text>
+    <text x="520" y="582" fill="#8b949e">run_mea_loop（orchestrator:321）→ mea.run_mea_loop_core；仅由 auditor 的 verified findings 更新 TaskState</text>
+
+    <!-- Program-level island model (new) -->
+    <rect x="40" y="470" width="430" height="200" rx="10" fill="#0e2620" stroke="#7ee787"/>
+    <text x="60" y="494" fill="#7ee787" font-weight="700">OpenRSI 程序级岛模型（run_program_evolutionary_loop）</text>
+    <text x="60" y="516" fill="#8b949e">IslandModel(n_islands)，branch gen{g}.isl{i}</text>
+    <text x="60" y="538" fill="#e6edf3">四原子算子（纯函数，gated by</text>
+    <text x="60" y="556" fill="#e6edf3">assert_operator_inner_only 白名单）：</text>
+    <text x="60" y="578" fill="#8b949e">Draft（seed）/ Improve（fit≥0.4）/</text>
+    <text x="60" y="596" fill="#8b949e">Debug（否则）/ Crossover（双亲）</text>
+    <text x="60" y="618" fill="#8b949e">per-gen breed → 冠军送 layer_11 冻结审计</text>
+    <text x="60" y="640" fill="#8b949e">候选存档 EvolutionArchive(node_kind=program)</text>
+    <rect x="60" y="650" width="390" height="14" fill="#2a1418"/>
+    <text x="64" y="661" font-size="10" fill="#ff7b72">⚠ C1：interpreter 透传宿主 env → 沙箱待闭环</text>
+
     <!-- budget / evolution outer -->
-    <rect x="40" y="370" width="430" height="120" rx="10" fill="#241d0a" stroke="#d29922"/>
-    <text x="60" y="394" fill="#d29922" font-weight="700">并行进化搜索（run_evolutionary_loop）</text>
-    <text x="60" y="416" fill="#8b949e">线程池并行评估（BufferedSDK 缓冲）</text>
-    <text x="60" y="438" fill="#8b949e">seed → select_parent(适应度加权) → mutate → novelty_filter(≥0.92 拒)</text>
-    <text x="60" y="460" fill="#8b949e">每代冠军过冻结审计 → EvolutionArchive</text>
-    <text x="60" y="480" fill="#8b949e">候选写入 gen{g} 分支假设树</text>
+    <rect x="40" y="390" width="430" height="60" rx="10" fill="#241d0a" stroke="#d29922"/>
+    <text x="60" y="414" fill="#d29922" font-weight="700">config 进化（run_evolutionary_loop，扁平种群）</text>
+    <text x="60" y="436" fill="#8b949e">seed → select_parent → mutate → novelty_filter(≥0.92 拒) → 代冠军过冻结审计</text>
 
     <!-- budget guard -->
-    <rect x="40" y="510" width="890" height="60" rx="10" fill="#161b22" stroke="#f85149"/>
-    <text x="60" y="534" fill="#f85149" font-weight="700">预算三维硬停（exited_budget）</text>
-    <text x="60" y="556" fill="#8b949e">max_seconds · max_capability_calls（_cap_call_counts，agent 调用也计数）· max_cost（cost_per_call）— 任一超额即停。</text>
+    <rect x="40" y="700" width="1060" height="60" rx="10" fill="#161b22" stroke="#f85149"/>
+    <text x="60" y="724" fill="#f85149" font-weight="700">预算三维硬停（exited_budget）</text>
+    <text x="60" y="746" fill="#8b949e">max_seconds · max_capability_calls（_cap_call_counts，agent 调用也计数）· max_cost（cost_per_call）— 任一超额即停。</text>
 
     <!-- guardrails -->
-    <rect x="40" y="590" width="890" height="120" rx="10" fill="#161b22" stroke="#39c5cf"/>
-    <text x="60" y="614" fill="#39c5cf" font-weight="700">隔离不变量 / 护栏（强制）</text>
-    <text x="60" y="636" fill="#8b949e">① 审计只读策展输入，不读内循环事件日志（hypothesis/experience/lesson）</text>
-    <text x="60" y="658" fill="#8b949e">② 内循环 agent 禁止集 = {layer_11, layer_09}（assert_inner_capability_allowed 守卫 CLI/transport）</text>
-    <text x="60" y="680" fill="#8b949e">③ 累积对象必带 run_id 按 run 过滤；④ 终态必须为合法 WorkflowStatus 枚举（如 exited_budget）</text>
-    <text x="60" y="702" fill="#8b949e">⑤ 连续 REFINE streak≥3 → Restart（recoverable=False）抛弃无进展轨迹</text>
+    <rect x="40" y="780" width="1060" height="150" rx="10" fill="#161b22" stroke="#39c5cf"/>
+    <text x="60" y="804" fill="#39c5cf" font-weight="700">隔离不变量 / 护栏（强制）</text>
+    <text x="60" y="826" fill="#8b949e">① 审计只读策展输入，不读内循环事件日志（hypothesis/experience/lesson）</text>
+    <text x="60" y="848" fill="#8b949e">② 内循环 agent 禁止集 = {layer_11, layer_09}（assert_inner_capability_allowed 守卫 CLI/transport）</text>
+    <text x="60" y="870" fill="#8b949e">②' 算子白名单 = {inner, inner_program_evolution}（assert_operator_inner_only，fail-closed，P2-2 加固）</text>
+    <text x="60" y="892" fill="#8b949e">③ 累积对象必带 run_id 按 run 过滤；④ 终态必须为合法 WorkflowStatus 枚举（如 exited_budget）</text>
+    <text x="60" y="914" fill="#8b949e">⑤ 连续 REFINE streak≥3 → Restart（recoverable=False）抛弃无进展轨迹</text>
+    <text x="60" y="936" fill="#8b949e">⑥ 程序候选送审计前显式剥离 feedback（P2-11）；⑦ MEA Auditor≠Executor 异模型（消除自确认）</text>
   </svg>
   </div>
-</section>
+  </section>
 
 <!-- ===================== ④ 能力注册表与护栏 ===================== -->
 <section id="cap">
-  <h2>④ 能力注册表、Agent 工具面与护栏</h2>
-  <p class="sub">基础设施层 10 环节 + kaggle_eval + layer_11 审计 = 11 个注册能力。Agent 通过 PlatformSDK 调用 run_capability；内环工具白名单剔除外环/元循环能力，杜绝自证。</p>
+  <h2>④ 能力注册表、Agent 工具面、OpenRSI 算子与护栏</h2>
+  <p class="sub">基础设施层 10 环节 + kaggle_eval + layer_11 审计 = 11 个注册能力。Agent 通过 PlatformSDK 调用 run_capability；内环工具白名单剔除外环/元循环能力。2026-08-04 新增 OpenRSI 四原子算子（纯函数，受算子白名单约束）。</p>
   <div class="card">
-  <svg viewBox="0 0 1120 500" xmlns="http://www.w3.org/2000/svg" font-size="12">
+  <svg viewBox="0 0 1120 560" xmlns="http://www.w3.org/2000/svg" font-size="12">
     <defs><marker id="a4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker></defs>
 
     <!-- capability registry -->
-    <rect x="40" y="30" width="520" height="430" rx="10" fill="#241d0a" stroke="#d29922"/>
+    <rect x="40" y="30" width="520" height="300" rx="10" fill="#241d0a" stroke="#d29922"/>
     <text x="60" y="54" fill="#d29922" font-weight="700">CapabilityRegistry（default_capability_registry）</text>
     <g font-family="monospace" fill="#e6edf3">
       <text x="60" y="82">layer_01 文献检索</text>
@@ -421,12 +492,8 @@
       <text x="60" y="258">layer_09 自迭代进化 ⛔(外环预留)</text>
       <text x="60" y="280">layer_10 对抗数据生成 (AttackExecutor)</text>
       <text x="60" y="302">layer_11 外部审计 ⛔(外环预留)</text>
-      <text x="60" y="324" fill="#3fb950">kaggle_eval（真实端到端评测）</text>
     </g>
-    <text x="60" y="356" fill="#8b949e">_NON_INFRA = {kaggle_eval, layer_11_external_audit}</text>
-    <text x="60" y="378" fill="#8b949e">AGENT_TOOL_NAMES（12 工具白名单）</text>
-    <text x="60" y="400" fill="#8b949e">配置内环工具时自动剔除 layer_11 / layer_09</text>
-    <text x="60" y="426" fill="#8b949e">OUTER_LOOP_RESERVED_CAPS（harness.py:77）</text>
+    <text x="60" y="324" fill="#3fb950">kaggle_eval（真实端到端评测）</text>
 
     <!-- agent tool surface -->
     <rect x="600" y="30" width="480" height="200" rx="10" fill="#1d1430" stroke="#bc8cff"/>
@@ -438,17 +505,27 @@
     <text x="620" y="176" fill="#8b949e">RemoteAgentHarness（has_real_agent 区分，防静默降级）</text>
     <text x="620" y="200" fill="#f85149">无 AGENT_COMMAND → agent 模式启动明确失败(FAILED)</text>
 
+    <!-- OpenRSI operators (new) -->
+    <rect x="600" y="250" width="480" height="150" rx="10" fill="#0e2620" stroke="#7ee787"/>
+    <text x="620" y="274" fill="#7ee787" font-weight="700">OpenRSI 四原子算子（operators.py，纯函数）</text>
+    <g font-family="monospace" fill="#e6edf3">
+      <text x="620" y="300">draft_program   — 全新解（seed 用）</text>
+      <text x="620" y="322">improve_program — 父程序 + feedback → 更优族</text>
+      <text x="620" y="344">debug_program   — try/except + majority fallback</text>
+      <text x="620" y="366">crossover_program— RF+GBM 概率平均（双亲）</text>
+    </g>
+    <text x="620" y="388" fill="#8b949e">run_operator → assert_operator_inner_only（白名单 fail-closed）</text>
+
     <!-- guardrail chain -->
-    <rect x="600" y="250" width="480" height="210" rx="10" fill="#161b22" stroke="#39c5cf"/>
-    <text x="620" y="274" fill="#39c5cf" font-weight="700">调用链护栏</text>
-    <text x="620" y="300" fill="#e6edf3">1. assert_inner_capability_allowed(cap)</text>
-    <text x="620" y="322" fill="#8b949e">   → 拒绝 layer_11/layer_09 被内环调用</text>
-    <text x="620" y="346" fill="#e6edf3">2. IterationRouter.validate_route(decision)</text>
-    <text x="620" y="368" fill="#8b949e">   → 拒绝非法 DecisionRecord（R1-R10 参考策略）</text>
-    <text x="620" y="392" fill="#e6edf3">3. transitions.validate_transition(status)</text>
-    <text x="620" y="414" fill="#8b949e">   → 状态机枚举校验（service 强制）</text>
-    <text x="620" y="438" fill="#e6edf3">4. _FROZEN_KEYS（冻结验证器）</text>
-    <text x="620" y="456" fill="#8b949e">   → 元循环严禁改 threshold/data_path</text>
+    <rect x="40" y="350" width="520" height="180" rx="10" fill="#161b22" stroke="#39c5cf"/>
+    <text x="60" y="374" fill="#39c5cf" font-weight="700">调用链护栏</text>
+    <text x="60" y="400" fill="#e6edf3">1. assert_inner_capability_allowed(cap)</text>
+    <text x="60" y="422" fill="#8b949e">   → 拒绝 layer_11/layer_09 被内环调用</text>
+    <text x="60" y="446" fill="#e6edf3">2. assert_operator_inner_only(operator)</text>
+    <text x="60" y="468" fill="#8b949e">   → 算子白名单 INNER_LOOP_ALLOWED_CALLERS（fail-closed）</text>
+    <text x="60" y="492" fill="#e6edf3">3. IterationRouter.validate_route(decision)</text>
+    <text x="60" y="514" fill="#8b949e">   → 拒绝非法 DecisionRecord（R1-R10 参考策略）</text>
+    <text x="60" y="538" fill="#e6edf3">4. transitions.validate_transition(status)</text>
 
     <line x1="560" y1="120" x2="600" y2="120" stroke="#8b949e" marker-end="url(#a4)"/>
     <line x1="560" y1="320" x2="600" y2="320" stroke="#8b949e" marker-end="url(#a4)"/>
@@ -459,9 +536,9 @@
 <!-- ===================== ⑤ 平台契约生成链 ===================== -->
 <section id="contract">
   <h2>⑤ 平台契约生成链（前后端单一事实来源）</h2>
-  <p class="sub">pydantic 模型 → export_typescript.py → zod 类型。后端校验用 pydantic，前端理论用 contracts.ts，但实际运行时使用 client.ts 手写 interface（存在漂移，见⑨）。</p>
+  <p class="sub">pydantic 模型 → export_typescript.py → zod 类型。后端校验用 pydantic，前端用 contracts.ts（已与生成物同步并被 client.ts 引用）。OpenRSI 另有独立的零依赖 dojo 契约镜像（不进本导出链）。</p>
   <div class="card">
-  <svg viewBox="0 0 1120 460" xmlns="http://www.w3.org/2000/svg" font-size="12">
+  <svg viewBox="0 0 1120 500" xmlns="http://www.w3.org/2000/svg" font-size="12">
     <defs><marker id="a5" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#39c5cf"/></marker></defs>
 
     <rect x="40" y="60" width="260" height="200" rx="10" fill="#0e2626" stroke="#39c5cf"/>
@@ -489,15 +566,15 @@
     <text x="680" y="154" fill="#e6edf3">manifest.json</text>
     <text x="680" y="176" fill="#e6edf3">typescript/contracts.ts</text>
     <text x="680" y="198" fill="#8b949e">14 枚举 + 16 对象</text>
-    <text x="680" y="220" fill="#8b949e">+ 11 事件 schema</text>
+    <text x="680" y="220" fill="#8b949e">+ 14 事件 schema</text>
 
     <rect x="960" y="60" width="120" height="200" rx="10" fill="#241a10" stroke="#f0883e"/>
     <text x="978" y="84" fill="#f0883e" font-weight="700">前端</text>
     <text x="978" y="110" fill="#e6edf3">src/</text>
     <text x="978" y="132" fill="#e6edf3">contracts.ts</text>
-    <text x="978" y="156" fill="#8b949e">⚠ 手工复制</text>
-    <text x="978" y="178" fill="#8b949e">⚠ 已漂移</text>
-    <text x="978" y="200" fill="#f85149">⚠ 未被引用</text>
+    <text x="978" y="156" fill="#8b949e">✓ 已与生成物同步</text>
+    <text x="978" y="178" fill="#8b949e">✓ 被 client.ts 引用</text>
+    <text x="978" y="200" fill="#8b949e">✓ safeParse 已接入</text>
 
     <line x1="300" y1="160" x2="360" y2="160" stroke="#39c5cf" marker-end="url(#a5)"/>
     <line x1="600" y1="160" x2="660" y2="160" stroke="#39c5cf" marker-end="url(#a5)"/>
@@ -513,10 +590,15 @@
 
     <rect x="600" y="300" width="480" height="120" rx="10" fill="#241a10" stroke="#f0883e"/>
     <text x="620" y="324" fill="#f0883e" font-weight="700">前端实际消费（运行时）</text>
-    <text x="620" y="350" fill="#8b949e">api/client.ts 手写 TS interface（非生成）</text>
-    <text x="620" y="372" fill="#8b949e">safeParse 辅助（zod，实际未被调用→降级 console.error）</text>
-    <text x="620" y="394" fill="#8b949e">展示常量 STATUS_*/CATEGORY_LABELS 多处重复定义</text>
-    <text x="620" y="416" fill="#8b949e">⚠ contracts.ts 与 generated 已漂移（见⑨）</text>
+    <text x="620" y="350" fill="#8b949e">api/client.ts 引用 contracts.ts 的 WorkflowStatus 枚举</text>
+    <text x="620" y="372" fill="#8b949e">safeParse 用于 getRuns/getAudit 响应校验</text>
+    <text x="620" y="394" fill="#8b949e">展示常量 STATUS_*/CATEGORY_LABELS 收口 client.ts</text>
+    <text x="620" y="416" fill="#8b949e">✓ 全部技术债（⑦月31日清单）已闭环</text>
+
+    <!-- dojo mirror note -->
+    <rect x="40" y="440" width="1040" height="40" rx="8" fill="#0e2620" stroke="#7ee787"/>
+    <text x="60" y="464" fill="#7ee787" font-weight="600">旁支契约：openmle_integration/contracts.py</text>
+    <text x="320" y="464" fill="#8b949e">零依赖镜像 dojo（Task/Interpreter/MetricValue/Node/Journal），与 OpenRSI 上游签名对齐，<b>不进</b> platform_contracts 导出链（独立本地重实现，vendor/openmle_dojo 仅参考）。</text>
   </svg>
   </div>
 </section>
@@ -524,7 +606,7 @@
 <!-- ===================== ⑥ 前端组件树与数据流 ===================== -->
 <section id="frontend">
   <h2>⑥ 前端组件树与数据获取</h2>
-  <p class="sub">极简 SPA：React 18 + Vite + TS，零 UI/路由/状态库。App.tsx 自研路由 + 侧边栏；数据双通道 = REST 轮询（主）+ SSE（刷新触发器）。</p>
+  <p class="sub">极简 SPA：React 18 + Vite + TS，零 UI/路由/状态库。App.tsx 自研路由 + 侧边栏；数据双通道 = REST 轮询（主）+ SSE（刷新触发器）。2026-08-04 起 EvolutionPanel 新增岛视图。</p>
   <div class="card">
   <svg viewBox="0 0 1120 720" xmlns="http://www.w3.org/2000/svg" font-size="11.5">
     <defs><marker id="a6" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker>
@@ -578,8 +660,8 @@
     <text x="576" y="324" fill="#58a6ff" font-weight="700">api/ 数据层</text>
     <text x="576" y="348" fill="#e6edf3">client.ts — fetch 封装（apiGet/apiPost）</text>
     <text x="576" y="370" fill="#e6edf3">useSSE.ts — EventSource(/stream)</text>
-    <text x="576" y="392" fill="#8b949e">手写 TS interface（非生成）</text>
-    <text x="576" y="414" fill="#8b949e">展示常量重复定义（技术债）</text>
+    <text x="576" y="392" fill="#8b949e">引用 contracts.ts 枚举 + safeParse</text>
+    <text x="576" y="414" fill="#8b949e">展示常量统一收口</text>
 
     <!-- data channels -->
     <rect x="560" y="440" width="300" height="92" rx="8" fill="#161b22" stroke="#e3b341"/>
@@ -592,8 +674,8 @@
     <rect x="900" y="380" width="200" height="100" rx="8" fill="#102216" stroke="#3fb950"/>
     <text x="916" y="404" fill="#3fb950" font-weight="700">后端 FastAPI</text>
     <text x="916" y="426" fill="#8b949e">/api → :8000</text>
-    <text x="916" y="448" fill="#8b949e">~27 端点</text>
-    <text x="916" y="470" fill="#8b949e">SSE /stream</text>
+    <text x="916" y="448" fill="#8b949e">~28 端点</text>
+    <text x="916" y="470" fill="#8b949e">SSE /stream · /mea</text>
 
     <!-- arrows -->
     <line x1="530" y1="50" x2="270" y2="110" stroke="#8b949e" marker-end="url(#a6)"/>
@@ -606,6 +688,12 @@
     <line x1="460" y1="360" x2="560" y2="360" stroke="#58a6ff" marker-end="url(#s6)"/>
     <line x1="860" y1="360" x2="900" y2="400" stroke="#58a6ff" marker-end="url(#s6)"/>
     <text x="700" y="350" fill="#58a6ff" font-size="10">fetch /api/*</text>
+
+    <!-- island view note -->
+    <rect x="560" y="552" width="540" height="80" rx="8" fill="#0e2620" stroke="#7ee787"/>
+    <text x="576" y="576" fill="#7ee787" font-weight="700">EvolutionPanel · 岛视图（2026-08-04 新增）</text>
+    <text x="576" y="598" fill="#8b949e">按 branch gen{g}.isl{i} 着色，10 色调色板 ISLAND_COLORS；</text>
+    <text x="576" y="620" fill="#8b949e">client.ts EvolutionCandidate 补 node_kind/code/operator/parent_ids。</text>
   </svg>
   </div>
   <div class="notes">
@@ -616,9 +704,9 @@
 <!-- ===================== ⑦ 持久化结构 ===================== -->
 <section id="persist">
   <h2>⑦ 持久化结构</h2>
-  <p class="sub">两层持久化：控制平面用 JSON 文件（Repository，原子写 + 线程锁），双循环累积记忆用 SQLite（ResearchStateStore）。自定义任务独立 JSON。</p>
+  <p class="sub">两层持久化：控制平面用 JSON 文件（Repository，原子写 + 线程锁），双循环累积记忆用 SQLite（ResearchStateStore）。自定义任务独立 JSON。2026-08-04 起 evolution_candidates 支持 config/program 双粒度（岛模型分支）。</p>
   <div class="card">
-  <svg viewBox="0 0 1120 460" xmlns="http://www.w3.org/2000/svg" font-size="12">
+  <svg viewBox="0 0 1120 470" xmlns="http://www.w3.org/2000/svg" font-size="12">
     <defs><marker id="a7" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#db61a2"/></marker></defs>
 
     <!-- JSON -->
@@ -656,11 +744,9 @@
     <text x="620" y="302" fill="#e6edf3" font-weight="600">StrategyArchive / PlaybookStore</text>
     <text x="620" y="324" fill="#8b949e">经验生命周期：去重合并 uses+1 / conf+0.05</text>
     <text x="620" y="346" fill="#8b949e">策略生命周期：expire_pending_strategies 收尾</text>
-    <text x="620" y="372" fill="#8b949e">env: RESEARCH_STATE_DB（默认 data/）</text>
-
-    <!-- custom tasks -->
-    <rect x="40" y="440" width="1040" height="0" rx="0" fill="none"/>
-    <text x="40" y="448" fill="#8b949e" font-size="11">另：benchmark_tasks/registry.py → data/custom_tasks.json（_save_raw 原子写 + _LOCK）；env: CUSTOM_UPLOAD_DIR。</text>
+    <text x="620" y="368" fill="#8b949e">env: RESEARCH_STATE_DB（默认 data/）</text>
+    <rect x="620" y="380" width="440" height="28" rx="6" fill="#0e2620"/>
+    <text x="628" y="399" fill="#7ee787" font-size="11">★ 2026-08-04：evolution_candidates 按 node_kind(config/program) 双存；IslandModel 迁移记录 branch gen{g}.isl{i}</text>
 
     <line x1="560" y1="230" x2="600" y2="230" stroke="#db61a2" stroke-dasharray="4 3" marker-end="url(#a7)"/>
   </svg>
@@ -669,7 +755,7 @@
 
 <!-- ===================== ⑧ 设计模式 ===================== -->
 <section id="patterns">
-  <h2>⑧ 关键设计模式总结</h2>
+  <h2>⑧ 关键设计模式总结（含 2026-08-04~05 新增）</h2>
   <div class="card">
   <table>
     <thead><tr><th>模式</th><th>落地位置</th><th>作用</th></tr></thead>
@@ -687,6 +773,12 @@
       <tr><td>依赖注入 DI</td><td><code>ClosedLoopOrchestrator</code> 构造注入</td><td>service/registry/harness/state_store 可替换（测试）</td></tr>
       <tr><td>命令/线协议 Command</td><td><code>agent/protocol.py</code> + <code>transport.py</code></td><td>6 消息类型 + Callable/Sub/CLI/HTTP 传输</td></tr>
       <tr><td>预算硬停 Budget</td><td><code>_cap_call_counts</code> / <code>budget</code> 三维</td><td>时间/能力调用/成本任一超额即停</td></tr>
+      <tr><td style="color:var(--openrsi)">岛模型 Island Model</td><td><code>evolution.IslandModel</code>(seed/best/migrate)</td><td>多岛并行进化 + 周期性跨岛迁移（程序级搜索）</td></tr>
+      <tr><td style="color:var(--openrsi)">契约镜像 Contract Mirror</td><td><code>openmle_integration/contracts.py</code></td><td>零依赖重实现 dojo 接口（未来可零改指向真包）</td></tr>
+      <tr><td style="color:var(--openrsi)">失败-闭合白名单 Fail-closed</td><td><code>assert_operator_inner_only</code> / <code>INNER_LOOP_ALLOWED_CALLERS</code></td><td>算子越权调用即抛 OperatorAuditViolation</td></tr>
+      <tr><td style="color:var(--mea)">角色分离 Role Separation</td><td><code>mea.py</code> + <code>agents/RoleAgentRegistry.require_different_from</code></td><td>Manager/Executor/Auditor 三分；Auditor 异模型消除自确认</td></tr>
+      <tr><td style="color:var(--mea)">有界子任务契约 Bounded Contract</td><td><code>TaskState</code> / <code>SubtaskContract</code></td><td>Manager 产出 goal+acceptance+boundary，Executor 单一上下文</td></tr>
+      <tr><td style="color:var(--ext)">沙箱（待闭环）Sandbox</td><td><code>interpreter.py</code>（C1）</td><td>执行 LLM 生成代码需最小 env + seccomp / 容器隔离（尚未落地）</td></tr>
     </tbody>
   </table>
   </div>
@@ -694,23 +786,25 @@
 
 <!-- ===================== ⑨ 技术债 ===================== -->
 <section id="debt">
-  <h2>⑨ 技术债与待同步项</h2>
-  <div class="notes">
-    <p><b>1. 契约漂移（重要）：</b> <code>platform_contracts/generated/manifest.json</code> 落后于源码，缺 <code>AuditReport</code>/<code>ImprovementProposal</code>/<code>HypothesisNode</code>/<code>ExperienceEntry</code> 等新模型与若干事件；建议重跑 <code>export.py</code> + <code>export_typescript.py</code> 使 JSON 与 TS 完全一致。</p>
-    <p><b>2. 前端副本断链：</b> <code>frontend/src/contracts.ts</code> 是手工复制且已漂移（如 <code>ApprovalRequiredEvent</code> 缺 <code>run_id</code>、<code>AuditReport.constraints</code> 类型不一致），且<b>无任何文件 import 它</b>。运行时真正类型是 <code>api/client.ts</code> 的手写 interface，zod 的 <code>safeParse</code> 实际未被调用（降级为 <code>console.error</code>）。</p>
-    <p><b>3. 死代码：</b> <code>views/BenchmarkTasks.tsx</code>（132 行，已被 BenchmarkCatalog 取代）、<code>src/contracts.ts</code>；client.ts 中 <code>getExperiences</code>/<code>getBenchmarkSuites</code>/<code>runEvolution</code>/<code>evaluateRun</code>/<code>reportRunMetric</code> 已定义未消费。</p>
-    <p><b>4. 展示常量重复：</b> <code>STATUS_LABEL/STATUS_CLASS/DECISION_*</code> 在 client.ts 声明为"single source of truth"，但 App.tsx / RunDashboard.tsx / DualLoopLive.tsx 各存本地副本；<code>CATEGORY_LABELS</code> 重复 4 份。</p>
-    <p><b>5. 裸 fetch 绕过封装：</b> <code>CompareRuns</code> 直连 <code>/research-records/compare</code>、<code>ApprovalConsole</code> 直连 <code>resolve-approval</code>、<code>deleteBenchmarkTask</code>/<code>uploadDataset</code> 用裸 fetch，未走 client.ts 封装（DELETE/FormData 场景）。</p>
-    <p><b>6. evaluation/ 目录未承载独立模块：</b> 评测逻辑分散在 <code>eval_runner.py</code> 与 <code>kaggle_eval_executor.py</code>，如需统一评测抽象可在此收敛。</p>
+  <h2>⑨ 技术债与待同步项（截至 2026-08-05）</h2>
+  <div class="notes ok">
+    <p><b>✅ 已解决（2026-07-31 前端技术债清理）：</b></p>
+    <p>① 契约漂移 → 重跑导出脚本，generated/ 现含 16 对象 / 14 事件，manifest 同步。② 前端副本断链 → contracts.ts 与生成物逐字节同步（修 run_id/constraints），被 client.ts 引用，safeParse 接入 getRuns/getAudit。③ 死代码 → 删 BenchmarkTasks.tsx + 移除 5 个未消费 client 函数。④ 展示常量重复 → 收口 client.ts 单一来源，4 视图改 import。⑤ 裸 fetch → 新增 compareRuns/resolveApproval 封装。验证：tsc 0 errors；加 gen:contracts 脚本。</p>
   </div>
-  <div class="notes" style="border-left-color:#3fb950">
-    <p><b>✅ 已解决（2026-07-31）：</b></p>
-    <p><b>① 契约漂移</b> → 重跑 <code>export.py</code> + <code>export_typescript.py</code>：<code>generated/</code> 现含 16 对象 / 14 事件（补齐 AuditReport·ImprovementProposal·HypothesisNode·ExperienceEntry + AuditCompletedEvent·AgentStepEvent·DebugEvent·ImprovementAppliedEvent），manifest.json 同步。</p>
-    <p><b>② 前端副本断链</b> → <code>frontend/src/contracts.ts</code> 已与生成物逐字节同步（修复 <code>run_id</code> / <code>constraints</code> 漂移），并被 <code>client.ts</code> 通过 <code>import { WorkflowStatus } from "../contracts"</code> + 重新导出引用；<code>safeParse</code> 现已实际用于 <code>getRuns</code>/<code>getAudit</code> 校验。</p>
-    <p><b>③ 死代码</b> → 删除孤儿 <code>views/BenchmarkTasks.tsx</code>；移除 client.ts 中 5 个未消费函数（getExperiences·getBenchmarkSuites·runEvolution·evaluateRun·reportRunMetric）。</p>
-    <p><b>④ 展示常量重复</b> → <code>STATUS_LABEL/STATUS_CLASS/DECISION_LABEL/DECISION_CLASS/CATEGORY_LABELS</code> 统一为 <code>client.ts</code> 单一来源；App·RunDashboard·BenchmarkCatalog·NewResearch 改为 import，删除本地副本（DualLoopLive 本已 import；EvolutionPanel 的策略状态标签属不同域，保留）。</p>
-    <p><b>⑤ 裸 fetch 绕过</b> → 新增 <code>compareRuns(ids)</code> 与 <code>resolveApproval(runId, resolution)</code> 封装，CompareRuns·ApprovalConsole 改用之。</p>
-    <p style="color:#8b949e">验证：前端 <code>tsc --noEmit</code> 0 errors；后端 pytest <b>132 passed</b>。另在 <code>frontend/package.json</code> 增加 <code>gen:contracts</code> 脚本，使契约再生成可一键复现。</p>
+  <div class="notes ok">
+    <p><b>✅ 已修复（2026-08-04 全项目代码审查：P1×4 + P2×12）：</b></p>
+    <p>P1-1 程序循环忽略 op 方向 → 改 <code>_primary_score(c.metrics, op)</code>（le 取负）；P1-2 四算子忽略父程序 → 加 <code>_hash_int</code> 播种，变体随父变化；P1-3 榜单对 lower-is-better 回退取最差 → 拆 <code>_best_dir</code>/<code>_best_higher</code> 方向感知；P1-4 reward NaN → <code>math.isnan</code> 守卫。</p>
+    <p>P2×12（含）：算子黑名单→<b>白名单 fail-closed</b>（INNER_LOOP_ALLOWED_CALLERS）；adapter id-merge NaN try/except；string-label LabelEncoder；evolution.mutate 删死代码；IslandModel.migrate 克隆带 fitness；set_run_status 按 status 映射 event；store.list_artifacts 精确匹配；reward maximize 方向；breed 多样性回退单最优 child；self_evolution direction 从 op 推导；审计剥离 feedback；audit 后复检预算。</p>
+    <p>补测试：<code>test_p2_fixes.py</code>(13) + <code>test_review_supplementary.py</code>(12)。回归触达 177 + 补测试 49 passed（全绿）。</p>
+  </div>
+  <div class="notes bad">
+    <p><b>🔴 待闭环高危项（2026-08-05 全量审查 + 后续，C1 / 缺陷1-11 / M1-M7 / L1-L7）：</b></p>
+    <p><b>C1 🔴（严重）</b>：<code>openmle_integration/interpreter.py:49-72</code> 把宿主<b>全部环境变量</b>（含 <code>OPENAI_API_KEY</code>/<code>LLM_JUDGE_URL</code>/DB 路径）透传给 LLM 生成的不可信代码 → <b>RCE / 密钥泄露</b>。需最小 env 白名单（清 <code>*_KEY</code>/<code>*_TOKEN</code>）+ seccomp/容器沙箱。短期未闭环。</p>
+    <p><b>缺陷1 🟠</b>：HTTP 面 <code>api.py:475</code> 端点 + <code>orchestrator.run_capability(224-299)</code> 缺 <code>assert_inner_capability_allowed</code> → 客户端可把 layer_11/layer_09 当内环能力调用。回归测试 <code>test_capabilities.py:187</code> 已加，但<b>后端本体守卫落地状态需复核</b>。</p>
+    <p><b>缺陷2 🟠</b>：4 个 run 端点（closed/dual/evolution/mea）同步阻塞、<code>cancel_event</code> 不传、<code>set_run_status</code> 不调 → 无法取消，UI 永久"运行中"。<b>缺陷3 / H1</b>：<code>store_tree</code> 与 <code>evolution._cands</code> 零锁（并发竞争）；<code>store.py</code> 每进程 Lock → 多进程部署数据损坏。</p>
+    <p><b>缺陷7 🟠</b>：<code>run_program_evolutionary_loop</code>（OpenRSI 程序进化）后端<b>无 REST 端点</b>，仅 orchestrator 直接调用 + <code>test_openmle_phase_*</code> 可达（孤儿路径）。前端 EvolutionPanel 岛视图已就绪，缺后端接线。</p>
+    <p><b>M1/M3/M5/M6 · L1-L3/L5/L7（部分开放）</b>：榜单排序反向(已修 test)、NaN/inf 无防护、<code>fe=bool</code> 崩溃、reward <code>novelty=0/1</code>、adapter 忽略 fe、zip bomb、空 embedding 余弦(L4 已修)、registry 缺 task_id KeyError(L6 已修)、<code>inner_acc</code> 未绑定(缺陷9 已修)。已锁契约：M2/M4/L4/L6/缺陷9 → <code>test_fix_regression_2026_08_05.py</code>(11)。</p>
+    <p style="color:#8b949e">测试基线：<b>245 passed</b>（较 2026-07-31 的 132 新增 113 例：openmle_phase_a 5 / phase_bc 9 / phase_d 10 / phase_d_ext 8 / mea_framework 44 / p2_fixes 13 / review_supplementary 12 / fix_regression 11 / capabilities 9 …）。前端 tsc 0 errors。全量套件须按模块分批（pandas/pyarrow 内存 SIGKILL）。</p>
   </div>
 </section>
 

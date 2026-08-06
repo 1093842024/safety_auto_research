@@ -3,6 +3,7 @@ import {
   getAgentTrace,
   getEvents,
   getRun,
+  cancelRun,
   debugRun,
   runExperiment,
   resolveCollaboration,
@@ -16,6 +17,7 @@ import {
   DECISION_CLASS,
 } from "../api/client";
 import { useSSE } from "../api/useSSE";
+import { useToast } from "../components/Toast";
 import { DualLoopLive } from "./DualLoopLive";
 import { AuditBoard } from "./AuditBoard";
 import { HypothesisTree } from "./HypothesisTree";
@@ -45,6 +47,8 @@ export function RunDashboard({ runId }: { runId: string }) {
   const [trace, setTrace] = useState<AgentTraceStep[]>([]);
   const [traceLoading, setTraceLoading] = useState(false);
   const [pollError, setPollError] = useState("");
+  const { push } = useToast();
+  const [cancelBusy, setCancelBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -87,6 +91,21 @@ export function RunDashboard({ runId }: { runId: string }) {
       fetchNow();
     }
   }, [latestEvent, fetchNow]);
+
+  // Cancel a running run (wired to POST /workflow-runs/{id}/cancel). The backend
+  // honors the cancel event at the next loop checkpoint.
+  const handleCancel = useCallback(async () => {
+    setCancelBusy(true);
+    try {
+      await cancelRun(runId);
+      push("已发送取消请求，运行将在下一个检查点停止。", "warn");
+      fetchNow();
+    } catch (e: any) {
+      push(`取消失败：${e?.message || e}`, "error");
+    } finally {
+      setCancelBusy(false);
+    }
+  }, [runId, fetchNow, push]);
 
   // Agent execution trace ("Agent 执行流水"): pull while the tab is active and refresh
   // periodically so the flow grows live as the inner-loop agent works.
@@ -206,6 +225,11 @@ export function RunDashboard({ runId }: { runId: string }) {
           <strong>{obj.name || run?.target_id || runId}</strong>
           <span className="muted mono small">{runId}</span>
           <span className={`dot ${sseConnected ? "ok" : "bad"}`} title={sseConnected ? "实时推送已连接" : "实时推送断开，使用轮询"} style={{ width: 7, height: 7, marginLeft: -6 }} />
+          {runStatus === "running" && (
+            <button className="btn" disabled={cancelBusy} onClick={handleCancel} style={{ marginLeft: "auto" }}>
+              {cancelBusy ? "取消中…" : "✕ 取消运行"}
+            </button>
+          )}
         </div>
 
         <div className="row status-meta" style={{ gap: 22, flexWrap: "wrap" }}>

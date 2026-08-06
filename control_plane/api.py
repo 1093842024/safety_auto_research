@@ -14,6 +14,9 @@ from fastapi import UploadFile
 from fastapi import status
 from fastapi.responses import StreamingResponse
 
+from ..platform_contracts.enums import RunType
+from ..platform_contracts.enums import WorkflowStatus
+from ..platform_contracts.events import utc_now
 from ..platform_contracts.objects import DecisionRecord
 from ..platform_contracts.objects import StageRun
 from ..platform_contracts.objects import WorkflowRun
@@ -471,6 +474,17 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
     )
     def run_capability(run_id: str, capability_id: str, req: CapabilityRunRequest) -> MessageResponse:
         try:
+            # 缺陷1 fix: enforce isolation invariant (2) at the EXTERNAL HTTP surface.
+            # The control plane internally drives the reserved outer-loop capabilities
+            # (layer_11_external_audit / layer_09_self_iterative_evolution) via
+            # orchestrator.run_capability — that trusted path must stay open. But an
+            # external client calling this tool endpoint must NEVER be able to run the
+            # audit or self-evolution on its own result (destroys evaluation-bias /
+            # self-confirmation guarantees). The agent tool path is already guarded by
+            # RemoteAgentHarness._tool_handler; this closes the remaining HTTP gap.
+            from ..execution_plane.agent.harness import assert_inner_capability_allowed
+
+            assert_inner_capability_allowed(capability_id)
             stage, result = orchestrator.run_capability(run_id, capability_id, req.params)
             return MessageResponse(
                 detail=result.detail,
@@ -487,10 +501,36 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
         summary="Run the 评测→决策 / 红队→决策 / 经验→回注 closed loop",
     )
     def run_closed_loop(run_id: str, max_rounds: int = 4, auto_loop: bool = True) -> dict:
-        try:
-            return orchestrator.run_closed_loop(run_id, max_rounds=max_rounds, auto_loop=auto_loop)
-        except Exception as exc:
-            raise _translate(exc)
+        # 缺陷2 fix: run in a background thread so the HTTP worker is not blocked for the
+        # (potentially hours-long) loop; wire cancel_event so POST .../cancel is honored
+        # and finalize the run status on exit.
+        def _drive() -> None:
+            if _shutdown_event.is_set():
+                return
+            try:
+                summary = orchestrator.run_closed_loop(
+                    run_id,
+                    max_rounds=max_rounds,
+                    auto_loop=auto_loop,
+                    cancel_event=_run_cancel_events.get(run_id),
+                )
+                svc.set_run_status(run_id, _map_summary_status(summary.get("status", "exited_budget")))
+            except Exception:
+                logging.exception("closed loop failed for run=%s", run_id)
+                try:
+                    svc.set_run_status(run_id, "failed")
+                except Exception:
+                    logging.exception("set_run_status('failed') failed for run=%s", run_id)
+                finally:
+                    try:
+                        orchestrator.expire_pending_strategies(run_id)
+                    except Exception:
+                        logging.exception("expire_pending_strategies failed for run=%s", run_id)
+                    finally:
+                        _run_cancel_events.pop(run_id, None)  # 缺陷10: always release the cancel event once the run ends
+
+        _spawn_bg_thread(_drive, name=f"closed-loop-{run_id}")
+        return {"run_id": run_id, "status": "running", "accepted": True}
 
     # ----- Lessons promoted for a run (reinjection objects) -----
     @app.get(
@@ -509,32 +549,57 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
         summary="Run the dual loop (inner research -> outer audit -> recursive improvement)",
     )
     def run_dual_loop_endpoint(run_id: str, req: DualLoopRequest) -> dict:
-        try:
-            # Ensure the run is running so stage runs can be created.
+        # 缺陷2 fix: background the loop; wire cancel_event; finalize status + capture record.
+        def _drive() -> None:
+            if _shutdown_event.is_set():
+                return
             try:
-                svc.start_workflow_run(run_id)
-            except (ConflictError, ValueError):
-                pass  # already running / terminal — proceed
-            inner_params = dict(req.inner_params) or {
-                "preset": "titanic",
-                "model": "gbm",
-                "data_dir": os.path.join(
-                    os.path.dirname(__file__), "..", "data", "kaggle", "titanic"
-                ),
-                "cv_folds": 5,
-                "threshold": 0.82,
-            }
-            return orchestrator.run_dual_loop(
-                run_id,
-                inner_capability=req.inner_capability,
-                inner_params=inner_params,
-                audit_params=req.audit_params or {"threshold": 0.8},
-                max_outer_iters=req.max_outer_iters,
-                agent_inner=req.agent_inner,
-                progress_callback=_progress_bus.emit,
-            )
-        except Exception as exc:
-            raise _translate(exc)
+                # Ensure the run is running so stage runs can be created.
+                try:
+                    svc.start_workflow_run(run_id)
+                except (ConflictError, ValueError):
+                    pass  # already running / terminal — proceed
+                inner_params = dict(req.inner_params) or {
+                    "preset": "titanic",
+                    "model": "gbm",
+                    "data_dir": os.path.join(
+                        os.path.dirname(__file__), "..", "data", "kaggle", "titanic"
+                    ),
+                    "cv_folds": 5,
+                    "threshold": 0.82,
+                }
+                summary = orchestrator.run_dual_loop(
+                    run_id,
+                    inner_capability=req.inner_capability,
+                    inner_params=inner_params,
+                    audit_params=req.audit_params or {"threshold": 0.8},
+                    max_outer_iters=req.max_outer_iters,
+                    agent_inner=req.agent_inner,
+                    cancel_event=_run_cancel_events.get(run_id),
+                    progress_callback=_progress_bus.emit,
+                )
+                svc.set_run_status(run_id, _map_summary_status(summary.get("status", "exited_budget")))
+                # 自动入库"最优自主研究记录"。
+                try:
+                    svc.capture_run_record(run_id)
+                except Exception:
+                    logging.exception("capture_run_record failed for run=%s", run_id)
+            except Exception:
+                logging.exception("dual loop failed for run=%s", run_id)
+                try:
+                    svc.set_run_status(run_id, "failed")
+                except Exception:
+                    logging.exception("set_run_status('failed') failed for run=%s", run_id)
+                finally:
+                    try:
+                        orchestrator.expire_pending_strategies(run_id)
+                    except Exception:
+                        logging.exception("expire_pending_strategies failed for run=%s", run_id)
+                    finally:
+                        _run_cancel_events.pop(run_id, None)  # 缺陷10: always release the cancel event once the run ends
+
+        _spawn_bg_thread(_drive, name=f"dual-loop-{run_id}")
+        return {"run_id": run_id, "status": "running", "accepted": True}
 
     # ----- Evolutionary search (Phase 3): parallel population -> audit champion -----
     @app.post(
@@ -542,35 +607,59 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
         summary="Run parallel evolutionary search over the inner-loop config space",
     )
     def run_evolution_endpoint(run_id: str, req: EvolutionRequest) -> dict:
-        try:
+        # 缺陷2 fix: background the loop; wire cancel_event; finalize status + capture record.
+        def _drive() -> None:
+            if _shutdown_event.is_set():
+                return
             try:
-                svc.start_workflow_run(run_id)
-            except (ConflictError, ValueError):
-                pass  # already running / terminal — proceed
-            inner_params = dict(req.inner_params) or {
-                "preset": "titanic",
-                "model": "gbm",
-                "data_dir": os.path.join(
-                    os.path.dirname(__file__), "..", "data", "kaggle", "titanic"
-                ),
-                "cv_folds": 5,
-                "threshold": 0.82,
-            }
-            return orchestrator.run_evolutionary_loop(
-                run_id,
-                inner_capability=req.inner_capability,
-                inner_params=inner_params,
-                audit_params=req.audit_params or {"threshold": 0.8},
-                population_size=req.population_size,
-                generations=req.generations,
-                max_workers=req.max_workers,
-                novelty_threshold=req.novelty_threshold,
-                budget=req.budget or None,
-                seed=req.seed,
-                progress_callback=_progress_bus.emit,
-            )
-        except Exception as exc:
-            raise _translate(exc)
+                try:
+                    svc.start_workflow_run(run_id)
+                except (ConflictError, ValueError):
+                    pass  # already running / terminal — proceed
+                inner_params = dict(req.inner_params) or {
+                    "preset": "titanic",
+                    "model": "gbm",
+                    "data_dir": os.path.join(
+                        os.path.dirname(__file__), "..", "data", "kaggle", "titanic"
+                    ),
+                    "cv_folds": 5,
+                    "threshold": 0.82,
+                }
+                summary = orchestrator.run_evolutionary_loop(
+                    run_id,
+                    inner_capability=req.inner_capability,
+                    inner_params=inner_params,
+                    audit_params=req.audit_params or {"threshold": 0.8},
+                    population_size=req.population_size,
+                    generations=req.generations,
+                    max_workers=req.max_workers,
+                    novelty_threshold=req.novelty_threshold,
+                    budget=req.budget or None,
+                    seed=req.seed,
+                    cancel_event=_run_cancel_events.get(run_id),
+                    progress_callback=_progress_bus.emit,
+                )
+                svc.set_run_status(run_id, _map_summary_status(summary.get("status", "exited_budget")))
+                try:
+                    svc.capture_run_record(run_id)
+                except Exception:
+                    logging.exception("capture_run_record failed for run=%s", run_id)
+            except Exception:
+                logging.exception("evolution loop failed for run=%s", run_id)
+                try:
+                    svc.set_run_status(run_id, "failed")
+                except Exception:
+                    logging.exception("set_run_status('failed') failed for run=%s", run_id)
+                finally:
+                    try:
+                        orchestrator.expire_pending_strategies(run_id)
+                    except Exception:
+                        logging.exception("expire_pending_strategies failed for run=%s", run_id)
+                    finally:
+                        _run_cancel_events.pop(run_id, None)  # 缺陷10: always release the cancel event once the run ends
+
+        _spawn_bg_thread(_drive, name=f"evolution-{run_id}")
+        return {"run_id": run_id, "status": "running", "accepted": True}
 
     # ----- Evolution observability: population / candidates -----
     @app.get(
@@ -583,6 +672,86 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
         try:
             svc.get_workflow_run(run_id)
             return [asdict(c) for c in state_store.evolution.list(run_id)]
+        except Exception as exc:
+            raise _translate(exc)
+
+    # ----- MEA loop (LongHorizon-Harness Phase P1): Manage-Execute-Audit -----
+    @app.post(
+        "/workflow-runs/{run_id}/mea",
+        summary="Run the Manage-Execute-Audit loop with per-step optimal agents",
+    )
+    def run_mea_endpoint(
+        run_id: str,
+        role_spec: str | None = None,
+        objective: str | None = None,
+        max_rounds: int = 25,
+    ) -> dict:
+        # 缺陷2 fix: background the loop; wire cancel_event; finalize status.
+        def _drive() -> None:
+            if _shutdown_event.is_set():
+                return
+            try:
+                # Create-or-start: honor the client run_id so the TaskState / MEA keys
+                # match. start_workflow_run raises NotFound for a missing run, so we
+                # materialize it first (with the requested id) instead of crashing.
+                try:
+                    svc.get_workflow_run(run_id)
+                except NotFoundError:
+                    svc._repo.put_workflow_run(
+                        WorkflowRun(
+                            run_id=run_id,
+                            program_id="mea",
+                            run_type=RunType.STANDARD_RESEARCH,
+                            entry_stage="00_agent_orchestration",
+                            target_id=run_id,
+                            objective_snapshot={"goal": objective or run_id},
+                            status=WorkflowStatus.REQUESTED,
+                            started_at=utc_now(),
+                        )
+                    )
+                try:
+                    svc.start_workflow_run(run_id)
+                except (ConflictError, ValueError):
+                    pass  # already running / terminal — proceed
+
+                status = orchestrator.run_mea_loop(
+                    run_id,
+                    role_spec=role_spec,
+                    max_rounds=max_rounds,
+                    objective=objective,
+                    cancel_event=_run_cancel_events.get(run_id),
+                )
+                svc.set_run_status(run_id, _map_summary_status(status))
+            except Exception:
+                logging.exception("mea loop failed for run=%s", run_id)
+                try:
+                    svc.set_run_status(run_id, "failed")
+                except Exception:
+                    logging.exception("set_run_status('failed') failed for run=%s", run_id)
+                finally:
+                    try:
+                        orchestrator.expire_pending_strategies(run_id)
+                    except Exception:
+                        logging.exception("expire_pending_strategies failed for run=%s", run_id)
+                    finally:
+                        _run_cancel_events.pop(run_id, None)  # 缺陷10: always release the cancel event once the run ends
+
+        _spawn_bg_thread(_drive, name=f"mea-{run_id}")
+        return {"run_id": run_id, "status": "running", "accepted": True}
+
+    @app.get(
+        "/workflow-runs/{run_id}/mea/state",
+        summary="Trusted TaskState for a MEA run (verified facts only)",
+    )
+    def mea_state(run_id: str) -> dict:
+        from ..control_plane.task_state import TaskState
+
+        try:
+            svc.get_workflow_run(run_id)
+            state = TaskState.load(run_id)
+            if state is None:
+                return {"run_id": run_id, "exists": False}
+            return {"run_id": run_id, "exists": True, **state.model_dump()}
         except Exception as exc:
             raise _translate(exc)
 
@@ -811,6 +980,28 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
         if safe.lower().endswith(".zip"):
             try:
                 with zipfile.ZipFile(dest) as zf:
+                    infos = zf.infolist()
+                    # ---- zip-bomb guard (M6): cap entry count + total uncompressed size ----
+                    _MAX_ZIP_ENTRIES = 100_000
+                    _MAX_UNCOMPRESSED_BYTES = 4 * 1024 * 1024 * 1024  # 4 GiB
+                    if len(infos) > _MAX_ZIP_ENTRIES:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"zip 内含文件过多（{len(infos)} > {_MAX_ZIP_ENTRIES}），拒绝解压",
+                        )
+                    total = 0
+                    for info in infos:
+                        if info.file_size < 0 or info.file_size > _MAX_UNCOMPRESSED_BYTES:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"zip 单文件过大（{info.file_size} 字节），拒绝解压",
+                            )
+                        total += info.file_size
+                        if total > _MAX_UNCOMPRESSED_BYTES:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="zip 解压后总体积超限（> 4 GiB），疑似 zip bomb，拒绝解压",
+                            )
                     for member in zf.namelist():  # zip-slip guard
                         target = os.path.realpath(os.path.join(dest_dir, member))
                         if not target.startswith(os.path.realpath(dest_dir) + os.sep):
@@ -1096,7 +1287,9 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
                     try:
                         active_orchestrator.expire_pending_strategies(run.run_id)
                     except Exception:
-                        pass
+                        logging.exception("expire_pending_strategies failed for run=%s", run.run_id)
+                    finally:
+                        _run_cancel_events.pop(run.run_id, None)  # 缺陷10: always release the cancel event once the run ends
 
             _spawn_bg_thread(_drive, name=f"dual-loop-{run.run_id}")
 
@@ -1382,6 +1575,7 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
                 # I3 fix: no pending meta-loop proposal survives an abnormal exit.
                 try:
                     active_orchestrator.expire_pending_strategies(run.run_id)
+                    _run_cancel_events.pop(run.run_id, None)  # 缺陷10: release the cancel event once the run ends
                 except Exception:
                     pass
 
@@ -1562,10 +1756,12 @@ def create_app(service: ControlPlaneService | None = None) -> FastAPI:
             )
         except Exception as exc:
             raise _translate(exc)
-
-        with lock:
-            if run_id in pauses:
-                pauses[run_id].get("evt", threading.Event()).set()
+        finally:
+            # 缺陷5 fix: always release the paused background loop thread, even if
+            # approval resolution failed — otherwise it deadlocks on evt.wait().
+            with lock:
+                if run_id in pauses:
+                    pauses[run_id].get("evt", threading.Event()).set()
 
         return {"status": "ok", "run_id": run_id, "resolution": body.resolution}
 

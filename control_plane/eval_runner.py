@@ -20,9 +20,12 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_JUDGE_URL = os.environ.get("LLM_JUDGE_URL")
 
@@ -115,6 +118,22 @@ def llm_judge_eval(
             out = str(_pick(pr, "output", "prediction", "answer", "generated") or "")
             if p in ref_by_prompt:
                 paired.append((out, ref_by_prompt[p]))
+    # L7 fix: capture alignment statistics for observability. When only a subset
+    # of predictions aligns to references (key mismatch, casing, truncation, ...)
+    # the score is computed on the matched subset only — warn loudly instead of
+    # silently scoring on a partial pairing.
+    alignment = {
+        "refs": len(refs),
+        "preds": len(preds),
+        "matched": len(paired),
+        "dropped": max(len(preds) - len(paired), 0),
+    }
+    if 0 < alignment["matched"] < alignment["preds"]:
+        logger.warning(
+            "eval alignment partial: matched=%d, preds=%d, refs=%d, dropped=%d "
+            "(key mismatch? scoring only the matched subset)",
+            alignment["matched"], alignment["preds"], alignment["refs"], alignment["dropped"],
+        )
     if not paired and len(refs) == len(preds):
         for r, pr in zip(refs, preds):
             out = str(_pick(pr, "output", "prediction", "answer", "generated") or "")
@@ -136,13 +155,17 @@ def llm_judge_eval(
 
         judged: list[dict[str, Any]] = []
         judge_error: str | None = None
+        partial_failed = 0
         for out, ref in paired[:50]:
             try:
                 judged.append(call_llm_judge(prompt="", reference=ref, prediction=out, url=judge_url))
             except LLMJudgeError as exc:
+                # L3 fix: skip the failing sample instead of aborting the whole
+                # batch — already-judged samples are kept and still scored.
                 judge_error = str(exc)
-                break
-        if judged and judge_error is None:
+                partial_failed += 1
+                continue
+        if judged:
             n = len(judged)
             avg = sum(j["score"] for j in judged) / n
             return {
@@ -153,6 +176,9 @@ def llm_judge_eval(
                     "n": n,
                     "judge": "llm",
                     "judge_url": judge_url,
+                    "partial_failed": partial_failed,
+                    "judge_error_sample": judge_error,
+                    "alignment": alignment,
                     "rationales": [j["rationale"] for j in judged[:5]],
                     "evidence_refs": [j["evidence_refs"] for j in judged[:5]],
                 },
@@ -174,6 +200,7 @@ def llm_judge_eval(
             sum(_token_f1(ref, out) for out, ref in paired) / n, 6
         ) if n else 0.0,
         "judge": "heuristic-token-f1",
+        "alignment": alignment,
     }
     if judge_url:
         details["fallback_reason"] = judge_error or "llm judge returned no scores"

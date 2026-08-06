@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { getRuns, getBenchmarkTasks, BenchmarkTask, WorkflowRunSummary, STATUS_LABEL, STATUS_CLASS, CATEGORY_LABELS } from "./api/client";
+import { getRuns, getBenchmarkTasks, BenchmarkTask, WorkflowRunSummary, STATUS_LABEL, STATUS_CLASS, CATEGORY_LABELS, setSchemaViolationHandler } from "./api/client";
+import { ToastProvider, useToast } from "./components/Toast";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NewResearch } from "./views/NewResearch";
 import { RunDashboard } from "./views/RunDashboard";
 import { BenchmarkCatalog } from "./views/BenchmarkCatalog";
@@ -26,6 +28,23 @@ interface RunGroup {
 }
 
 export function App() {
+  return (
+    <ToastProvider>
+      <ErrorBoundary>
+        <AppBody />
+      </ErrorBoundary>
+    </ToastProvider>
+  );
+}
+
+function AppBody() {
+  const { push } = useToast();
+  // Surface backend schema-drift warnings as toasts (P2 frontend fix).
+  useEffect(() => {
+    setSchemaViolationHandler((msg) => push(msg, "warn"));
+    return () => setSchemaViolationHandler(null);
+  }, [push]);
+
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [taskMap, setTaskMap] = useState<Record<string, BenchmarkTask>>({});
   const [runId, setRunId] = useState<string>("");

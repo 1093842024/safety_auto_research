@@ -21,6 +21,9 @@ The reflector here is deliberately rule-based: given a platform run's curated si
 (inner metrics, audit verdict, unresolved claims, rejected candidates, mined failure
 modes) it emits candidate bullets; an LLM reflector can later replace ``reflect_round``
 without touching the store or the orchestrator wiring.
+
+THREAD-SAFETY (缺陷3 fix): the playbook is a shared, mutable dict accessed from multiple
+concurrent background runs, so every dict-touching method is guarded by a reentrant lock.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import uuid
 from dataclasses import asdict
 from dataclasses import dataclass
@@ -65,6 +69,7 @@ class PlaybookStore:
     """Itemized playbook with deterministic dedup-merge (memory or SQLite-backed)."""
 
     def __init__(self, db_path: str | None = None) -> None:
+        self._lock = threading.RLock()
         self.db_path = db_path
         self._entries: dict[str, PlaybookEntry] = {}
         if db_path:
@@ -112,58 +117,61 @@ class PlaybookStore:
         playbook grows by *evidence*, not by near-duplicate text.
         """
 
-        index = {
-            (e.scope, e.section, _norm_key(e.content)): e for e in self._entries.values()
-        }
-        touched: list[PlaybookEntry] = []
-        for cand in candidates:
-            content = str(cand.get("content", "")).strip()
-            if not content:
-                continue
-            section = str(cand.get("section", "fact"))
-            key = (scope, section, _norm_key(content))
-            existing = index.get(key)
-            if existing is not None:
-                existing.helpful += int(cand.get("helpful", 0))
-                existing.harmful += int(cand.get("harmful", 0))
-                existing.iter_no = iter_no  # last-reinforced marker
-                self._persist(existing)
-                touched.append(existing)
-                continue
-            entry = PlaybookEntry(
-                entry_id=_new_id("pb"),
-                scope=scope,
-                section=section,
-                content=content,
-                helpful=int(cand.get("helpful", 0)),
-                harmful=int(cand.get("harmful", 0)),
-                run_id=run_id,
-                iter_no=iter_no,
-            )
-            self._entries[entry.entry_id] = entry
-            index[key] = entry
-            self._persist(entry)
-            touched.append(entry)
-        return touched
+        with self._lock:
+            index = {
+                (e.scope, e.section, _norm_key(e.content)): e for e in self._entries.values()
+            }
+            touched: list[PlaybookEntry] = []
+            for cand in candidates:
+                content = str(cand.get("content", "")).strip()
+                if not content:
+                    continue
+                section = str(cand.get("section", "fact"))
+                key = (scope, section, _norm_key(content))
+                existing = index.get(key)
+                if existing is not None:
+                    existing.helpful += int(cand.get("helpful", 0))
+                    existing.harmful += int(cand.get("harmful", 0))
+                    existing.iter_no = iter_no  # last-reinforced marker
+                    self._persist(existing)
+                    touched.append(existing)
+                    continue
+                entry = PlaybookEntry(
+                    entry_id=_new_id("pb"),
+                    scope=scope,
+                    section=section,
+                    content=content,
+                    helpful=int(cand.get("helpful", 0)),
+                    harmful=int(cand.get("harmful", 0)),
+                    run_id=run_id,
+                    iter_no=iter_no,
+                )
+                self._entries[entry.entry_id] = entry
+                index[key] = entry
+                self._persist(entry)
+                touched.append(entry)
+            return touched
 
     def tag(self, entry_id: str, *, helpful: bool) -> None:
         """Post-hoc verification feedback: mark a bullet as having (not) paid off."""
 
-        entry = self._entries.get(entry_id)
-        if entry is None:
-            return
-        if helpful:
-            entry.helpful += 1
-        else:
-            entry.harmful += 1
-        self._persist(entry)
+        with self._lock:
+            entry = self._entries.get(entry_id)
+            if entry is None:
+                return
+            if helpful:
+                entry.helpful += 1
+            else:
+                entry.harmful += 1
+            self._persist(entry)
 
     # ------------------------------------------------------------------ retrieval
     def list_entries(self, scope: str | None = None) -> list[PlaybookEntry]:
-        out = list(self._entries.values())
-        if scope is not None:
-            out = [e for e in out if e.scope == scope]
-        return out
+        with self._lock:
+            out = list(self._entries.values())
+            if scope is not None:
+                out = [e for e in out if e.scope == scope]
+            return out
 
     def render(self, scope: str, k: int = 6) -> str:
         """Render the top-k bullets for prompt/param injection (inner loop only)."""

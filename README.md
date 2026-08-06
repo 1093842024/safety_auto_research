@@ -55,12 +55,34 @@
 
 | 层 | 目录 | 职责 |
 |----|------|------|
-| **平台契约层** | `platform_contracts/` | 12 个核心对象模型、10+ 事件模型、状态机校验（`transitions.py`）、JSON Schema / TypeScript 导出 |
-| **控制平面** | `control_plane/` | `ControlPlaneService`（状态机服务）+ `Repository`（持久化仓储）+ FastAPI 应用，暴露工作流 / 阶段 / 审批 / 决策 / 事件 / 双循环端点 |
-| **执行平面** | `execution_plane/` | `StageExecutor` 抽象、`PlatformSDK`（adapter 唯一接口）、`ClosedLoopOrchestrator`（编排）、`AgentHarness`（决策）、`capabilities/`（10 层能力注册为可调工具） |
+| **平台契约层** | `platform_contracts/` | **16 对象模型 / 14 事件模型** / 14 枚举 + 状态机校验（`transitions.py`）+ JSON Schema / TypeScript 导出 |
+| **控制平面** | `control_plane/` | `ControlPlaneService`（状态机服务）+ `Repository`（持久化仓储）+ `task_state.py`（MEA 任务态）+ FastAPI 应用，暴露工作流 / 阶段 / 审批 / 决策 / 事件 / 双循环 / 进化 / MEA 端点 |
+| **执行平面** | `execution_plane/` | `StageExecutor`/`PlatformSDK`/`ClosedLoopOrchestrator`/`AgentHarness`/`capabilities/`；新增 `mea.py`（MEA 主控）+ `agents/`（RoleAgent 注册 / 适配器） |
+| **OpenRSI / OpenMLE 集成层** | `openmle_integration/` | OpenRSI 程序级岛模型集成（Phase A–D）：`contracts`(dojo 镜像) / `operators`(四算子) / `adapter` / `interpreter` / `inner_capability`(算子护栏) / `reward_bridge` / `local_train`；参考副本 `vendor/openmle_dojo/` |
 | **基础设施层** | `infrastructure/` | 十个研究环节的可复用资产（skill / agent / 数据集任务 / 评测），详见 `infrastructure/README.md` |
-| **前端** | `frontend/` | React 18 + Vite + TypeScript 研究人员控制面板（侧边栏分类画廊 + 新建向导 + run 仪表盘） |
-| **持久化** | `data/` | `control_plane_store.json`（run/stage/decision/event 等）+ `research_state.db`（双循环假设树/经验库/策略归档） |
+| **前端** | `frontend/` | React 18 + Vite + TypeScript 研究人员控制面板（侧边栏分类画廊 + 新建向导 + run 仪表盘 + 进化岛视图） |
+| **持久化** | `data/` | `control_plane_store.json` + `research_state.db`（假设树/经验库/策略归档/**进化种群 config+program 双粒度**） |
+
+---
+
+### 2.4 最新演进：OpenRSI/OpenMLE 集成 + MEA 控制循环（2026-08-04 ~ 08-05）
+
+平台在双循环主干之外，于 2026-08-04 接入 **OpenRSI / OpenMLE**（源自 Frontis-MA1 的"AI 改进 AI"递归自改进框架），并于 2026-08-05 落地 **MEA（Manage-Execute-Audit）控制循环**（源自 LongHorizon-Harness）。两者均为"越用越强"闭环的能力扩展，且都受同一套隔离不变量约束。
+
+**OpenRSI / OpenMLE（程序级进化）— 四阶段落地：**
+
+- **Phase A · 契约**：`openmle_integration/contracts.py` 零依赖镜像 dojo 的 `Task`/`Interpreter`/`MetricValue`/`Node`/`Journal`（与上游签名对齐，未来可零改指向真包）；`vendor/openmle_dojo/` 仅作参考副本（因整包 import 会拖垮 venv，本地用契约重实现）。
+- **Phase B · 四原子算子**：`operators.py` 的 `draft_program` / `improve_program` / `debug_program` / `crossover_program` 为**纯函数**（只构造 prompt 调 LLM 产出代码，不执行）；由 `run_operator` 统一分发，每次必经 `assert_operator_inner_only`（白名单 `INNER_LOOP_ALLOWED_CALLERS`，fail-closed）。离线 `TemplateOperatorBackend` 确定性拼装 sklearn 程序，真实 LLM 时走 `LLMOperatorBackend` / `ApiLLMOperatorBackend`（零依赖 `urllib` 对接第三方 API）。
+- **Phase C · 程序级岛模型**：`control_plane/evolution.py::IslandModel`（`seed`/`best`/`migrate` 跨岛迁移，branch `gen{g}.isl{i}`）+ `orchestrator.run_program_evolutionary_loop`（:1451）+ `_breed_program_generation`（:1711）。与 config 进化（`run_evolutionary_loop` 扁平种群）并存于 `EvolutionArchive`，靠 `Candidate.node_kind`（config/program）区分、双粒度新颖性过滤（config 余弦≥0.92 拒；program 精确代码字符串 set 去重）。
+- **Phase D · 本地训练 + 奖励桥**：`reward_bridge.py`（`reward_func`/`reward_population`，validity/improvement/diversity/parsimony）把 fitness 翻成 RL 风格 reward；`local_train.py`（`LocalLLMTrainer`，`detect_device` MPS/CPU，≤0.6B LoRA）在 Mac 上训练轻量 generator 反哺算子后端；`ApiLLMOperatorBackend` 对接第三方 OpenAI 兼容 API。
+
+> ⚠️ **接线状态**：程序级进化（`run_program_evolutionary_loop`）目前**仅在 `orchestrator` 直接调用与 `test_openmle_phase_*` 测试可达，后端尚无 REST 端点**（计划中的 `api.py` 接线为待办，见第 9 节缺陷 7）。前端 `EvolutionPanel` 已支持岛视图（`gen{g}.isl{i}` 十色着色）。
+
+**MEA（Manage-Execute-Audit）控制循环：**
+
+- **三角色**：`Manager`（持持久 `TaskState`，产出有界子任务契约 `c_i`：goal+acceptance+boundary+prior-evidence，决策 `{execute,done,blocked,ask}`）/ `Executor`（唯一可改环境，fresh、budget-bounded context 只做当前子任务）/ `Auditor`（**只读**独立检查，产出 completion/integrity/state-update 三类 findings）。
+- **核心杠杆**：`Auditor` 必须与 `Executor` **异模型 / 异后端**（`RoleAgentRegistry.require_different_from` 硬约束），从架构层消除自确认。评测角色（R5）强制 `DeterministicAdapter`（无 LLM），审计角色（R6）强制异模型。
+- **落地**：`execution_plane/mea.py`（`run_mea_loop_core` + `MeaMetrics`）+ `orchestrator.run_mea_loop`（:321）+ `control_plane/task_state.py`（`StateRecord`/`TaskState`/`AuditVerdict`）+ `execution_plane/agents/{adapter,registry}.py` + `config/role_agents.yaml`（role→backend/model/budget）。`run_mea_endpoint`（api.py）已暴露但当前为同步阻塞、缺取消支持（见第 9 节缺陷 2）。
 
 ---
 
@@ -82,12 +104,24 @@ safety_auto_research/
 │   ├── llm_judge.py               #   真实 LLM judge 客户端（证据链 + 回退）
 │   ├── progress_bus.py            #   SSE 进度总线（多订阅者，跨线程安全）
 │   └── schemas.py                 #   API 请求/响应模型（含 InnerLoopConfig）
-├── execution_plane/               # 执行平面（adapter / orchestrator / agent / capabilities）
-│   ├── orchestrator.py            #   ClosedLoopOrchestrator + run_dual_loop
+├── execution_plane/               # 执行平面（adapter / orchestrator / agent / capabilities / mea / agents）
+│   ├── orchestrator.py            #   ClosedLoopOrchestrator + run_dual_loop / run_evolutionary_loop / run_program_evolutionary_loop / run_mea_loop
 │   ├── agent/                     #   AgentHarness + 线协议 + 传输层（接 Codex/WorkBuddy 的 seam）
 │   ├── capabilities/              #   10 个基础设施层能力注册为可调工具
 │   ├── executors/                 #   eval / attack / lesson 真实 executor
-│   └── decision/router.py        #   IterationRouter（参考策略 + 安全护栏）
+│   ├── decision/router.py        #   IterationRouter（参考策略 + 安全护栏）
+│   ├── mea.py                     #   MEA（Manage-Execute-Audit）主控：run_mea_loop_core + MeaMetrics
+│   └── agents/                    #   RoleAgentAdapter / RoleAgentRegistry（require_different_from 异模型硬约束）
+├── openmle_integration/           # OpenRSI / OpenMLE 集成层（程序级岛模型，Phase A–D）
+│   ├── contracts.py               #   零依赖镜像 dojo：Task/Interpreter/MetricValue/Node/Journal
+│   ├── operators.py               #   四原子算子 Draft/Improve/Debug/Crossover + 各 LLM 后端
+│   ├── adapter.py                 #   OpenMLETaskAdapter（sklearn 流水线包装 + step_task）
+│   ├── interpreter.py             #   PythonInterpreter（多进程 + 超时，⚠ C1 沙箱待闭环）
+│   ├── inner_capability.py        #   ATOMIC_OPERATORS + assert_operator_inner_only（白名单 fail-closed）
+│   ├── reward_bridge.py           #   reward_func / reward_population（RL 风格奖励桥）
+│   └── local_train.py             #   LocalLLMTrainer（Mac MPS/CPU ≤0.6B LoRA）
+├── config/                        # role_agents.yaml（role→backend/model/budget 分配）
+├── vendor/openmle_dojo/           # OpenMLE-dojo 参考副本（仅参考，不 vendoring 训练栈）
 ├── infrastructure/                # 十层研究基础设施资产（详见其 README）
 ├── benchmark_tasks/               # 任务目录（18 个任务 / 11 个类别 + suites/ 基准套件）
 ├── frontend/                      # 研究人员控制面板（React + Vite + TS）
@@ -213,7 +247,7 @@ curl --noproxy '*' -o /dev/null -w "%{http_code}\n" http://localhost:5173/      
 
 ## 8. API 概览
 
-控制平面共暴露约 27 个端点，关键路径：
+控制平面共暴露约 28 个端点，关键路径：
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -232,7 +266,9 @@ curl --noproxy '*' -o /dev/null -w "%{http_code}\n" http://localhost:5173/      
 | POST | `/workflow-runs/{run_id}/capabilities/{capability_id}/run` | 运行某个基础设施层能力 |
 | POST | `/workflow-runs/{run_id}/dual-loop` | 跑双循环（核心） |
 | POST | `/workflow-runs/{run_id}/evolution` | 跑并行进化搜索（种群/新颖性拒绝/代冠军审计） |
-| GET | `/workflow-runs/{run_id}/evolution` | 进化候选列表（适应度/新颖度/血缘） |
+| GET | `/workflow-runs/{run_id}/evolution` | 进化候选列表（适应度/新颖度/血缘，含 `node_kind`/岛分支 `gen{g}.isl{i}`） |
+| POST | `/workflow-runs/{run_id}/mea` | 跑 MEA（Manage-Execute-Audit）控制循环 |
+| GET | `/workflow-runs/{run_id}/mea` | MEA 运行态（Manager/Executor/Auditor 角色与 findings） |
 | GET | `/workflow-runs/{run_id}/hypo-tree` | 假设树 |
 | GET | `/workflow-runs/{run_id}/audit` | 外部审计结论 |
 | GET | `/workflow-runs/{run_id}/improvements` | 改进项 |
@@ -254,6 +290,8 @@ curl --noproxy '*' -o /dev/null -w "%{http_code}\n" http://localhost:5173/      
   - 内循环 agent 禁止自审/自改：`layer_11_external_audit` 与 `layer_09_self_iterative_evolution` 在 harness 内为不可用工具，由控制平面直接调用。
   - 假设树/改进态按 `run_id` 隔离，跨 run 累积对象必须带 `run_id`。
 - **内循环护栏**：配置内循环工具时，自动剔除 `layer_11`（外循环审计）与 `layer_09`（自迭代进化）——内循环不得越权调用元/外循环能力。
+- **算子护栏（OpenRSI）**：四原子算子（Draft/Improve/Debug/Crossover）每次调用必经 `assert_operator_inner_only`（白名单 `INNER_LOOP_ALLOWED_CALLERS`，fail-closed），杜绝算子越权调用外层能力或自审。
+- **MEA 自确认消除**：Auditor 角色强制与 Executor 异模型 / 异后端（`RoleAgentRegistry.require_different_from`），审计 findings 只读、不写环境。
 - **状态机枚举**：`WorkflowRun` / `StageRun` / `DecisionRecord` 的合法流转由 `platform_contracts/transitions.py` 校验；决策类型含 `continue` / `revisit` / `exit_success` / `exit_budget` / `exit_converged`，终态必须为合法枚举名（旧字符串如 `dual_loop_accepted` 已废弃）。
 - **任务类别枚举**：`puzzle` / `adversarial` / `efficiency` / `platform_native` / `model_dev` / `system_opt` / `cuda` / `agent_eval` / `tooling` 等（未分类兜底为 `未分类`）。
 - **无 RemoteAgentHarness 时**：agent 模式（含所有 harness 依赖任务）启动会**明确失败并终止**——创建 FAILED 状态的 run 并在 `status_detail` 写明原因（需设置 `AGENT_COMMAND` 接入远程 Agent），**不再静默回退**脚本化。
@@ -282,7 +320,9 @@ cd /Users/glennge/work/github/AI_research
     safety_auto_research/tests/ -q
 ```
 
-当前基线 **132 passed**。主要覆盖：`control_plane`（状态机/API）、`dual_loop`（双循环隔离与终态）、`playbook`（ACE 合并/反思/策略生命周期/审计隔离）、`phase2`（held-out/LLM judge/经验生命周期/预算）、`evolution`（种群/选择/新颖性/并行回放/审计隔离）、`benchmark_registry`（任务注册校验）、`benchmark_suites`（套件清单/基线）、`research_records`（榜单/复现）、`capabilities`、`execution_plane`、`platform_contracts`。前端 `npx tsc --noEmit` 0 errors。
+当前基线 **245 passed**（2026-08-05；较 2026-07-31 的 132 新增 113 例，主要来自 OpenRSI/OpenMLE 四阶段测试与 MEA / 审查回归）。主要覆盖：`control_plane`、`dual_loop`（双循环隔离与终态 + `ContextSeparationTest`）、`playbook`、`phase2`（held-out/LLM judge/经验生命周期/预算）、`evolution`（种群/选择/双粒度新颖性/IslandModel/候选序列化）、`benchmark_registry`、`benchmark_suites`、`research_records`（榜单方向感知）、`capabilities`、`execution_plane`、`platform_contracts`；**新增** `openmle_phase_a`(5)/`openmle_phase_bc`(9)/`openmle_phase_d`(10)/`openmle_phase_d_ext`(8)（OpenRSI 四阶段）、`mea_framework`(44)（MEA 框架）、`p2_fixes`(13)/`review_supplementary`(12)/`fix_regression_2026_08_05`(11)（审查回归）。前端 `npx tsc --noEmit` 0 errors。
+
+> ⚠️ 全量套件一次性加载会因内存（pandas/pyarrow）触发 SIGKILL（exit 137），CI 须按模块分批运行；受管 venv 已加 `tests/conftest.py` 设 `future.infer_string=False` 规避 pandas 3.0 的 pyarrow segfault。
 
 ---
 
@@ -295,6 +335,7 @@ cd /Users/glennge/work/github/AI_research
 - **Agent 模式真实接入**：通过环境变量 `AGENT_COMMAND`（Codex / WorkBuddy CLI）接入 `RemoteAgentHarness` 后，agent 模式（含全部 harness 依赖任务）即可真正执行自主内循环——`system_prompt/skills/tools/step_plan` 与任务核心信息（`task_spec`）会完整传给外部 agent；未接入时启动明确失败并终止。
 - **代理环境变量**：本机若设置 `HTTP_PROXY`，对 `127.0.0.1`/`localhost` 的 curl 会被拦截返回 502，需加 `--noproxy '*'` 或用 `localhost`（浏览器不受此影响）。
 - **前端代理**：Vite 开发服务器将 `/api` 代理到 `:8000`；若后端未运行，前端请求会返回 500，应先确认后端存活。
+- **OpenRSI 解释器沙箱（C1，待闭环）**：`openmle_integration/interpreter.py` 执行 LLM 生成的不可信代码时，当前把宿主全部环境变量（含 `OPENAI_API_KEY` / `LLM_JUDGE_URL` / DB 路径）透传给子进程，存在 RCE / 密钥泄露风险。短期需最小 env 白名单（清掉 `*_KEY`/`*_TOKEN`），长期需 seccomp / 容器沙箱隔离。详见 `doc/code_review_2026-08-05.md`（C1 严重项）。
 - **数据文件**：`data/` 为运行时生成，建议纳入 `.gitignore`。
 
 ---
@@ -312,7 +353,10 @@ cd /Users/glennge/work/github/AI_research
 - `doc/code_review_2026-08-04.md` — 全项目代码审查（P1×4 + P2×12 修复执行记录 + 五.3 补测试 5 项落地）
 - `doc/benchmark_suites_integration.md` — 基准套件（SAB / MLE-bench）集成说明
 - `doc/benchmark_tasks.md` — **内置 18 个研究任务的逐任务详解**（定义/数据/模型/指标/基线/性能）
+- `doc/code_review_2026-08-05.md` — 全项目代码审查（C1 严重 / 缺陷1-11 / M1-M7 / L1-L7 发现 + 修复路线图 + 回归测试）
+- `doc/mea_harness_upgrade_plan.md` — **MEA（Manage-Execute-Audit）控制循环升级方案**（2026-08-05，已落地）
+- `doc/openrsi_openmle_integration_analysis.md` — **OpenRSI/OpenMLE 集成分析**（Phase A–D 落地记录，54KB）
 
 ---
 
-*最后更新：2026-08-04 · 全项目代码审查（P1×4 程序循环方向 / 算子消费父程序 / 榜单 lower-is-better 回退 / reward NaN + P2×12 功能与隔离加固）+ 五.3 补测试 5 项落地；回归 177 passed + 补测试 49 passed，前端 tsc 0 errors。详见 `doc/code_review_2026-08-04.md`。*
+*最后更新：2026-08-05 · OpenRSI/OpenMLE 四阶段集成（`openmle_integration/` 包 + `IslandModel` 程序级岛模型 + 本地训练/奖励桥）+ MEA（Manage-Execute-Audit）控制循环落地 + 全项目代码审查（C1 严重项 / 缺陷1-11 / M1-M7 / L1-L7 发现与修复路线图）。详见 `doc/code_review_2026-08-05.md`、`doc/mea_harness_upgrade_plan.md`、`doc/openrsi_openmle_integration_analysis.md`。测试基线 245 passed。*

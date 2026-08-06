@@ -35,6 +35,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import uuid
 from dataclasses import asdict
 from dataclasses import dataclass
@@ -99,7 +100,16 @@ def _embed(text: str, dim: int = 256) -> list[float]:
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
-    return sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b))
+    # L4 fix: an empty/zero embedding (e.g. an empty config) has zero norm, so its
+    # cosine with any vector is 0.0 — meaning two *identical* empty configs were
+    # never flagged as duplicates. Treat zero-vs-zero as identical, zero-vs-nonzero
+    # as dissimilar.
+    if dot == 0.0:
+        a_zero = all(v == 0.0 for v in a)
+        b_zero = all(v == 0.0 for v in b)
+        return 1.0 if (a_zero and b_zero) else 0.0
+    return dot
 
 
 def candidate_text(params: dict[str, Any]) -> str:
@@ -476,6 +486,7 @@ class EvolutionArchive:
     """Run-scoped candidate history (SQLite or in-memory)."""
 
     def __init__(self, db_path: str | None = None) -> None:
+        self._lock = threading.RLock()
         self.db_path = db_path
         self._cands: dict[str, Candidate] = {}
         if db_path:
@@ -507,24 +518,27 @@ class EvolutionArchive:
             conn.commit()
 
     def add(self, c: Candidate) -> Candidate:
-        self._cands[c.candidate_id] = c
-        self._persist(c)
-        return c
+        with self._lock:
+            self._cands[c.candidate_id] = c
+            self._persist(c)
+            return c
 
     def update(self, candidate_id: str, **fields: Any) -> Candidate | None:
-        c = self._cands.get(candidate_id)
-        if c is None:
-            return None
-        for k, v in fields.items():
-            setattr(c, k, v)
-        self._persist(c)
-        return c
+        with self._lock:
+            c = self._cands.get(candidate_id)
+            if c is None:
+                return None
+            for k, v in fields.items():
+                setattr(c, k, v)
+            self._persist(c)
+            return c
 
     def list(self, run_id: str | None = None) -> list[Candidate]:
-        out = list(self._cands.values())
-        if run_id is not None:
-            out = [c for c in out if c.run_id == run_id]
-        return out
+        with self._lock:
+            out = list(self._cands.values())
+            if run_id is not None:
+                out = [c for c in out if c.run_id == run_id]
+            return out
 
     def list_by_kind(self, run_id: str, kind: str) -> list[Candidate]:
         """Return only candidates of a given ``node_kind`` (config | program) for a run.
@@ -532,10 +546,12 @@ class EvolutionArchive:
         Enables the frontend/EvolutionPanel to show the two evolution grains separately
         without mixing hyperparameter-config nodes with code-operator nodes.
         """
-        return [c for c in self.list(run_id) if c.node_kind == kind]
+        with self._lock:
+            return [c for c in self.list(run_id) if c.node_kind == kind]
 
     def best(self, run_id: str) -> Candidate | None:
-        evaluated = [c for c in self.list(run_id) if c.fitness is not None]
-        if not evaluated:
-            return None
-        return max(evaluated, key=lambda c: c.fitness or 0.0)
+        with self._lock:
+            evaluated = [c for c in self.list(run_id) if c.fitness is not None]
+            if not evaluated:
+                return None
+            return max(evaluated, key=lambda c: c.fitness or 0.0)

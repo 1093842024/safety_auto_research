@@ -15,20 +15,63 @@ export { WorkflowStatus };
 // visible glitch rather than a hard crash).
 // ---------------------------------------------------------------------------
 
-/** Non-blocking parse: warns on schema drift but returns the raw data anyway. */
+/** Optional sink for schema-drift warnings; wired to the toast UI by App. */
+type SchemaViolationHandler = ((msg: string) => void) | null;
+let _schemaViolationHandler: SchemaViolationHandler = null;
+
+/** Register a handler to surface schema violations in the UI (e.g. a toast). */
+export function setSchemaViolationHandler(fn: SchemaViolationHandler) {
+  _schemaViolationHandler = fn;
+}
+
+/**
+ * Non-blocking parse: warns on schema drift but returns the raw data anyway.
+ * Drift is surfaced via {@link setSchemaViolationHandler} so the UI shows a toast
+ * instead of silently degrading into a glitching view.
+ */
 function safeParse<T>(schema: z.ZodType<T>, data: unknown, label: string): T {
   const result = schema.safeParse(data);
   if (!result.success) {
-    console.error(`[Schema Violation] ${label}:`, result.error.issues);
-    // Return the raw data — the caller will likely show a partial/glitching
-    // UI rather than a blank screen, which is a better degradation path.
+    const msg = `[Schema Violation] ${label}: ${result.error.issues
+      .map((i) => `${i.path.join(".") || "?"} ${i.message}`)
+      .join("; ")}`;
+    console.error(msg, result.error.issues);
+    if (_schemaViolationHandler) _schemaViolationHandler(msg);
+    // Return the raw data — the caller keeps working with a (possibly partial) view.
     return data as T;
   }
   return result.data;
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`/api${path}`, { headers: { Accept: "application/json" } });
+// Default request timeout. A hung backend (e.g. a long-running loop that should
+// have been backgrounded) must not leave the UI in perpetual loading.
+export const DEFAULT_TIMEOUT_MS = 30_000;
+
+/**
+ * Shared fetch plumbing: prepends the /api proxy and enforces a timeout via
+ * AbortController (P2 frontend fix). Aborted requests surface a clear timeout
+ * error instead of hanging forever.
+ */
+async function apiFetch(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(`/api${path}`, { ...init, signal: controller.signal });
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new Error(`请求超时（>${timeoutMs}ms）: ${path}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function _parseJson<T>(res: Response, path: string): Promise<T> {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${path}`);
   try {
     return (await res.json()) as T;
@@ -38,19 +81,19 @@ export async function apiGet<T>(path: string): Promise<T> {
   }
 }
 
+export async function apiGet<T>(path: string): Promise<T> {
+  return _parseJson<T>(await apiFetch(path, { headers: { Accept: "application/json" } }), path);
+}
+
 export async function apiPost<T>(path: string, body: Record<string, unknown> = {}): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${path}`);
-  try {
-    return (await res.json()) as T;
-  } catch (err) {
-    console.error(`[API] Invalid JSON response from ${path}:`, err);
-    throw new Error(`Invalid response from ${path}`);
-  }
+  return _parseJson<T>(
+    await apiFetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+    }),
+    path,
+  );
 }
 
 export interface WorkflowRunSummary {
@@ -241,7 +284,7 @@ export const registerBenchmarkTask = (taskType: string, values: Record<string, a
   apiPost<BenchmarkTask>("/benchmark-tasks/register", { task_type: taskType, values });
 
 export async function deleteBenchmarkTask(taskId: string): Promise<void> {
-  const res = await fetch(`/api/benchmark-tasks/${encodeURIComponent(taskId)}`, {
+  const res = await apiFetch(`/benchmark-tasks/${encodeURIComponent(taskId)}`, {
     method: "DELETE",
     headers: { Accept: "application/json" },
   });
@@ -264,10 +307,15 @@ export interface UploadResult {
   size_bytes: number;
 }
 
-export async function uploadDataset(file: File): Promise<UploadResult> {
+// Large dataset uploads need a far longer timeout than the 30s default.
+export async function uploadDataset(file: File, timeoutMs = 10 * 60_000): Promise<UploadResult> {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch("/api/benchmark-tasks/upload-dataset", { method: "POST", body: fd });
+  const res = await apiFetch(
+    "/benchmark-tasks/upload-dataset",
+    { method: "POST", body: fd },
+    timeoutMs,
+  );
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
     try {
@@ -481,6 +529,12 @@ export const debugRun = (runId: string, stage: "inner" | "outer", auditInputOver
 export const runExperiment = (runId: string) =>
   apiPost<{ run_id: string; status: string; collaboration_mode?: string }>(
     `/workflow-runs/${encodeURIComponent(runId)}/run-experiment`,
+  );
+
+/** Request cancellation of a running workflow (sets the cancel event checked by the loop). */
+export const cancelRun = (runId: string) =>
+  apiPost<{ run_id: string; status: string }>(
+    `/workflow-runs/${encodeURIComponent(runId)}/cancel`,
   );
 
 // ---------------------------------------------------------------------------

@@ -175,7 +175,7 @@ def reward_population(
                 getattr(c, "fitness", None),
                 valid=valid,
                 prev_fitness=prev,
-                novelty=getattr(c, "novelty", 1.0) or 1.0,
+                novelty=(1.0 if getattr(c, "novelty", None) is None else float(getattr(c, "novelty"))),
                 program=getattr(c, "code", None),
                 config=config,
             )

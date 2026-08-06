@@ -35,6 +35,24 @@ _DEFAULT_DATA_DIR = os.path.join(
     "titanic",
 )
 
+
+def derive_gate_op(params: dict[str, Any], obj: dict[str, Any]) -> str:
+    """L2 fix: resolve the gate comparison operator from explicit + task direction.
+
+    An explicit ``op`` (from ``params`` or the objective snapshot) always wins.
+    When neither is set, the operator is derived from the task's ``direction``:
+    ``"lower"`` -> ``"le"`` (pass when primary <= threshold), otherwise ``"ge"``
+    (pass when primary >= threshold). This keeps the gate consistent with the
+    leaderboard direction so a lower-is-better task can never silently use the
+    opposite (>=) gate.
+    """
+    explicit_op = params.get("op") or obj.get("op")
+    if explicit_op in ("le", "ge"):
+        return explicit_op
+    direction = str(obj.get("direction") or "higher").strip().lower()
+    return "le" if direction == "lower" else "ge"
+
+
 # Competition presets: feature engineering + target column + gold reference.
 PRESETS = {
     "titanic": {
@@ -108,7 +126,11 @@ class KaggleEvalExecutor(StageExecutor):
             )
         df = pd.read_csv(train_path)
 
-        fe = (params.get("fe") or "basic").lower()
+        fe_raw = params.get("fe")
+        if isinstance(fe_raw, bool):
+            fe = "rich" if fe_raw else "basic"
+        else:
+            fe = str(fe_raw or "basic").lower()
         X, y = self._build_xy(df, target, preset, drop_cols, fe)
 
         # ---- held-out split (Phase 2: evaluator hardening) ----
@@ -229,7 +251,12 @@ class KaggleEvalExecutor(StageExecutor):
             if params.get("threshold") is not None
             else obj.get("target_threshold", preset_cfg.get("threshold", 0.82))
         )
-        op = params.get("op") or obj.get("op", "ge")
+        # L2 fix: an explicit `op` (params or objective) wins, but when neither is
+        # set we derive the comparison direction from the task's `direction`
+        # ("lower" -> "le", else "ge"). This keeps the gate consistent with the
+        # leaderboard direction and fixes the bug where a lower-is-better task
+        # silently used the opposite (>=) gate.
+        op = derive_gate_op(params, obj)
         passed = (primary <= threshold) if op == "le" else (primary >= threshold)
         gate_passed = passed
 

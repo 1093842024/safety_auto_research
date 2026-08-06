@@ -32,7 +32,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, PolynomialFeatures
 from sklearn.impute import SimpleImputer
 
 from .contracts import Task, TEST_FITNESS, VALID_SOLUTION, VALID_SOLUTION_FEEDBACK, AUX_EVAL_INFO, MetricValue
@@ -311,14 +311,25 @@ class OpenMLETaskAdapter(Task):
 
     @staticmethod
     def _build_preprocessor(X: pd.DataFrame, fe: str = "basic") -> ColumnTransformer:
+        fe = (fe or "basic").lower()
         num = X.select_dtypes(include=[np.number]).columns.tolist()
         cat = X.select_dtypes(exclude=[np.number]).columns.tolist()
         transformers = []
         # Impute missing values (titanic has NaNs in Age/Embarked) then scale/encode.
+        # "rich" FE adds degree-2 polynomial/interaction terms on the numeric block (M5).
         if num:
-            transformers.append(
-                ("num", Pipeline([("imp", SimpleImputer(strategy="median")), ("sc", StandardScaler())]), num)
-            )
+            if fe == "rich":
+                num_steps = [
+                    ("imp", SimpleImputer(strategy="median")),
+                    ("poly", PolynomialFeatures(degree=2, include_bias=False)),
+                    ("sc", StandardScaler()),
+                ]
+            else:
+                num_steps = [
+                    ("imp", SimpleImputer(strategy="median")),
+                    ("sc", StandardScaler()),
+                ]
+            transformers.append(("num", Pipeline(num_steps), num))
         if cat:
             transformers.append(
                 ("cat", Pipeline([("imp", SimpleImputer(strategy="most_frequent")),

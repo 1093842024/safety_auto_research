@@ -40,8 +40,8 @@ function metricPill(t: BenchmarkTask) {
       <span className="muted">{dirText(t.direction)}</span>
       {t.baseline !== null && <span className="muted mono">baseline={t.baseline}</span>}
       {t.reference !== null && <span className="muted mono">ref={t.reference}</span>}
-      {Object.keys(t.gates).length > 0 && (
-        <span className="muted mono">门限: {JSON.stringify(t.gates)}</span>
+      {Object.keys(t.gates || {}).length > 0 && (
+        <span className="muted mono">门限: {JSON.stringify(t.gates || {})}</span>
       )}
     </div>
   );
@@ -791,7 +791,7 @@ export function NewResearch({
               </div>
               <div className="kv">
                 <span className="muted">通过门限</span>
-                <span className="mono">{JSON.stringify(selected.gates)}</span>
+                <span className="mono">{JSON.stringify(selected.gates || {})}</span>
               </div>
               <div className="kv">
                 <span className="muted">数据集</span>

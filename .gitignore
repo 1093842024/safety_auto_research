@@ -32,6 +32,9 @@ frontend/dist/
 # Runtime data (generated dynamically)
 data/control_plane_store.json
 data/research_state.db
+data/custom_tasks.json
+data/custom_tasks.json.lock
+data/task_state/
 data/custom_uploads/
 
 # Vendored benchmarks & downloaded competition data (large, local-only)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime
 from datetime import timezone
 from typing import Any
@@ -31,6 +32,20 @@ from .schemas import UpdateStageStatusRequest
 from .store import Repository
 from . import eval_runner
 from ..benchmark_tasks import get_task
+
+
+def _clean_score(value: float) -> float:
+    """Return a finite float, raising ``ValueError`` on NaN/inf (M2 fix).
+
+    Non-finite scores (division-by-zero, log(0), empty splits) must never enter
+    the leaderboard/records: they break Python's sort comparator and pollute
+    top-3 selection.
+    """
+    v = float(value)
+    if not math.isfinite(v):
+        raise ValueError(f"评测分数非法（NaN/inf），无法入榜: {value!r}")
+    return v
+
 
 # Map a target StageStatus to the event_type used in StageStatusChangedEvent.
 _STAGE_EVENT_TYPE: dict[StageStatus, EventType] = {
@@ -274,6 +289,10 @@ class ControlPlaneService:
             nm = next(iter(scores))
             target = _best_dir(scores[nm])
 
+        try:
+            score_val = round(_clean_score(target), 6)
+        except ValueError:
+            return None
         artifacts = self._repo.list_artifacts(run_id)
         artifact_ids = [a.artifact_id for a in artifacts]
         record = {
@@ -282,7 +301,7 @@ class ControlPlaneService:
             "run_id": run_id,
             "metric_name": metric_name,
             "direction": direction,
-            "score": round(float(target), 6),
+            "score": score_val,
             "config_snapshot": config,
             "artifact_ids": artifact_ids,
             "artifacts": [{"artifact_id": a.artifact_id} for a in artifacts],
@@ -293,13 +312,43 @@ class ControlPlaneService:
         self._recompute_top3(task_id)
         return record
 
+    def _canonical_direction(self, task_id: str) -> str | None:
+        """Resolve the *canonical* optimization direction for a task.
+
+        L1 fix: the leaderboard direction must come from the task's declared
+        direction (benchmark_tasks), not from an arbitrary record's ``direction``
+        field (which could be wrong or mixed across records). Returns a normalized
+        "lower"/"higher" string, or None when the task is unknown.
+        """
+        try:
+            task = get_task(task_id)
+        except Exception:
+            task = None
+        if task is not None:
+            d = str(getattr(task, "direction", "") or "").strip().lower()
+            if d in ("lower", "higher"):
+                return d
+        return None
+
     def _recompute_top3(self, task_id: str) -> None:
         """Mark the top-3 records (by score, direction-aware) for a task as is_top3."""
         recs = self._repo.list_research_records(task_id)
         if not recs:
             return
-        direction = recs[0].get("direction", "higher")
-        ordered = sorted(recs, key=lambda r: r.get("score", 0.0), reverse=(direction != "lower"))
+        # L1 fix: canonical task direction first; fall back to the first record's
+        # direction for non-registered / tracked-only tasks (preserves historical
+        # behaviour). Only when a declared direction exists and conflicts does the
+        # ranking change — and that flip is exactly the bug being fixed.
+        direction = self._canonical_direction(task_id) or str(
+            recs[0].get("direction", "higher")
+        ).strip().lower()
+
+        def _sort_key(r: dict[str, Any]) -> tuple:
+            s = r.get("score", 0.0)
+            # non-finite scores always rank worst (never become top-3)
+            return (0 if math.isfinite(s) else 1, -s if direction != "lower" else s)
+
+        ordered = sorted(recs, key=_sort_key, reverse=False)
         for i, r in enumerate(ordered):
             self._repo.update_research_record(r["record_id"], is_top3=(i < 3))
 
@@ -330,7 +379,7 @@ class ControlPlaneService:
             "run_id": run_id,
             "metric_name": str(metric_name).strip().lower(),
             "direction": str(direction).strip().lower(),
-            "score": round(float(score), 6),
+            "score": round(_clean_score(score), 6),
             "config_snapshot": dict(config or {}),
             "artifact_ids": artifact_ids,
             "artifacts": artifacts_data,
@@ -408,15 +457,17 @@ class ControlPlaneService:
         # best-first ordering (direction-aware)
         def _key(r: dict[str, Any]):
             rev = r.get("direction", "higher") != "lower"
-            return (r.get("is_top3", False), -r.get("score", 0.0) if rev else r.get("score", 0.0))
-        return sorted(recs, key=_key, reverse=False)  # top3 True < top3 False; score desc
+            # top-3 records first; within each group, best score first (direction-aware)
+            return (0 if r.get("is_top3", False) else 1, -r.get("score", 0.0) if rev else r.get("score", 0.0))
+        return sorted(recs, key=_key, reverse=False)  # top3 (0) before non-top3 (1); best score first
 
     def leaderboard(self) -> list[dict[str, Any]]:
         """Cross-task global board: each task contributes its single best record."""
         by_task: dict[str, dict[str, Any]] = {}
         for r in self._repo.list_research_records():
-            if r.get("score") is None:
-                continue  # can't rank a record without a score
+            sc = r.get("score")
+            if sc is None or not math.isfinite(sc):
+                continue  # can't rank a record without a finite score
             cur = by_task.get(r["task_id"])
             if cur is None:
                 by_task[r["task_id"]] = r

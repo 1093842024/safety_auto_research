@@ -67,6 +67,7 @@ from .agent.harness import AGENT_TOOL_NAMES
 from .agent.harness import AgentHarness
 from .agent.harness import LocalAgentHarness
 from .agent.harness import RemoteAgentHarness
+from .base import ExecResult
 from .base import StageTaskSpec
 
 # Human-in-the-loop collaboration state: one entry per paused run.  The background
@@ -225,6 +226,7 @@ class ClosedLoopOrchestrator:
         run_id: str,
         capability_id: str,
         params: dict[str, Any] | None = None,
+        agent: "RoleAgentAdapter | None" = None,
     ) -> tuple[Any, Any]:
         """Agent-invoked tool: run one infrastructure-layer capability.
 
@@ -233,6 +235,10 @@ class ClosedLoopOrchestrator:
         but initiated by the agent through the ``run_capability`` tool. This is what lets
         an agent orchestrate the ten layers end-to-end instead of being confined to one
         assigned stage. Returns ``(stage_run, exec_result)``.
+
+        When ``agent`` (a ``RoleAgentAdapter``) is supplied, it fulfills the subtask in a
+        fresh, bounded context instead of the default deterministic executor — this is the
+        MEA hook that lets each research step run on its configured optimal backend.
         """
 
         cap = self.capability_registry.resolve(capability_id)
@@ -247,6 +253,31 @@ class ClosedLoopOrchestrator:
         self.svc.update_stage_status(
             stage.stage_run_id, UpdateStageStatusRequest(to_status=StageStatus.RUNNING)
         )
+        # MEA hook: a RoleAgentAdapter fulfills the bounded subtask contract (fresh
+        # context, bounded budget). The StageRun is still created for auditability.
+        if agent is not None:
+            from ..control_plane.task_state import SubtaskContract
+            from .agents import RoleBudget
+
+            params = params or {}
+            contract = SubtaskContract(
+                subtask_type=params.get("subtask_type", capability_id),
+                goal=params.get("open_goal", capability_id),
+                acceptance_criteria=params.get("acceptance_criteria", []),
+                boundary_constraints=params.get("boundary_constraints", []),
+                prior_evidence_refs=params.get("prior_evidence_refs", []),
+                params={**params, "run_id": run_id},
+                capability_id=capability_id,
+                record_key=params.get("record_key"),
+            )
+            out = agent.run_contract(contract, RoleBudget())
+            result = self._exec_output_to_result(out, stage)
+            self.svc.update_stage_status(
+                stage.stage_run_id, UpdateStageStatusRequest(to_status=result.final_status)
+            )
+            stage.gate_result = result.gate_result
+            self.svc._repo.put_stage_run(stage)
+            return stage, result
         executor = cap.executor or self.registry.resolve(cap.layer_code)
         if executor is None:
             raise NotFoundError(f"no executor bound for capability {capability_id}")
@@ -266,6 +297,107 @@ class ClosedLoopOrchestrator:
         stage.gate_result = result.gate_result
         self.svc._repo.put_stage_run(stage)
         return stage, result
+
+    # --------------------------------------------------- MEA (Manage-Execute-Audit)
+    @staticmethod
+    def _exec_output_to_result(out: "ExecOutput", stage: Any) -> "ExecResult":
+        """Adapt an agent's ``ExecOutput`` (unverified) into the platform ``ExecResult``."""
+
+        from ..platform_contracts.enums import GateResult
+        from ..platform_contracts.enums import StageStatus
+
+        if out.status == "succeeded":
+            final, gate = StageStatus.SUCCEEDED, GateResult.PASSED
+        else:  # failed | blocked
+            final, gate = StageStatus.FAILED, GateResult.FAILED
+        return ExecResult(
+            final_status=final,
+            gate_result=gate,
+            event=None,
+            output_refs=list(out.output_refs),
+            detail=out.summary or out.detail,
+        )
+
+    def run_mea_loop(
+        self,
+        run_id: str,
+        role_spec: str | None = None,
+        max_rounds: int = 25,
+        objective: str | None = None,
+        data_dir: str | None = None,
+        cancel_event: Any | None = None,
+    ) -> str:
+        """Run the Manage-Execute-Audit loop over the research objective.
+
+        Wraps :func:`run_mea_loop_core` with a real ``RoleAgentRegistry`` (loaded from
+        ``config/role_agents.yaml`` or ``role_spec``) and an environment snapshot for the
+        read-only auditor's integrity check. Each step uses its configured optimal agent;
+        the auditor is guaranteed independent of the executor via ``enforce_separation``.
+        Returns a valid ``WorkflowStatus`` name.
+        """
+
+        from .agents import RoleAgentRegistry
+        from .mea import run_mea_loop_core
+
+        spec = role_spec or _os.path.join(
+            _os.path.dirname(_os.path.dirname(__file__)), "config", "role_agents.yaml"
+        )
+        registry = RoleAgentRegistry.load(spec)
+        registry.bind(
+            self.run_capability,
+            getattr(self.harness, "_tool_handler", None) if self.harness else None,
+        )
+        registry.enforce_separation()
+        if objective is None:
+            try:
+                objective = self.svc.get_workflow_run(run_id).objective_snapshot
+            except Exception:
+                objective = run_id
+        status, _state, _metrics = run_mea_loop_core(
+            registry,
+            run_id,
+            objective,
+            max_rounds=max_rounds,
+            data_dir=data_dir,
+            env_snapshot_fn=self._env_snapshot,
+            cancel_event=cancel_event,
+            # P4 closed loop: route real executor backends through run_capability so each
+            # subtask is fulfilled inside a real StageRun (audited). The deterministic
+            # placeholder keeps its existing runner binding (no nested StageRun).
+            exec_fn=self.run_capability,
+        )
+        return status
+
+    def _env_snapshot(self) -> dict[str, Any]:
+        """Snapshot PROTECTED paths (harness source) for the auditor's integrity check.
+
+        Only protected paths are included, so any diff the auditor observes is a violation
+        (the executor must not mutate the harness code / other runs' artifacts).
+        """
+
+        protected = [
+            _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "control_plane"),
+            _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "execution_plane"),
+        ]
+        snap: dict[str, Any] = {}
+        count = 0
+        for base in protected:
+            if not _os.path.isdir(base):
+                continue
+            for root, _dirs, files in _os.walk(base):
+                for fn in files:
+                    if not fn.endswith(".py"):
+                        continue
+                    p = _os.path.join(root, fn)
+                    try:
+                        st = _os.stat(p)
+                        snap[p] = (st.st_size, int(st.st_mtime))
+                    except OSError:
+                        pass
+                    count += 1
+                    if count >= 2000:  # cap snapshot cost
+                        return snap
+        return snap
 
     # --------------------------------------------------- open-goal agent orchestration
     def dispatch_open_goal(
@@ -363,6 +495,7 @@ class ClosedLoopOrchestrator:
         run_id: str,
         max_rounds: int = 4,
         auto_loop: bool = True,
+        cancel_event: Any | None = None,
     ) -> dict[str, Any]:
         """Run the full 评测→红队→经验 closed loop and return a trace summary."""
 
@@ -391,6 +524,8 @@ class ClosedLoopOrchestrator:
         # 2) 红队 (loop until ASR within ceiling or max_rounds)
         round_idx = 0
         while auto_loop and round_idx < max_rounds:
+            if cancel_event is not None and cancel_event.is_set():
+                break
             stage, result = self.dispatch_stage(
                 run_id, "10_adversarial_data_generation", params={"target_model_id": run.target_id}
             )
@@ -560,6 +695,7 @@ class ClosedLoopOrchestrator:
                 pass  # never let progress failures crash the run
 
         outer = 0
+        inner_acc = 0.0  # 缺陷9 fix: bound at function scope so it is never UnboundLocalError
         while outer < max_outer_iters:
             # ---- CANCELLATION CHECK: user-requested abort ----
             if cancel_event is not None and cancel_event.is_set():
@@ -896,6 +1032,11 @@ class ClosedLoopOrchestrator:
                 steps.append(self._step(f"self_evo[{outer}]", se_stage, se_result, None))
             except NotFoundError:
                 pass  # layer_09 still a stub in this deployment
+            except Exception as _se_err:
+                # 缺陷11 fix: the original except was too narrow — a non-NotFoundError
+                # from the meta-loop must not abort the whole research run. Log and
+                # continue; the meta-loop is best-effort.
+                logging.warning("self-evolution meta-loop step failed (non-fatal): %s", _se_err)
 
             # ---- APPLY the accepted meta-loop patch (closes propose → apply →
             # evaluate → accept/rollback): the patch lands on the NEXT inner loop and

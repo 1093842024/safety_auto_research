@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import logging
 import os
@@ -107,26 +109,58 @@ class Repository:
             self.open_approvals = {}
 
     def _persist(self) -> None:
-        """Write the whole store to disk atomically. Caller must hold ``self._lock``."""
+        """Write the whole store to disk atomically.
+
+        Caller must hold ``self._lock`` (intra-process serialization). The cross-process
+        ``flock`` is acquired here so *every* writer (the ~10 mutators that call
+        ``_persist`` directly, plus ``_save``) is covered — fixing the H1 gap where only
+        ``_save``/``persist_now`` were guarded and concurrent multi-worker writes could
+        still corrupt the JSON store.
+        """
         if self._store_path is None:
             return
-        payload: dict[str, Any] = {}
-        for coll_name, (model_name, _key) in _PERSIST_COLLECTIONS.items():
-            coll = getattr(self, coll_name)
-            payload[coll_name] = [
-                {"__type__": model_name, "data": obj.model_dump(mode="json")}
-                for obj in coll.values()
-            ]
-        payload["metrics"] = self.metrics
-        payload["events"] = self.events
-        payload["research_records"] = self.research_records
-        payload["open_approvals"] = self.open_approvals
-        self._store_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._store_path.with_name(self._store_path.name + ".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, self._store_path)
+        with self._cross_process_lock():
+            payload: dict[str, Any] = {}
+            for coll_name, (model_name, _key) in _PERSIST_COLLECTIONS.items():
+                coll = getattr(self, coll_name)
+                payload[coll_name] = [
+                    {"__type__": model_name, "data": obj.model_dump(mode="json")}
+                    for obj in coll.values()
+                ]
+            payload["metrics"] = self.metrics
+            payload["events"] = self.events
+            payload["research_records"] = self.research_records
+            payload["open_approvals"] = self.open_approvals
+            self._store_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._store_path.with_name(self._store_path.name + ".tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, self._store_path)
+
+    @contextlib.contextmanager
+    def _cross_process_lock(self) -> Any:
+        """Advisory cross-process mutex on a sidecar ``.lock`` file (H1 fix).
+
+        ``threading.Lock`` only serializes threads *within one process*. With multiple
+        worker processes (e.g. ``uvicorn --workers N``) two processes could rewrite the
+        JSON store concurrently, causing lost updates or (mid-write) corruption. A
+        ``flock`` on a sidecar lock file gives the cross-process exclusion the JSON
+        store needs. The lock is released automatically on process exit.
+        """
+
+        if self._store_path is None:
+            yield
+            return
+        lock_path = self._store_path.with_name(self._store_path.name + ".lock")
+        with open(lock_path, "w", encoding="utf-8") as lf:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
     def _save(self) -> None:
+        # ``_persist`` already acquires the cross-process flock, so we only need the
+        # intra-process thread lock here.
         with self._lock:
             self._persist()
 

@@ -340,3 +340,36 @@ html, body, #root { height: 100%; }
 .compare-bar-label { display: flex; flex-direction: column; }
 .compare-bar-track { height: 24px; background: var(--panel-2); border-radius: 6px; overflow: hidden; }
 .compare-bar-fill { height: 100%; background: var(--accent); border-radius: 6px; transition: width 0.3s ease; min-width: 4px; }
+
+/* ===== Global toast notifications (P2 frontend fix) ===== */
+.toast-host {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 9999;
+  max-width: min(380px, calc(100vw - 36px));
+}
+.toast {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-left-width: 4px;
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  animation: toast-in 0.18s ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.toast-info { border-left-color: var(--accent); }
+.toast-ok { border-left-color: var(--ok); }
+.toast-warn { border-left-color: var(--warn); }
+.toast-error { border-left-color: var(--bad); }

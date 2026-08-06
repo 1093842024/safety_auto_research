@@ -1,0 +1,101 @@
+# Role -> agent assignment for the MEA auto-research harness.
+# Each step runs on its configured OPTIMAL backend. The Auditor is hard-required to be
+# independent of the Executor (require_different_from), cutting self-confirmation at the
+# architecture level. Budgets follow the paper: executor 1800s, manager/auditor 300s.
+#
+# Backends: deterministic | codex | claude_code | workbuddy | llm_api
+#   deterministic  -> no LLM; the orchestrator's real deterministic executors
+#   codex          -> Codex CLI (tool-calling agent)
+#   claude_code    -> Claude Code CLI (tool-calling agent)
+#   workbuddy      -> WorkBuddy session (endpoint= or agent_command=)
+#   llm_api        -> OpenAI-compatible chat model (OPENMLE_API_* env), used for
+#                     reasoning roles and as the independent auditor judge
+
+roles:
+  # R0 Manager — decompose objective into bounded subtask contracts (built into TaskState)
+  manager:
+    backend: llm_api
+    model: claude-opus-4.7
+    budget_seconds: 300
+
+  # R4 Executor — the default coding/execution agent (fresh context per subtask)
+  executor_default:
+    backend: claude_code
+    model: auto
+    budget_seconds: 1800
+    # Per-subtask-type overrides: pick the best-fit agent for each research step.
+    executor_overrides:
+      literature_search:
+        backend: workbuddy
+        model: web-research
+        budget_seconds: 1200
+      hypothesis_gen:
+        backend: llm_api
+        model: claude-opus-4.7
+        budget_seconds: 900
+      experiment_design:
+        backend: llm_api
+        model: claude-opus-4.7
+        budget_seconds: 600
+      # R4 Implementation — fresh-context coding agent (default backend, kept explicit).
+      experiment_code:
+        backend: claude_code
+        model: auto
+        budget_seconds: 1800
+      # R5 Evaluation — MUST stay deterministic (no LLM) for reproducible, zero-hallucination metrics.
+      eval_metrics:
+        backend: deterministic
+        model: none
+        budget_seconds: 300
+      # R8 Self-evolution proposer — cautious LLM; must pass frozen verifier + rollback later.
+      self_evolve_patch:
+        backend: llm_api
+        model: cautious-llm
+        budget_seconds: 300
+      # R9 Evolutionary search — deterministic orchestration (operators are configurable elsewhere).
+      evolution_orchestrate:
+        backend: deterministic
+        model: none
+        budget_seconds: 600
+      # R10 Report synthesis — write the final report from verified findings only.
+      report_synthesis:
+        backend: workbuddy
+        model: writing-agent
+        budget_seconds: 600
+
+  # R5 Evaluator — MUST stay deterministic (no LLM) for reproducible metrics
+  evaluator:
+    backend: deterministic
+    model: none
+    budget_seconds: 300
+
+  # R6 Auditor — independent model, read-only, must differ from the executor
+  auditor:
+    backend: llm_api
+    model: gpt-independent-judge
+    require_different_from: executor
+    budget_seconds: 300
+
+  # R7 Meta-decider / router — strong reasoning, output gated by validate_route
+  meta_decider:
+    backend: llm_api
+    model: claude-opus-4.7
+    budget_seconds: 300
+
+  # R8 Self-evolution proposer — cautious LLM, frozen verifier + rollback
+  self_evolver:
+    backend: llm_api
+    model: cautious-llm
+    budget_seconds: 300
+
+  # R9 Evolutionary search — deterministic orchestration + LLM operators
+  evolutionary:
+    backend: deterministic
+    model: none
+    budget_seconds: 600
+
+  # R10 Synthesizer — write the final report from verified findings only
+  synthesizer:
+    backend: workbuddy
+    model: writing-agent
+    budget_seconds: 600

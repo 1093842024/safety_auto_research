@@ -15,6 +15,12 @@ or SQLite-backed) so that:
 The AREX-style ``compact()`` method produces an ``improvement_state`` that preserves
 verified findings, unresolved constraints, **and rejected candidates** — the key to
 escaping local optima.
+
+THREAD-SAFETY (缺陷3 fix): a single ``ResearchStateStore`` is shared by all concurrent
+background runs, and each store mutates / iterates its in-memory dict from multiple
+threads. Every dict-touching method is guarded by a per-store reentrant lock so concurrent
+``observe`` / ``add`` / ``commit`` / ``compact`` / ``snapshot`` calls cannot raise
+``RuntimeError: dictionary changed size during iteration`` or lose updates.
 """
 
 from __future__ import annotations
@@ -23,6 +29,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import uuid
 from typing import Any
 
@@ -40,6 +47,7 @@ class HypoTreeStore:
     """Arbor-style hypothesis tree persisted across rounds (memory or SQLite)."""
 
     def __init__(self, db_path: str | None = None) -> None:
+        self._lock = threading.RLock()
         self.db_path = db_path
         self._nodes: dict[str, HypothesisNode] = {}
         if db_path:
@@ -87,21 +95,22 @@ class HypoTreeStore:
     ) -> HypothesisNode:
         """Add a hypothesis node (Arbor ``observe`` / ``ideate``)."""
 
-        node = HypothesisNode(
-            node_id=_new_id("node"),
-            parent_id=parent_id,
-            hypothesis=hypothesis,
-            evidence_refs=evidence_refs or [],
-            artifact_ref=artifact_ref,
-            branch=branch,
-            score=score,
-            status="active",
-            node_kind=node_kind,
-            run_id=run_id,
-        )
-        self._nodes[node.node_id] = node
-        self._persist_node(node)
-        return node
+        with self._lock:
+            node = HypothesisNode(
+                node_id=_new_id("node"),
+                parent_id=parent_id,
+                hypothesis=hypothesis,
+                evidence_refs=evidence_refs or [],
+                artifact_ref=artifact_ref,
+                branch=branch,
+                score=score,
+                status="active",
+                node_kind=node_kind,
+                run_id=run_id,
+            )
+            self._nodes[node.node_id] = node
+            self._persist_node(node)
+            return node
 
     def backpropagate(self, node_id: str, insight: str, score: float | None = None) -> None:
         """Attach an insight and propagate the score up the parent chain (Arbor ``decide``).
@@ -110,52 +119,58 @@ class HypoTreeStore:
         preserving diversity for the meta-loop's archive.
         """
 
-        node = self._nodes.get(node_id)
-        if node is None:
-            return
-        if insight:
-            node.insight = insight
-        if score is not None:
-            node.score = max(0.0, min(1.0, score))
-        self._persist_node(node)
-        # climb the chain, smoothing scores upward
-        cur = node
-        while cur.parent_id and cur.parent_id in self._nodes:
-            parent = self._nodes[cur.parent_id]
-            parent.score = round(max(parent.score, cur.score * 0.9), 4)
-            self._persist_node(parent)
-            cur = parent
+        with self._lock:
+            node = self._nodes.get(node_id)
+            if node is None:
+                return
+            if insight:
+                node.insight = insight
+            if score is not None:
+                node.score = max(0.0, min(1.0, score))
+            self._persist_node(node)
+            # climb the chain, smoothing scores upward
+            cur = node
+            while cur.parent_id and cur.parent_id in self._nodes:
+                parent = self._nodes[cur.parent_id]
+                parent.score = round(max(parent.score, cur.score * 0.9), 4)
+                self._persist_node(parent)
+                cur = parent
 
     def mark_pruned(self, node_id: str) -> None:
-        node = self._nodes.get(node_id)
-        if node is None:
-            return
-        node.status = "pruned"
-        self._persist_node(node)
+        with self._lock:
+            node = self._nodes.get(node_id)
+            if node is None:
+                return
+            node.status = "pruned"
+            self._persist_node(node)
 
     def mark_merged(self, node_id: str) -> None:
-        node = self._nodes.get(node_id)
-        if node is None:
-            return
-        node.status = "merged"
-        self._persist_node(node)
+        with self._lock:
+            node = self._nodes.get(node_id)
+            if node is None:
+                return
+            node.status = "merged"
+            self._persist_node(node)
 
     def get(self, node_id: str) -> HypothesisNode | None:
-        return self._nodes.get(node_id)
+        with self._lock:
+            return self._nodes.get(node_id)
 
     def list_nodes(self, branch: str | None = None, run_id: str | None = None) -> list[HypothesisNode]:
-        out = list(self._nodes.values())
-        if branch is not None:
-            out = [n for n in out if n.branch == branch]
-        if run_id is not None:
-            out = [n for n in out if n.run_id == run_id]
-        return out
+        with self._lock:
+            out = list(self._nodes.values())
+            if branch is not None:
+                out = [n for n in out if n.branch == branch]
+            if run_id is not None:
+                out = [n for n in out if n.run_id == run_id]
+            return out
 
     def snapshot(self, run_id: str | None = None) -> dict[str, Any]:
-        nodes = [n for n in self._nodes.values() if run_id is None or n.run_id == run_id]
-        return {
-            "nodes": [n.model_dump(mode="json") for n in nodes],
-        }
+        with self._lock:
+            nodes = [n for n in self._nodes.values() if run_id is None or n.run_id == run_id]
+            return {
+                "nodes": [n.model_dump(mode="json") for n in nodes],
+            }
 
     # ------------------------------------------------------------------ AREX compact
     def compact(
@@ -168,30 +183,31 @@ class HypoTreeStore:
     ) -> dict[str, Any]:
         """Build the ``improvement_state`` at a turning point (AREX ``update_context``)."""
 
-        keep = keep or ["verified", "unresolved", "rejected_candidates", "next_plan"]
-        nodes = [n for n in self._nodes.values() if run_id is None or n.run_id == run_id]
-        verified = [
-            {"node_id": n.node_id, "hypothesis": n.hypothesis, "score": n.score, "insight": n.insight}
-            for n in nodes
-            if n.status == "active" and n.score >= 0.6
-        ]
-        stepping_stones = [
-            {"node_id": n.node_id, "hypothesis": n.hypothesis, "insight": n.insight}
-            for n in nodes
-            if n.status == "pruned"
-        ]
-        state: dict[str, Any] = {}
-        if "verified" in keep:
-            state["verified"] = verified
-        if "unresolved" in keep and unresolved is not None:
-            state["unresolved"] = unresolved
-        if "rejected_candidates" in keep and rejected_candidates is not None:
-            state["rejected_candidates"] = rejected_candidates
-        if "next_plan" in keep:
-            state["next_plan"] = next_plan
-        # always preserve stepping stones (the anti-local-optima safeguard)
-        state["stepping_stones"] = stepping_stones
-        return state
+        with self._lock:
+            keep = keep or ["verified", "unresolved", "rejected_candidates", "next_plan"]
+            nodes = [n for n in self._nodes.values() if run_id is None or n.run_id == run_id]
+            verified = [
+                {"node_id": n.node_id, "hypothesis": n.hypothesis, "score": n.score, "insight": n.insight}
+                for n in nodes
+                if n.status == "active" and n.score >= 0.6
+            ]
+            stepping_stones = [
+                {"node_id": n.node_id, "hypothesis": n.hypothesis, "insight": n.insight}
+                for n in nodes
+                if n.status == "pruned"
+            ]
+            state: dict[str, Any] = {}
+            if "verified" in keep:
+                state["verified"] = verified
+            if "unresolved" in keep and unresolved is not None:
+                state["unresolved"] = unresolved
+            if "rejected_candidates" in keep and rejected_candidates is not None:
+                state["rejected_candidates"] = rejected_candidates
+            if "next_plan" in keep:
+                state["next_plan"] = next_plan
+            # always preserve stepping stones (the anti-local-optima safeguard)
+            state["stepping_stones"] = stepping_stones
+            return state
 
 
 class ExperienceBank:
@@ -209,6 +225,7 @@ class ExperienceBank:
     DECAY = 0.97
 
     def __init__(self, db_path: str | None = None) -> None:
+        self._lock = threading.RLock()
         self.db_path = db_path
         self._entries: dict[str, ExperienceEntry] = {}
         self._seq = 0
@@ -252,48 +269,51 @@ class ExperienceBank:
         confidence: float = 0.5,
         source_run_id: str | None = None,
     ) -> ExperienceEntry:
-        key = (kind, self._norm(lesson))
-        for e in self._entries.values():
-            if (e.kind, self._norm(e.lesson)) == key:
-                # reinforcement: merge, do not duplicate
-                e.uses += 1
-                e.confidence = min(0.99, round(e.confidence + 0.05, 4))
-                self._seq += 1
-                e.seq = self._seq  # refresh recency
-                if source_run_id:
-                    e.source_run_id = source_run_id
-                self._persist(e)
-                return e
-        self._seq += 1
-        e = ExperienceEntry(
-            entry_id=_new_id("exp"),
-            kind=kind,
-            context=context,
-            lesson=lesson,
-            applicable_stages=applicable_stages or [],
-            confidence=confidence,
-            uses=0,
-            seq=self._seq,
-            source_run_id=source_run_id,
-        )
-        self._entries[e.entry_id] = e
-        self._persist(e)
-        return e
+        with self._lock:
+            key = (kind, self._norm(lesson))
+            for e in self._entries.values():
+                if (e.kind, self._norm(e.lesson)) == key:
+                    # reinforcement: merge, do not duplicate
+                    e.uses += 1
+                    e.confidence = min(0.99, round(e.confidence + 0.05, 4))
+                    self._seq += 1
+                    e.seq = self._seq  # refresh recency
+                    if source_run_id:
+                        e.source_run_id = source_run_id
+                    self._persist(e)
+                    return e
+            self._seq += 1
+            e = ExperienceEntry(
+                entry_id=_new_id("exp"),
+                kind=kind,
+                context=context,
+                lesson=lesson,
+                applicable_stages=applicable_stages or [],
+                confidence=confidence,
+                uses=0,
+                seq=self._seq,
+                source_run_id=source_run_id,
+            )
+            self._entries[e.entry_id] = e
+            self._persist(e)
+            return e
 
     def query(self, stage: str | None = None, k: int = 5) -> list[ExperienceEntry]:
         """Retrieve up to ``k`` experiences, ranked by decayed confidence."""
 
-        out = list(self._entries.values())
-        if stage is not None:
-            out = [e for e in out if stage in e.applicable_stages]
-        out.sort(
-            key=lambda e: e.confidence * (self.DECAY ** max(0, self._seq - e.seq)),
-            reverse=True,
-        )
-        return out[:k]
+        with self._lock:
+            out = list(self._entries.values())
+            if stage is not None:
+                out = [e for e in out if stage in e.applicable_stages]
+            out.sort(
+                key=lambda e: e.confidence * (self.DECAY ** max(0, self._seq - e.seq)),
+                reverse=True,
+            )
+            return out[:k]
 
     def list_all(self) -> list[ExperienceEntry]:
-        return list(self._entries.values())
+        with self._lock:
+            return list(self._entries.values())
 
 
 class StrategyArchive:
@@ -312,6 +332,7 @@ class StrategyArchive:
     """
 
     def __init__(self, db_path: str | None = None) -> None:
+        self._lock = threading.RLock()
         self.db_path = db_path
         self._strategies: dict[str, dict[str, Any]] = {}
         if db_path:
@@ -341,40 +362,45 @@ class StrategyArchive:
     def commit(self, snapshot: dict[str, Any]) -> str:
         """Store a mechanism snapshot; return its rollback id."""
 
-        rid = _new_id("rb")
-        self._strategies[rid] = {"rollback_id": rid, **snapshot}
-        self._persist(rid, self._strategies[rid])
-        return rid
+        with self._lock:
+            rid = _new_id("rb")
+            self._strategies[rid] = {"rollback_id": rid, **snapshot}
+            self._persist(rid, self._strategies[rid])
+            return rid
 
     def get(self, rollback_id: str) -> dict[str, Any] | None:
-        return self._strategies.get(rollback_id)
+        with self._lock:
+            return self._strategies.get(rollback_id)
 
     def update(self, rollback_id: str, **fields: Any) -> dict[str, Any] | None:
         """Merge fields into an entry and persist (verification results, status)."""
 
-        entry = self._strategies.get(rollback_id)
-        if entry is None:
-            return None
-        entry.update(fields)
-        self._persist(rollback_id, entry)
-        return entry
+        with self._lock:
+            entry = self._strategies.get(rollback_id)
+            if entry is None:
+                return None
+            entry.update(fields)
+            self._persist(rollback_id, entry)
+            return entry
 
     def pending(self, run_id: str | None = None) -> list[dict[str, Any]]:
         """Entries accepted-but-not-yet-verified (optionally filtered by run)."""
 
-        out = [
-            e
-            for e in self._strategies.values()
-            if e.get("status") == "pending_verification"
-            and (run_id is None or e.get("run_id") == run_id)
-        ]
-        return out
+        with self._lock:
+            out = [
+                e
+                for e in self._strategies.values()
+                if e.get("status") == "pending_verification"
+                and (run_id is None or e.get("run_id") == run_id)
+            ]
+            return out
 
     def list_all(self, run_id: str | None = None) -> list[dict[str, Any]]:
-        out = list(self._strategies.values())
-        if run_id is not None:
-            out = [e for e in out if e.get("run_id") == run_id]
-        return out
+        with self._lock:
+            out = list(self._strategies.values())
+            if run_id is not None:
+                out = [e for e in out if e.get("run_id") == run_id]
+            return out
 
     def rollback(self, rollback_id: str) -> dict[str, Any] | None:
         """Mark an entry rolled back (falsified prediction) and return it.

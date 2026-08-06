@@ -22,6 +22,8 @@ Design notes
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import re
@@ -30,6 +32,29 @@ import time
 from typing import Any
 
 _LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def _cross_process_lock() -> Any:
+    """Advisory cross-process mutex on a sidecar ``.lock`` file (H1 fix).
+
+    ``threading.Lock`` only serializes threads *within one process*. With multiple
+    worker processes (e.g. ``uvicorn --workers N``) two processes could rewrite the
+    custom-tasks JSON concurrently, causing lost updates or (mid-write) corruption.
+    A ``flock`` on a sidecar lock file gives the cross-process exclusion the store
+    needs. The lock is released automatically on process exit.
+    """
+
+    path = _store_path()
+    parent = os.path.dirname(path)
+    os.makedirs(parent, exist_ok=True)
+    lock_path = path + ".lock"
+    with open(lock_path, "w", encoding="utf-8") as lf:
+        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
 _PKG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -775,44 +800,47 @@ def register_custom_task(task_type: str, values: dict[str, Any]) -> dict[str, An
         raise ValueError("；".join(errors))
     spec = _SPEC_BY_ID[task_type]
 
-    with _LOCK:
-        items = _load_raw()
-        existing = {it["task_id"] for it in items}
-        base = f"custom.{_slugify(str(values.get('name', '')))}"
-        task_id = base
-        i = 2
-        while task_id in existing:
-            task_id = f"{base}_{i}"
-            i += 1
+    with _cross_process_lock():
+        with _LOCK:
+            items = _load_raw()
+            existing = {it.get("task_id") for it in items}
+            base = f"custom.{_slugify(str(values.get('name', '')))}"
+            task_id = base
+            i = 2
+            while task_id in existing:
+                task_id = f"{base}_{i}"
+                i += 1
 
-        record = {
-            "task_id": task_id,
-            "task_type": task_type,
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "values": values,
-            "label": spec["label"],
-            "executable": bool(spec["executable"]),
-            "harness": spec["harness"],
-            "modality": spec["modality"],
-        }
-        items.append(record)
-        _save_raw(items)
-        return record
+            record = {
+                "task_id": task_id,
+                "task_type": task_type,
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "values": values,
+                "label": spec["label"],
+                "executable": bool(spec["executable"]),
+                "harness": spec["harness"],
+                "modality": spec["modality"],
+            }
+            items.append(record)
+            _save_raw(items)
+            return record
 
 
 def list_custom_tasks() -> list[dict[str, Any]]:
-    with _LOCK:
-        return _load_raw()
+    with _cross_process_lock():
+        with _LOCK:
+            return _load_raw()
 
 
 def delete_custom_task(task_id: str) -> bool:
-    with _LOCK:
-        items = _load_raw()
-        kept = [it for it in items if it["task_id"] != task_id]
-        if len(kept) == len(items):
-            return False
-        _save_raw(kept)
-        return True
+    with _cross_process_lock():
+        with _LOCK:
+            items = _load_raw()
+            kept = [it for it in items if it.get("task_id") != task_id]
+            if len(kept) == len(items):
+                return False
+            _save_raw(kept)
+            return True
 
 
 def get_custom_task(task_id: str) -> dict[str, Any] | None:

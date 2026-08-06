@@ -110,7 +110,11 @@ def _propose_param_patch(inner_params: dict[str, Any]) -> tuple[dict[str, Any], 
     current configuration is already at the surface's strongest point (no-op proposal).
     """
 
-    cur_fe = (inner_params.get("fe") or "basic").lower()
+    fe_raw = inner_params.get("fe")
+    if isinstance(fe_raw, bool):
+        cur_fe = "rich" if fe_raw else "basic"
+    else:
+        cur_fe = str(fe_raw or "basic").lower()
     cur_model = (inner_params.get("model") or "gbm").lower()
     cur_cv = int(inner_params.get("cv_folds", 5) or 5)
     if cur_fe == "basic":

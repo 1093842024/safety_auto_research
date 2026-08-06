@@ -51,33 +51,13 @@ export function DualLoopLive({ runId }: { runId: string }) {
     : null;
   const decisionLabel = lastDecision ? (DECISION_LABEL[lastDecision] || lastDecision) : "—";
   const decisionClass = lastDecision ? (DECISION_CLASS[lastDecision] || "accent") : "accent";
-  const statusLabel: Record<string, string> = {
-    running: "运行中",
-    requested: "已请求",
-    waiting_approval: "等待审批",
-    succeeded: "成功",
-    failed: "失败",
-    exited_budget: "已完成 · 已达最大轮数",
-    exited_converged: "已完成 · 审计通过",
-    cancelled: "已取消",
-  };
-  const statusClass: Record<string, string> = {
-    running: "warn",
-    requested: "accent",
-    waiting_approval: "accent",
-    succeeded: "ok",
-    failed: "bad",
-    exited_budget: "ok",
-    exited_converged: "ok",
-    cancelled: "bad",
-  };
 
   return (
     <div>
       <div className="card" style={{ marginBottom: 12 }}>
         <div className="row" style={{ gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-          <span className={`pill ${statusClass[runStatus] || "accent"}`}>
-            {statusLabel[runStatus] || runStatus}
+          <span className={`pill ${STATUS_CLASS[runStatus] || "accent"}`}>
+            {STATUS_LABEL[runStatus] || runStatus}
           </span>
           <span className="muted">外部审计进度</span>
           <span>
