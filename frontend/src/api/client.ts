@@ -259,6 +259,12 @@ export interface BenchmarkTask {
   /** custom-registered tasks only */
   task_type?: string;
   type_config?: Record<string, any> | null;
+  /** Availability: false => grayed out (data >1 GiB / external dep / LLM weights). */
+  enabled?: boolean;
+  /** Why the task is unavailable (shown when enabled === false). */
+  unavailable_reason?: string;
+  /** Lower bound on train+eval data volume in bytes (null = unknown/external). */
+  data_size_bytes?: number | null;
 }
 
 export const getBenchmarkTasks = async () => {

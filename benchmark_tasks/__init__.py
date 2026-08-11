@@ -49,6 +49,14 @@ class BenchmarkTask:
     # ---- custom-registered tasks only (empty for curated entries) ----
     task_type: str = ""  # e.g. tabular_classification / llm_sft / llm_opd ...
     type_config: dict[str, Any] | None = None  # raw registration form values
+    # ---- availability / gray-out (data-size policy) ----
+    # ``data_size_bytes`` is the *lower bound* on train+eval data volume. ``None`` means
+    # "unknown / external" (treated as not-locally-completable). Tasks whose data exceeds
+    # the 1 GiB policy, or that depend on external repos / model weights too large to host
+    # locally, are grayed out (``enabled=False``) and excluded from training-optimization.
+    data_size_bytes: int | None = None
+    enabled: bool = True
+    unavailable_reason: str = ""
 
 
 def _oss(p: str) -> str:
@@ -566,10 +574,62 @@ def _sandbox_isolation(t: BenchmarkTask) -> str:
     return "host"
 
 
+def _availability(t: BenchmarkTask) -> tuple[bool, str, int | None]:
+    """Gray-out policy for the benchmark catalog.
+
+    A task is *unavailable* (grayed out, excluded from training-optimization) when:
+      * its train/eval data exceeds the 1 GiB policy (e.g. the two external suites
+        whose datasets total ~6.9 GB), or
+      * it depends on an external sibling repo / Harbor / Arbor environment that is
+        not present locally, or
+      * it is a custom LLM task whose base-model weights alone exceed 1 GiB and thus
+        cannot be trained in this environment.
+
+    Returns ``(enabled, unavailable_reason, data_size_bytes)``. ``data_size_bytes`` is
+    the known lower bound on data volume (``None`` == unknown / external).
+    """
+    tid = t.task_id
+    # Two external suites: data 6.9 GB on disk -> >1 GiB policy.
+    if tid.startswith("suite."):
+        return (
+            False,
+            "训练/评测数据 >1GB（外部套件，需手动拉取数据集与官方 grade 脚本）",
+            6_900_000_000,
+        )
+    # External MLE-bench harness: depends on openai/mle-bench dataset (>1 GB).
+    if tid == "mlevolve.mle_bench":
+        return (
+            False,
+            "外部依赖 openai/mle-bench 数据集（>1GB），需 Kaggle API 凭据",
+            None,
+        )
+    # Curated OSS tasks live in external sibling repos (Harbor / Arbor / etc.) with
+    # no local data or runtime; they are tracked-only and cannot be trained here.
+    _EXTERNAL_PREFIXES = (
+        "autolab.", "claudini.", "arbor.", "autoresearchclaw.",
+        "ara.", "autoclaude.",
+    )
+    if any(tid.startswith(p) for p in _EXTERNAL_PREFIXES):
+        return (
+            False,
+            "外部兄弟仓库 + Harbor/Arbor 依赖，本仓无本地数据与运行环境",
+            None,
+        )
+    # Custom LLM tasks: base-model weights alone exceed 1 GiB.
+    if t.task_type in ("llm_sft", "llm_rl", "llm_opd"):
+        return (
+            False,
+            "基座模型权重 >1GB，需 GPU 与大容量存储，本环境不内置训练",
+            None,
+        )
+    return (True, "", t.data_size_bytes)
+
+
 def to_dict(t: BenchmarkTask) -> dict[str, Any]:
     eval_method = t.eval_method or _default_eval_method(t)
     execution_mode = "platform" if (t.harness == "kaggle_eval" or t.supported_by_platform) else "agent"
     sandbox_isolation = _sandbox_isolation(t)
+    enabled, unavailable_reason, data_size_bytes = _availability(t)
     direction = "越高越好" if t.direction == "higher" else "越低越好"
     goal = (
         f"优化指标 {t.eval_metric}（{direction}），baseline={t.baseline}"
@@ -600,6 +660,10 @@ def to_dict(t: BenchmarkTask) -> dict[str, Any]:
         "note": t.note,
         "task_type": t.task_type,
         "type_config": t.type_config,
+        # ---- gray-out policy (data-size > 1 GiB / external / LLM weights) ----
+        "enabled": enabled,
+        "unavailable_reason": unavailable_reason,
+        "data_size_bytes": data_size_bytes,
     }
 
 

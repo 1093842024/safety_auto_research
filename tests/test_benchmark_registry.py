@@ -50,10 +50,18 @@ class TaskTypeSpecTest(unittest.TestCase):
         )
 
     def test_only_tabular_is_executable(self) -> None:
+        # Platform-executable types: tabular (kaggle_eval path) plus the four
+        # classifier sandboxes (text / image / audio / embedding) wired in the
+        # 2026-08-11 benchmark-completeness work. LLM types stay tracked-only.
+        _EXECUTABLE = {
+            "tabular_classification",
+            "text_classification",
+            "image_classification",
+            "audio_classification",
+            "embedding_contrastive",
+        }
         for s in registry.get_task_type_specs():
-            self.assertEqual(
-                s["executable"], s["type_id"] == "tabular_classification", s["type_id"]
-            )
+            self.assertEqual(s["executable"], s["type_id"] in _EXECUTABLE, s["type_id"])
 
     def test_specs_carry_common_fields(self) -> None:
         for s in registry.get_task_type_specs():

@@ -147,7 +147,9 @@ export function BenchmarkCatalog({ onUseTask }: { onUseTask: (taskId: string) =>
       </div>
       <p className="muted" style={{ marginTop: 6 }}>
         内置研究任务的完整信息：目标、定义、数据、评估方式、指标与基线、执行方式。
-        需要 docker / Arbor / Harbor 的任务已统一改为 <b>agent 模式执行</b>（仅保留核心信息，剥离外部依赖）。
+        需要 docker / Arbor / Harbor 的任务已统一改为 <b>agent 模式执行</b>（仅保留核心信息，剥离外部依赖）；
+        训练/评测数据体积 <b>&gt;1GB</b>、依赖外部兄弟仓库或基座模型权重 &gt;1GB 的任务已<b>置灰（⛔ 不可用）</b>，
+        不参与端到端评测与训练优化。
       </p>
 
       <div className="row" style={{ gap: 10, marginTop: 10, flexWrap: "wrap" }}>
@@ -175,8 +177,10 @@ export function BenchmarkCatalog({ onUseTask }: { onUseTask: (taskId: string) =>
             <h3 style={{ borderBottom: "1px solid var(--border)", paddingBottom: 4 }}>
               {CATEGORY_LABELS[c] || c} <span className="muted">({items.length})</span>
             </h3>
-            {items.map((t) => (
-              <div key={t.task_id} className={`catalog-card ${expanded === t.task_id ? "open" : ""}`}>
+            {items.map((t) => {
+              const disabled = t.enabled === false;
+              return (
+              <div key={t.task_id} className={`catalog-card ${expanded === t.task_id ? "open" : ""} ${disabled ? "disabled" : ""}`}>
                 <div className="row catalog-head">
                   <button
                     type="button"
@@ -187,22 +191,35 @@ export function BenchmarkCatalog({ onUseTask }: { onUseTask: (taskId: string) =>
                     <strong>{t.name}</strong>
                   </button>
                   <span className="muted mono small">{t.task_id}</span>
-                  {t.execution_mode === "agent" ? (
+                  {disabled ? (
+                    <span className="pill gray" title={t.unavailable_reason}>⛔ 已置灰（不可用）</span>
+                  ) : t.execution_mode === "agent" ? (
                     <span className="pill warn">agent 模式</span>
                   ) : (
                     <span className="pill ok">平台原生</span>
                   )}{" "}
-                  {isoBadge(t.sandbox_isolation)}
-                  <button className="btn tiny primary" onClick={() => onUseTask(t.task_id)}>
+                  {!disabled && isoBadge(t.sandbox_isolation)}
+                  <button
+                    className="btn tiny primary"
+                    disabled={disabled}
+                    title={disabled ? t.unavailable_reason : undefined}
+                    onClick={() => onUseTask(t.task_id)}
+                  >
                     用此任务新建研究 →
                   </button>
                 </div>
                 <div className="muted mono small" style={{ margin: "2px 0 6px 18px" }}>
                   指标 {t.eval_metric} · {dirText(t.direction)} · baseline={t.baseline ?? "—"}
                 </div>
+                {disabled && t.unavailable_reason && (
+                  <div className="muted small" style={{ margin: "0 0 6px 18px", color: "var(--warn, #b26a00)" }}>
+                    不可用原因：{t.unavailable_reason}
+                  </div>
+                )}
                 {expanded === t.task_id && <TaskDetail t={t} />}
               </div>
-            ))}
+              );
+            })}
           </div>
         ))}
       </div>

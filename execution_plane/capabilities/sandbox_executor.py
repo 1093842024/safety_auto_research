@@ -71,7 +71,11 @@ _BASH = "/bin/bash"
 
 # Capabilities that should route into the sandbox when AGENT_SANDBOX=1 is set.
 SANDBOX_CAPABILITY_IDS = frozenset(
-    {"kaggle_eval", "kaggle_eval_sandbox", "run_research_sandbox", "text_cls_sandbox"}
+    {
+        "kaggle_eval", "kaggle_eval_sandbox", "run_research_sandbox",
+        "text_cls_sandbox", "image_cls_sandbox", "audio_cls_sandbox",
+        "embedding_sandbox",
+    }
 )
 
 
@@ -181,6 +185,115 @@ class SandboxResearchExecutor(StageExecutor):
                 "report_ref": params.get("report_ref", f"text-cls://sandbox-{data_subdir}"),
             }
             scratch = self._make_scratch(home, stage_run, "text_cls")
+            return cmd, data_dir, scratch, result_name, eval_meta
+
+        # ---- image classification path -----------------------------------------
+        if cap_id == "image_cls_sandbox" or params.get("task_type") == "image_classification" or str(
+            params.get("preset") or ""
+        ) == "image_cls":
+            obj = self._objective(params, stage_run)
+            data_subdir = str(params.get("data_subdir") or obj.get("data_subdir") or "image_cls_demo")
+            arch = str(params.get("arch") or obj.get("arch") or "tiny_cnn")
+            epochs = int(params.get("epochs") if params.get("epochs") is not None else obj.get("epochs", 6))
+            metric = params.get("eval_metric") or obj.get("eval_metric") or "accuracy"
+            direction = str(obj.get("direction") or "higher").strip().lower()
+            op = params.get("op") or ("le" if direction == "lower" else "ge")
+            threshold = float(
+                params.get("threshold")
+                if params.get("threshold") is not None
+                else obj.get("target_threshold", obj.get("target_value", 0.0))
+            )
+            cmd = [
+                "python",
+                "/repo/scripts/sandbox_examples/run_image_cls_sandbox.py",
+                "--data-dir", f"/data/{data_subdir}",
+                "--arch", arch,
+                "--epochs", str(epochs),
+                "--eval-metric", str(metric),
+                "--op", op,
+                "--threshold", str(threshold),
+                "--result-name", "result.json",
+            ]
+            data_dir = params.get("data_dir") or str(_REPO_ROOT / "benchmark_tasks" / "sample_data")
+            result_name = "result.json"
+            eval_meta = {
+                "eval_suite_id": params.get("eval_suite_id", f"image-cls-{data_subdir}"),
+                "report_ref": params.get("report_ref", f"image-cls://sandbox-{data_subdir}"),
+            }
+            scratch = self._make_scratch(home, stage_run, "image_cls")
+            return cmd, data_dir, scratch, result_name, eval_meta
+
+        # ---- audio classification path ----------------------------------------
+        if cap_id == "audio_cls_sandbox" or params.get("task_type") == "audio_classification" or str(
+            params.get("preset") or ""
+        ) == "audio_cls":
+            obj = self._objective(params, stage_run)
+            data_subdir = str(params.get("data_subdir") or obj.get("data_subdir") or "audio_cls_demo")
+            feature = str(params.get("feature") or obj.get("feature") or "logmel")
+            epochs = int(params.get("epochs") if params.get("epochs") is not None else obj.get("epochs", 8))
+            metric = params.get("eval_metric") or obj.get("eval_metric") or "accuracy"
+            direction = str(obj.get("direction") or "higher").strip().lower()
+            op = params.get("op") or ("le" if direction == "lower" else "ge")
+            threshold = float(
+                params.get("threshold")
+                if params.get("threshold") is not None
+                else obj.get("target_threshold", obj.get("target_value", 0.0))
+            )
+            cmd = [
+                "python",
+                "/repo/scripts/sandbox_examples/run_audio_cls_sandbox.py",
+                "--manifest", f"/data/{data_subdir}/manifest.csv",
+                "--data-dir", f"/data/{data_subdir}",
+                "--feature", feature,
+                "--epochs", str(epochs),
+                "--eval-metric", str(metric),
+                "--op", op,
+                "--threshold", str(threshold),
+                "--result-name", "result.json",
+            ]
+            data_dir = params.get("data_dir") or str(_REPO_ROOT / "benchmark_tasks" / "sample_data")
+            result_name = "result.json"
+            eval_meta = {
+                "eval_suite_id": params.get("eval_suite_id", f"audio-cls-{data_subdir}"),
+                "report_ref": params.get("report_ref", f"audio-cls://sandbox-{data_subdir}"),
+            }
+            scratch = self._make_scratch(home, stage_run, "audio_cls")
+            return cmd, data_dir, scratch, result_name, eval_meta
+
+        # ---- embedding (contrastive) path -------------------------------------
+        if cap_id == "embedding_sandbox" or params.get("task_type") == "embedding_contrastive" or str(
+            params.get("preset") or ""
+        ) == "embedding_cls":
+            obj = self._objective(params, stage_run)
+            data_subdir = str(params.get("data_subdir") or obj.get("data_subdir") or "embedding_demo")
+            dim = int(params.get("dim") if params.get("dim") is not None else obj.get("dim", 64))
+            epochs = int(params.get("epochs") if params.get("epochs") is not None else obj.get("epochs", 30))
+            metric = params.get("eval_metric") or obj.get("eval_metric") or "recall_at_10"
+            direction = str(obj.get("direction") or "higher").strip().lower()
+            op = params.get("op") or ("le" if direction == "lower" else "ge")
+            threshold = float(
+                params.get("threshold")
+                if params.get("threshold") is not None
+                else obj.get("target_threshold", obj.get("target_value", 0.0))
+            )
+            cmd = [
+                "python",
+                "/repo/scripts/sandbox_examples/run_embedding_sandbox.py",
+                "--data-dir", f"/data/{data_subdir}",
+                "--dim", str(dim),
+                "--epochs", str(epochs),
+                "--eval-metric", str(metric),
+                "--op", op,
+                "--threshold", str(threshold),
+                "--result-name", "result.json",
+            ]
+            data_dir = params.get("data_dir") or str(_REPO_ROOT / "benchmark_tasks" / "sample_data")
+            result_name = "result.json"
+            eval_meta = {
+                "eval_suite_id": params.get("eval_suite_id", f"embedding-{data_subdir}"),
+                "report_ref": params.get("report_ref", f"embedding://sandbox-{data_subdir}"),
+            }
+            scratch = self._make_scratch(home, stage_run, "embedding")
             return cmd, data_dir, scratch, result_name, eval_meta
 
         # ---- kaggle / tabular path ----------------------------------------------

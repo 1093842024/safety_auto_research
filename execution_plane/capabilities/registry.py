@@ -161,6 +161,36 @@ _CAPABILITIES: list[tuple[str, str, str, str, str, str, object | None]] = [
         "eval_report",
         SandboxResearchExecutor(),
     ),
+    (
+        "image_cls_sandbox",
+        "image_cls_sandbox",
+        "图像分类评测（Docker 沙箱）",
+        "在隔离容器内运行真实图像分类评测",
+        "agent 模式的 image_classification：torchvision / 轻量 CNN backbone 在一次性 Docker 容器内训练/评测"
+        "（只读数据、无网络），产出真实 EvalCompletedEvent。由 run_capability 在 AGENT_SANDBOX=1 时自动路由。",
+        "eval_report",
+        SandboxResearchExecutor(),
+    ),
+    (
+        "audio_cls_sandbox",
+        "audio_cls_sandbox",
+        "音频分类评测（Docker 沙箱）",
+        "在隔离容器内运行真实音频分类评测",
+        "agent 模式的 audio_classification：logmel/MFCC 特征 + 轻量 CNN 在一次性 Docker 容器内训练/评测"
+        "（只读数据、无网络），产出真实 EvalCompletedEvent。由 run_capability 在 AGENT_SANDBOX=1 时自动路由。",
+        "eval_report",
+        SandboxResearchExecutor(),
+    ),
+    (
+        "embedding_sandbox",
+        "embedding_sandbox",
+        "Embedding 对比学习评测（Docker 沙箱）",
+        "在隔离容器内运行真实 Embedding 评测",
+        "agent 模式的 embedding_contrastive：文-文对比学习（TF-IDF + 线性映射 InfoNCE）在一次性 Docker 容器内"
+        "训练/评测（只读数据、无网络），以检索 Recall@K 为指标产出真实 EvalCompletedEvent。",
+        "eval_report",
+        SandboxResearchExecutor(),
+    ),
 ]
 
 _PARAM_SCHEMA: dict[str, object] = {
@@ -212,7 +242,7 @@ def default_capability_registry() -> CapabilityRegistry:
     # Capabilities that are *extra* (demo / dual-loop) rather than one of the ten
     # R&D infrastructure layers — excluded from the infra-layer catalog but still
     # discoverable by an agent via list_all_capabilities().
-    _NON_INFRA = {"kaggle_eval", "layer_11_external_audit", "kaggle_eval_sandbox", "run_research_sandbox", "text_cls_sandbox"}
+    _NON_INFRA = {"kaggle_eval", "layer_11_external_audit", "kaggle_eval_sandbox", "run_research_sandbox", "text_cls_sandbox", "image_cls_sandbox", "audio_cls_sandbox", "embedding_sandbox"}
     for cid, lcode, lname, title, desc, atype, ex in _CAPABILITIES:
         is_infra = cid not in _NON_INFRA
         reg.register(

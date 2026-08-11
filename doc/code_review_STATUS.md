@@ -985,3 +985,72 @@ L5 因涉及全局评分语义、且当前数据集不触发，继续暂缓并�
 | **合计** | **317 passed, 0 failed** |
 
 > ⚠️ 运行约束（沿用既有惯例）：必须从**父目录** `AI_research/` 执行 `python -m pytest safety_auto_research/tests/...`；一次性加载全部用例会 OOM 被 SIGKILL（exit 137），须按上表分批。
+
+---
+
+## 附录 C-3. Benchmark 任务完备性补全与端到端验证（2026-08-11）
+
+### 背景与目标
+用户要求：(1) 将缺失 / 不完整的 benchmark 任务补全到「**可评估 + 可训练优化**」的程度，并实际跑评测与训练优化验证；(2) 训练 / 评测数据 >1GB 的任务在可选列表中**置灰**，不补全、不验证。
+
+### 一、可选任务盘点（22 精选 + 2 外部套件 + 8 自定义类型）
+- 5 个平台原生任务（titanic / spaceship-titanic / wine / iris / breast_cancer）→ kaggle_eval 端到端。
+- 其余 17 个精选任务来自 autolab / claudini / Arbor / AutoResearchClaw / ARA / Auto-claude 等**外部兄弟仓库**，本仓无本地数据与运行环境（Harbor / Arbor 依赖）→ tracked-only，无法本地训练。
+- 2 个外部套件（ScienceAgentBench / MLE-bench）：数据集 ~6.9GB。
+- 8 个自定义任务类型：tabular（平台可执行）；text / image / audio / embedding 分类（此前 `executable=False, harness=manual`）；llm_sft / llm_rl / llm_opd（基座权重 >1GB）。
+
+### 二、置灰策略（`benchmark_tasks._availability` + `to_dict`）
+`BenchmarkTask` 新增 `data_size_bytes` / `enabled` / `unavailable_reason` 字段；`_availability` 规则：
+- `suite.*` → 禁用，`data_size_bytes=6.9e9`
+- `mlevolve.mle_bench` → 禁用（openai/mle-bench >1GB，需 Kaggle 凭据）
+- 外部前缀 `autolab.` `claudini.` `arbor.` `autoresearchclaw.` `ara.` `autoclaude.` → 禁用
+- `task_type in (llm_sft, llm_rl, llm_opd)` → 禁用（基座权重 >1GB）
+- 其余 → 启用
+
+> ⚠️ **关键设计点**：LLM 类型的 `available=False` 仅作**目录 / 表单 UI 灰显提示**（前端渲染 `⛔ 已置灰（不可用）` + 原因，禁用「用此任务新建研究」），**不在后端拒绝注册**。tracked 型 LLM 任务仍是合法（非本地可执行）目录条目，`executable=False` 已表达「本环境不训练」。因此 `registry.validate_registration` 中对 `available=False` 的拒绝分支**已移除**——否则会破坏既有 API 契约（`test_register_launch_tracked` 等注册 tracked LLM 任务返回 201）。
+
+### 三、4 个分类模态补全为「可评估 + 可训练优化」
+此前 text / image / audio / embedding 分类均 `executable=False, harness=manual`。本次补全：
+- `registry.py`：4 个类型 `executable=True` + `harness={text,image,audio,embedding}_cls_sandbox`；`suggest_run_command` 指向仓库内真实脚本；image 增加 `tiny_cnn` 轻量 backbone（免预训练下载）。
+- 新增 3 个沙箱执行脚本（`scripts/sandbox_examples/`）：
+  - `run_image_cls_sandbox.py`（torchvision TinyCNN，host torch）
+  - `run_audio_cls_sandbox.py`（librosa logmel / MFCC + CNN，host torch）
+  - `run_embedding_sandbox.py`（文-文对比学习，recall@10 检索评测，host torch）
+  - （text 的 `run_text_cls_sandbox.py` 已存在，TF-IDF + 线性，sklearn-only，可在 docker 硬隔离内跑）
+- 平台接线：`sandbox_executor.py` 扩展 `SANDBOX_CAPABILITY_IDS` 并新增 3 个 `_plan` 分支；`capabilities/registry.py` 注册 3 个 `InfraCapability`；`routers/benchmarks.py` 的 agent 模式启动把 4 个分类类型路由到对应沙箱能力。
+- 样本数据：`benchmark_tasks/sample_data/generate_sample_data.py` 生成 <1GB 合成数据。修复 image 数据嵌套 bug——原先 `train/val` 目录被 ImageFolder 误读为两个类（恒定 0.7733），改为扁平 `<root>/<class>/*.png`（runner 内部切分），epochs=1→0.587、epochs≥3→1.0。
+
+### 四、实际评估与训练优化验证（`scripts/verify_benchmark_completeness.py` + pytest）
+4 个模态均可产出合法 [0,1] 指标，且**具备优化空间**：
+
+| 模态 | baseline | improved | Δ | 说明 |
+|---|---|---|---|---|
+| image (TinyCNN) | acc 0.587（ep1，underfit） | 1.0（ep≥3） | **+0.41** | underfit→fit |
+| embedding (contrastive) | recall@10 0.33（dim64/ep40，过拟合） | 1.0（dim16/ep3） | **+0.67** | 过拟合→尺寸恰当 |
+| text (TF-IDF) | f1_macro 达合成上限 | — | sensitive=no | 合法指标，无空间（已达上限） |
+| audio (logmel/MFCC) | acc 1.0 | — | sensitive=no | 合法指标，无空间（已达上限） |
+
+> 说明：text / audio 在合成数据上已达指标上限，故「sensitive=no」（无优化空间），但指标合法、评测链路通畅；image / embedding 则真实展现了「调参即可提升」的优化空间，满足「可训练优化」要求。
+
+text 能力经真实 `SandboxResearchExecutor.execute` 在 docker 硬隔离下**端到端跑通**：`status=SUCCEEDED, passed=True`。
+
+### 五、前端灰显
+`api/client.ts` 增加 `enabled` / `unavailable_reason` / `data_size_bytes`；`BenchmarkCatalog.tsx` 对禁用卡片加 `disabled` 类 + `⛔ 已置灰（不可用）` 胶囊 + 原因，禁用「用此任务新建研究」按钮；`styles.css` 加 `.pill.gray` 与 `.catalog-card.disabled`（`opacity:0.55; grayscale`）。`npx tsc --noEmit` 0 错误。
+
+### 六、回归
+- 新增 `tests/test_benchmark_completeness_2026_08_11.py`（11 例：灰显策略 / 沙箱 dispatch / runner 可解析 / 扁平 ImageFolder 回归）。
+- 更新 `test_benchmark_registry.py::test_only_tabular_is_executable`（现 5 个可执行类型）、`test_capabilities.py::test_protocol_exposes_capabilities`（能力数 15→18）。
+- 移除 `registry.validate_registration` 中对 `available=False` 的拒绝分支（灰显是 UI 提示，不应阻断 tracked LLM 任务注册）。
+
+### 文件改动清单
+**后端**：`benchmark_tasks/`{`__init__.py`, `registry.py`}、`execution_plane/capabilities/`{`sandbox_executor.py`, `registry.py`}、`control_plane/routers/benchmarks.py`
+**前端**：`api/client.ts`、`views/BenchmarkCatalog.tsx`、`styles.css`
+**新增**：`scripts/sandbox_examples/run_{image,audio,embedding}_cls_sandbox.py`、`scripts/verify_benchmark_completeness.py`、`benchmark_tasks/sample_data/*`、`tests/test_benchmark_completeness_2026_08_11.py`
+
+### 回归结果（从父目录分批跑）
+| 批次 | 结果 |
+|---|---|
+| A：benchmark_completeness(新·11) / benchmark_registry / benchmark_suites / capabilities / evolution / dual_loop / review_supplementary / fix_regression_08_05 / fix_regression_08_11 | 132 passed |
+| B：agent_mode / agent_protocol / api_endpoints / audit_followup / control_plane / control_plane_structure / execution_plane / mea_framework | 108 passed（15 subtests） |
+| C：openmle_phase_a / bc / d / d_ext / p2_fixes / phase2 / platform_contracts / playbook / program_evolution_endpoint / research_records | 88 passed |
+| **合计** | **328 passed, 0 failed**（R1–R30 基线 317 + 本轮新增 11） |

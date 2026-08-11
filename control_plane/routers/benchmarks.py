@@ -371,6 +371,36 @@ def build_benchmarks_router(deps: ControlPlaneDeps) -> APIRouter:
                 if tc.get("target_value") is not None:
                     inner_agent_config["threshold"] = float(tc["target_value"])
                 inner_agent_config["eval_metric"] = task.eval_metric
+            elif task_type == "image_classification":
+                sandbox_capability = "image_cls_sandbox"
+                tc = task.type_config or {}
+                inner_agent_config["task_type"] = "image_classification"
+                inner_agent_config["data_subdir"] = tc.get("data_subdir") or "image_cls_demo"
+                inner_agent_config["arch"] = tc.get("base_model", "tiny_cnn")
+                inner_agent_config["epochs"] = tc.get("num_epochs", 6)
+                if tc.get("target_value") is not None:
+                    inner_agent_config["threshold"] = float(tc["target_value"])
+                inner_agent_config["eval_metric"] = task.eval_metric
+            elif task_type == "audio_classification":
+                sandbox_capability = "audio_cls_sandbox"
+                tc = task.type_config or {}
+                inner_agent_config["task_type"] = "audio_classification"
+                inner_agent_config["data_subdir"] = tc.get("data_subdir") or "audio_cls_demo"
+                inner_agent_config["feature"] = tc.get("feature", "logmel")
+                inner_agent_config["epochs"] = tc.get("num_epochs", 8)
+                if tc.get("target_value") is not None:
+                    inner_agent_config["threshold"] = float(tc["target_value"])
+                inner_agent_config["eval_metric"] = task.eval_metric
+            elif task_type == "embedding_contrastive":
+                sandbox_capability = "embedding_sandbox"
+                tc = task.type_config or {}
+                inner_agent_config["task_type"] = "embedding_contrastive"
+                inner_agent_config["data_subdir"] = tc.get("data_subdir") or "embedding_demo"
+                inner_agent_config["dim"] = tc.get("embedding_dim", 64)
+                inner_agent_config["epochs"] = tc.get("num_epochs", 30)
+                if tc.get("target_value") is not None:
+                    inner_agent_config["threshold"] = float(tc["target_value"])
+                inner_agent_config["eval_metric"] = task.eval_metric
             else:
                 sandbox_capability = "run_research_sandbox"
                 if not task.supported_by_platform and task.run_command and task.run_command != "manual":

@@ -70,6 +70,8 @@ h3 { font-size: 13px; margin: 0 0 6px; color: var(--muted); text-transform: uppe
 .pill.accent { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
 .pill.iso { background: #0e7490; color: #cffafe; border-color: transparent; }
 .pill.iso-soft { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.pill.gray { background: var(--muted-soft, #ececec); color: var(--muted, #888); border-color: transparent; }
+.catalog-card.disabled { opacity: 0.55; filter: grayscale(0.6); }
 .iso-banner { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; padding: 10px 12px;
   border-radius: 8px; background: #0e7490; color: #cffafe; font-size: 13px; line-height: 1.5; }
 .iso-banner.warn { background: var(--warn-soft); color: var(--warn); }

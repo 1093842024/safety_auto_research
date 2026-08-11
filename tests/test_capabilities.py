@@ -427,8 +427,9 @@ class ProtocolEndpointTest(unittest.TestCase):
         self.assertIn("capabilities", data)
         # 10 infrastructure layers + the extra real kaggle_eval + layer_11_external_audit
         # + the three F3 sandbox capabilities (kaggle_eval_sandbox / run_research_sandbox /
-        # text_cls_sandbox).
-        self.assertEqual(len(data["capabilities"]), 15)
+        # text_cls_sandbox) + the three 2026-08-11 classifier sandbox capabilities
+        # (image_cls_sandbox / audio_cls_sandbox / embedding_sandbox) = 18.
+        self.assertEqual(len(data["capabilities"]), 18)
         cap_ids = [c["capability_id"] for c in data["capabilities"]]
         self.assertIn("kaggle_eval", cap_ids)
         self.assertIn("layer_11_external_audit", cap_ids)

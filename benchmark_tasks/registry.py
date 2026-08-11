@@ -171,9 +171,9 @@ TASK_TYPE_SPECS: list[dict[str, Any]] = [
         "label": "文本分类",
         "icon": "📝",
         "modality": "text",
-        "harness": "manual",
-        "executable": False,
-        "summary": "csv/jsonl 文本 + 标签的分类任务（BERT/RoBERTa 微调或 TF-IDF 基线），平台记录设定与目标，外部执行。",
+        "harness": "text_cls_sandbox",
+        "executable": True,
+        "summary": "csv/jsonl 文本 + 标签的分类任务（BERT/RoBERTa 微调或 TF-IDF 基线）；平台提供 TF-IDF + 线性模型沙箱执行器，可端到端评测与优化。",
         "default_metric": {"eval_metric": "f1_macro", "direction": "higher"},
         "fields": [
             _f("dataset_path", "数据文件（csv/jsonl）", "path", "data", required=True,
@@ -200,9 +200,9 @@ TASK_TYPE_SPECS: list[dict[str, Any]] = [
         "label": "图像分类",
         "icon": "🖼️",
         "modality": "image",
-        "harness": "manual",
-        "executable": False,
-        "summary": "ImageFolder 结构（train/<class>/*.jpg）的图像分类，torchvision/timm backbone 微调。",
+        "harness": "image_cls_sandbox",
+        "executable": True,
+        "summary": "ImageFolder 结构（train/<class>/*.jpg）的图像分类，torchvision 轻量 CNN backbone 在沙箱内训练/评测。",
         "default_metric": {"eval_metric": "top1_accuracy", "direction": "higher"},
         "fields": [
             _f("data_dir", "数据根目录（ImageFolder 结构）", "path", "data", required=True,
@@ -211,9 +211,11 @@ TASK_TYPE_SPECS: list[dict[str, Any]] = [
             _f("num_classes", "类别数", "number", "data", required=True, min=2, step=1),
             _f("val_split", "验证集比例（无 val/ 目录时）", "number", "data", default=0.1, min=0.05, max=0.5, step=0.05),
             _f("image_size", "输入图像尺寸", "number", "model", default=224, min=32, max=1024, step=1),
-            _f("base_model", "Backbone", "select", "model", default="resnet50",
-               options=_opt(("resnet50", "ResNet-50"), ("vit_b_16", "ViT-B/16"),
-                            ("efficientnet_b0", "EfficientNet-B0"), ("convnext_tiny", "ConvNeXt-Tiny"))),
+            _f("base_model", "Backbone", "select", "model", default="tiny_cnn",
+               options=_opt(("tiny_cnn", "TinyCNN（轻量演示，免预训练下载）"),
+                            ("resnet50", "ResNet-50"), ("resnet18", "ResNet-18"),
+                            ("vit_b_16", "ViT-B/16"), ("efficientnet_b0", "EfficientNet-B0"),
+                            ("convnext_tiny", "ConvNeXt-Tiny"))),
             _f("pretrained", "使用 ImageNet 预训练权重", "bool", "model", default=True),
             _f("augmentation", "数据增广", "select", "train", default="basic",
                options=_opt(("none", "无"), ("basic", "基础（翻转/裁剪）"), ("randaug", "RandAugment"))),
@@ -227,9 +229,9 @@ TASK_TYPE_SPECS: list[dict[str, Any]] = [
         "label": "音频分类",
         "icon": "🎧",
         "modality": "audio",
-        "harness": "manual",
-        "executable": False,
-        "summary": "音频目录 + manifest（filepath,label）的分类任务，logmel/MFCC 特征或 wav2vec2 类预训练模型。",
+        "harness": "audio_cls_sandbox",
+        "executable": True,
+        "summary": "音频目录 + manifest（filepath,label）的分类任务，logmel/MFCC 特征 + 轻量 CNN 在沙箱内训练/评测。",
         "default_metric": {"eval_metric": "accuracy", "direction": "higher"},
         "fields": [
             _f("data_dir", "音频根目录", "path", "data", required=True, placeholder="/path/to/audio"),
@@ -380,10 +382,9 @@ TASK_TYPE_SPECS: list[dict[str, Any]] = [
         "label": "图文音 Embedding（对比学习 / 自监督）",
         "icon": "🧲",
         "modality": "multimodal",
-        "harness": "manual",
-        "executable": False,
-        "summary": "对比学习 / 自监督表征模型（SimCSE/CLIP/SimCLR/MoCo 等），按模态组合与数据格式注册，"
-                   "以检索/STS/零样本分类作为评测协议。",
+        "harness": "embedding_sandbox",
+        "executable": True,
+        "summary": "对比学习 / 自监督表征模型（SimCSE/CLIP/SimCLR/MoCo 等）；平台提供文-文对比学习沙箱执行器（检索 Recall@K 评测），可端到端评测与优化。以检索/STS/零样本分类作为评测协议。",
         "default_metric": {"eval_metric": "recall_at_10", "direction": "higher"},
         "fields": [
             _f("modality_pair", "模态组合", "select", "model", required=True, default="text-image",
@@ -428,6 +429,18 @@ TASK_TYPE_SPECS: list[dict[str, Any]] = [
 ]
 
 _SPEC_BY_ID = {s["type_id"]: s for s in TASK_TYPE_SPECS}
+
+# Gray-out policy for the registration form: LLM SFT / RL / OPD tasks need base-model
+# weights >1 GiB and cannot be trained in this environment, so they are shown in the
+# catalog but disabled in the registration form (and rejected if submitted anyway).
+for _s in TASK_TYPE_SPECS:
+    if _s["type_id"] in ("llm_sft", "llm_rl", "llm_opd"):
+        _s["available"] = False
+        _s["unavailable_reason"] = (
+            "基座模型权重 >1GB，需 GPU 与大容量存储，本环境不内置训练"
+        )
+    else:
+        _s.setdefault("available", True)
 
 
 def get_task_type_specs() -> list[dict[str, Any]]:
@@ -644,6 +657,11 @@ def validate_registration(task_type: str, values: dict[str, Any]) -> list[str]:
     spec = _SPEC_BY_ID.get(task_type)
     if spec is None:
         return [f"未知任务类型: {task_type}（可选: {', '.join(_SPEC_BY_ID)}）"]
+    # NOTE: gray-out (``available=False`` for LLM SFT/RL/OPD) is a *catalog/UI* hint
+    # only — it disables the option in the registration form and the task catalog,
+    # but does NOT reject the registration. A tracked LLM research task is still a
+    # valid (non-locally-executable) catalog entry; ``executable=False`` already
+    # conveys that the platform will not train it here.
 
     all_fields = COMMON_FIELDS + spec["fields"]
     for f in all_fields:
@@ -715,19 +733,21 @@ def suggest_run_command(task_type: str, values: dict[str, Any]) -> str:
         return "POST /benchmark-tasks/{task_id}/launch  (runs dual loop via kaggle_eval)"
     if task_type == "text_classification":
         return (
-            f"python train_text_cls.py --model {g('base_model')} --data {g('dataset_path')} "
+            f"python scripts/sandbox_examples/run_text_cls_sandbox.py --data-dir {g('dataset_path')} "
             f"--text-col {g('text_col')} --label-col {g('label_col')} "
-            f"--max-len {g('max_seq_len', '256')} --epochs {g('num_epochs', '3')}"
+            f"--eval-metric {g('eval_metric', 'f1_macro')} --model {g('base_model', 'tfidf-linear')}"
         )
     if task_type == "image_classification":
         return (
-            f"python train_image_cls.py --arch {g('base_model')} --data {g('data_dir')} "
-            f"--img-size {g('image_size', '224')} --epochs {g('num_epochs', '20')}"
+            f"python scripts/sandbox_examples/run_image_cls_sandbox.py --data-dir {g('data_dir')} "
+            f"--arch {g('base_model', 'tiny_cnn')} --epochs {g('num_epochs', '20')} "
+            f"--eval-metric {g('eval_metric', 'top1_accuracy')}"
         )
     if task_type == "audio_classification":
         return (
-            f"python train_audio_cls.py --model {g('base_model')} --manifest {g('manifest_path')} "
-            f"--sr {g('sample_rate', '16000')} --feature {g('feature', 'logmel')}"
+            f"python scripts/sandbox_examples/run_audio_cls_sandbox.py --manifest {g('manifest_path')} "
+            f"--data-dir {g('data_dir')} --feature {g('feature', 'logmel')} "
+            f"--epochs {g('num_epochs', '30')} --eval-metric {g('eval_metric', 'accuracy')}"
         )
     if task_type == "llm_sft":
         return (
@@ -751,9 +771,9 @@ def suggest_run_command(task_type: str, values: dict[str, Any]) -> str:
         )
     if task_type == "embedding_contrastive":
         return (
-            f"python train_embedding.py --method {g('method', 'clip')} "
-            f"--pair {g('modality_pair')} --data {g('dataset_path')} "
-            f"--temperature {g('temperature', '0.07')} --batch-size {g('batch_size', '256')}"
+            f"python scripts/sandbox_examples/run_embedding_sandbox.py --data-dir {g('dataset_path')} "
+            f"--dim {g('embedding_dim', '64')} --epochs {g('num_epochs', '10')} "
+            f"--eval-metric {g('eval_metric', 'recall_at_10')}"
         )
     return "manual"
 
