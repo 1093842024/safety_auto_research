@@ -1,0 +1,38 @@
+;; research.sb — Seatbelt profile that confines an agent research subprocess.
+;;
+;; Used by:
+;;   * scripts/agent_sandbox_poc.sh  (empirical confinement verification)
+;;   * (later) the F3 agent wrapper script, as AGENT_COMMAND
+;;
+;; Confinement goals for the PoC:
+;;   * DENY  all file WRITES  except inside the scratch dir (passed via -D AGENT_SCRATCH=...)
+;;   * DENY  all NETWORK egress (production tightens this to allow only the agent API + pypi/uv index)
+;;   * ALLOW file READS + process EXEC/FORK so the agent runtime can boot and read datasets
+;;
+;; Why this shape (important Seatbelt gotcha):
+;;   Seatbelt's rule is "DENY wins over ALLOW". A blanket `(deny file-write*)` placed
+;;   BEFORE a narrow `(allow file-write* (subpath scratch))` would ALSO block the narrow
+;;   allow (both match, deny wins). So we start from `(deny default)` + `(allow default)`
+;;   (the curated safe set) and then grant ONLY the narrow write allow — writes everywhere
+;;   else stay denied by the default-deny. This is the correct, safe pattern.
+
+(version 1)
+(deny default)
+(allow default)
+
+;; The agent may READ anything it needs (datasets, python, shared libs, /etc/hosts, ...).
+(allow file-read*)
+
+;; The agent may WRITE only inside its scratch working directory.
+(allow file-write* (subpath (param AGENT_SCRATCH)))
+
+;; Let the agent runtime spawn helper processes (python, sh, subprocesses).
+;; NOTE: intentionally broad for the PoC (scope = FS + network confinement).
+;; The production profile must narrow this to an explicit allow-list of binaries.
+(allow process-exec)
+(allow process-fork)
+
+;; Network is denied by default — there is no (allow network*) rule, so all egress
+;; (connect/sendto to remote hosts) is blocked. Production adds a scoped allow for the
+;; agent's API endpoint + package index.
+(deny network*)

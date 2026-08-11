@@ -11,6 +11,12 @@ WORKFLOW_STATUS_TRANSITIONS: dict[WorkflowStatus, frozenset[WorkflowStatus]] = {
         WorkflowStatus.RUNNING,
         WorkflowStatus.WAITING_APPROVAL,
         WorkflowStatus.CANCELLED,
+        # R5 fix: a run can fail during *setup*, before it ever reaches RUNNING (bad
+        # task config, missing data dir, agent wiring rejected, ...). Without this edge
+        # the background driver's ``set_run_status(run_id, "failed")`` raised
+        # ValueError inside its own except-handler and the run was pinned at
+        # REQUESTED forever — the UI showed "已请求" for a run that is dead.
+        WorkflowStatus.FAILED,
     }),
     WorkflowStatus.RUNNING: frozenset({
         WorkflowStatus.WAITING_APPROVAL,

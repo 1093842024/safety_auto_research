@@ -3,13 +3,15 @@
 > **分析日期**: 2026-07-29 | **分析范围**: 全项目（Python 后端 + TypeScript 前端）
 > **测试基线**: 81/81 passed | **前端 tsc**: 0 errors
 
+> ⚠️ **历史快照（2026-07-29），已被取代**：本文件的**可靠性章节（原 §4）已过时**——相关 25 项缺陷（C1–C3 / I1–I12 / M1–M9 / R1–R5）已在 `../code_review_STATUS.md`（附录 A/B）中重列并修复。当前有效内容（产品 / UX / 架构 18 条）已提炼至 **`../product_ux_backlog.md`**，请以该文件为活动待办；本文件仅作历史记录，勿据其排期。
+
 ---
 
 ## 一、执行摘要
 
 **safety_auto_research** 是一个架构设计相当扎实的 AI 安全自动化研究平台。双循环（内循环执行 → 外循环审计 → 元循环进化）的核心设计在概念上非常先进，代码整体结构清晰、分层合理。81 个单元测试全部通过，前端类型检查零错误。
 
-然而，经过深度分析，项目在以下五个维度存在 **43 个可优化点**（合并 CODE_REVIEW.md 已知 25 条 + 新发现 18 条）：
+然而，经过深度分析，项目在以下五个维度存在可优化点。**注**：原"合并 CODE_REVIEW.md 已知 25 条 + 新发现 18 条 = 43 条"中的 25 条可靠性缺陷已全部修复（见顶部 banner），剩余 18 条产品 / UX / 架构观察已提炼至 `../product_ux_backlog.md`。下表为原始维度分布快照：
 
 | 维度 | 已知缺陷 | 新发现 | 合计 |
 |------|---------|--------|------|
@@ -19,7 +21,7 @@
 | 前端流程合理性 | 4 | 3 | 7 |
 | UI 界面 | 6 | 4 | 10 |
 
-**P0 立即修复**: 5 项 | **P1 近期修复**: 19 项 | **P2 后续迭代**: 19 项
+**原始快照优先级（已过时，勿据此排期）**：P0 5 项 | P1 19 项 | P2 19 项。可靠性项已全部修复，有效待办见 `../product_ux_backlog.md`。
 
 ---
 
@@ -70,32 +72,11 @@
 
 ---
 
-## 四、可靠性分析
+## 四、可靠性分析（本章节已于 2026-08-07 判定为过时并移除内容）
 
-### 4.1 已知严重缺陷（来自 CODE_REVIEW.md 合并）
+> ⚠️ 原 §4.1（已知严重缺陷，来自已删除的 `CODE_REVIEW.md`）与 §4.2（新发现可靠性 R1–R5）**均已在 `../code_review_STATUS.md`（附录 A/B）中重列并落地修复**，此处不再保留。当前有效待办（产品 / UX / 架构 18 条）见 **`../product_ux_backlog.md`**。
 
-| # | 位置 | 严重度 | 问题 | 状态 |
-|---|------|--------|------|------|
-| **C1** | `api.py:844-850` | 🚨 Critical | 双层 `except Exception: pass` 吞没 `_drive()` 所有异常，run 永久卡死 | 未修复 |
-| **C2** | `store_tree.py` 9处 | 🚨 Critical | SQLite 连接未用 context manager，异常时连接泄漏 | 未修复 |
-| **C3** | `DualLoopLive.tsx:43` | 🚨 Critical | `maxOuter` 硬编码为 3，忽略用户配置 | 未修复 |
-| **I1** | `store.py:56-58` | ⚠️ Important | corrupt 文件静默吞掉，所有历史数据不可逆丢失 | 未修复 |
-| **I2** | `service.py:74,413,458` | ⚠️ Important | `_open_approvals` 不持久化，重启后审批丢失 | 未修复 |
-| **I3** | `store.py:109-188` | ⚠️ Important | 读方法不加锁，read-while-write 可能读到不一致数据 | 未修复 |
-| **I4** | `kaggle_eval_executor.py:80` | ⚠️ Important | `cv_folds` 未校验上限 vs 最小类别样本数 | 未修复 |
-| **I5** | `kaggle_eval_executor.py:253` | ⚠️ Important | `df[target]` 不校验列名存在性 | 未修复 |
-| **I7** | `orchestrator.py:408-412` | ⚠️ Important | `metrics.get("accuracy")` 假设是 dict | 未修复 |
-| **M3** | `agent/transport.py:177-185` | ⚠️ Important | `proc.wait()` 无超时 → 子进程僵死 → 线程永久阻塞 | 未修复 |
 
-### 4.2 新发现的可靠性问题
-
-| # | 位置 | 严重度 | 问题 | 详情 |
-|---|------|--------|------|------|
-| **R1** | `api.py:848` | 🚨 Critical | `threading.Thread(daemon=True).start()` — daemon 线程在进程退出时强制终止，**不保证 finish**。如果 `run_dual_loop` 正在写数据库/JSON，会留下 corrupt 状态。应改用非 daemon 线程 + shutdown event 优雅退出。 | daemon 线程被 SIGTERM 杀掉时 `_persist()` 可能写一半，导致 store JSON 损坏，配合 I1 静默吞掉 → 永久数据丢失。 |
-| **R2** | `orchestrator.py:59-60` | ⚠️ Important | `_COLLAB_PAUSES` 是模块级 `dict`，多 run 并发协作时共享同一把 `_COLLAB_LOCK`。如果一个 run 的 approve 处理耗时较长（比如前端提交了大量调整参数），会 block 其他 run 的协作暂停。 | 高频使用场景下产生排队效应。 |
-| **R3** | `api.py:819-848`, `api.py:1070-1094`, `api.py:1117-1200` | ⚠️ Important | 三个不同的 `_drive` / `_debug_thread` 函数中都有 `except Exception: pass` 或类似吞异常模式。**C1 不是孤立问题，而是系统性的异常处理缺陷**。 | 任何一个未被捕获的异常都会导致线程静默死亡 + run 僵尸。 |
-| **R4** | `api.py:422-423` | 💡 Minor | `except (ConflictError, ValueError): pass` 在双循环启动时吞掉 start 冲突。如果 run 已经在 terminal 状态但代码走到了这里，后续 `run_dual_loop` 仍会尝试创建 stage run — 在 terminal workflow 上创建 stage run 是语义错误。 | 低概率，但一旦发生就是静默异常。 |
-| **R5** | `orchestrator.py:597-633` | 💡 Minor | `_collab_pause` 的 while 循环 `evt.wait(timeout=2)` — 如果 HTTP 端 resolve 在 `wait` 刚返回 false 到下一次 `get_workflow_run` 之间发生，会多等 2 秒才退出。虽不会死锁但有延迟。 | race condition window 很小，但在高负载下可能累积延迟。 |
 
 ---
 
@@ -118,7 +99,7 @@
 | **FL3** | 取消按钮行为不一致 | P2 | 在新建向导第一步点"取消"回到欢迎页；第二步点"取消"也是回到欢迎页。用户可能期望第二步取消时回到第一步（保留已选任务）。 |
 | **FL4** | 调试面板与仪表盘状态脱节 | P2 | 调试在 `debug` 子标签里触发，但调试结果需要**切换到 events 标签**才能看到详情——用户点击"运行内循环调试"后，按钮变"运行中…"但没有进度反馈，不知道自己该做什么。 |
 
-### 5.3 已知前端缺陷（来自 CODE_REVIEW.md）
+### 5.3 已知前端缺陷（来自 CODE_REVIEW.md，已于 08-05 前端健壮性修复中处理）
 
 | # | 位置 | 严重度 | 问题 |
 |---|------|--------|------|
@@ -173,7 +154,7 @@
 
 ---
 
-## 八、优先级排序与修复路线图
+## 八、优先级排序与修复路线图（可靠性 P0/P1 已修复，见活动待办）
 
 ### 🔴 P0 — 立即修复（5 项，阻塞生产可用性）
 

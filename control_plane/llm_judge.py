@@ -23,6 +23,7 @@ reliability concern, not a research outcome).
 from __future__ import annotations
 
 import json
+import math
 import os
 import urllib.request
 from typing import Any
@@ -76,6 +77,13 @@ def call_llm_judge(
         score = float(data["score"])
     except (KeyError, TypeError, ValueError) as exc:
         raise LLMJudgeError(f"LLM judge 响应缺少合法 score: {data!r}") from exc
+    # R11 fix: ``float("nan")`` passes the try/except above, and NaN silently wins
+    # every comparison in ``max(0.0, min(1.0, nan))`` -> the clamp returned **1.0**,
+    # i.e. a malformed / hallucinated judge response was scored as a PERFECT audit.
+    # Same for ±inf. Treat any non-finite score as a judge failure so the caller
+    # falls back to the deterministic heuristic.
+    if not math.isfinite(score):
+        raise LLMJudgeError(f"LLM judge 返回非有限 score: {data!r}")
     return {
         "score": max(0.0, min(1.0, score)),
         "rationale": str(data.get("rationale", "")),

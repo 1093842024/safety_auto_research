@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel
+from pydantic import ConfigDict
 from pydantic import Field
 
 from ..platform_contracts.enums import DecisionType
@@ -41,6 +42,40 @@ class EvolutionRequest(BaseModel):
     generations: int = 2
     max_workers: int = 4
     novelty_threshold: float = 0.92
+    budget: dict[str, Any] = Field(default_factory=dict)
+    seed: int = 42
+
+
+class ProgramEvolutionRequest(BaseModel):
+    """Body for the PROGRAM-level evolutionary-search driver (OpenRSI / Phase B–C).
+
+    Drives :meth:`ClosedLoopOrchestrator.run_program_evolutionary_loop`: the atomic
+    operators (Draft / Improve / Debug / Crossover) evolve *code* candidates over an
+    OpenMLE-Evo island model, executed in the verifiable tabular environment and scored.
+    Every field has a sane default so the endpoint is callable with an empty body -- it
+    then falls back to the bundled titanic preset (matching the config-level evolution
+    endpoint's default), keeping the program-evolution path no longer an orphan.
+
+    * ``task_config`` selects the verifiable task (``OpenMLETaskConfig`` fields:
+      ``name`` / ``data_dir`` / ``target`` / ``id_col`` / ``direction`` / ``threshold`` /
+      ``cv_folds`` / ...). A ``preset="titanic"`` (or no ``data_dir``) resolves to the
+      bundled dataset under ``data/kaggle/titanic``.
+    * ``backend_type`` picks the operator backend -- ``"template"`` (default, fully
+      offline + deterministic) or ``"llm"`` (any OpenAI-compatible chat API via
+      ``make_api_backend``; credentials come from ``backend_config`` / env).
+    * The remaining fields map 1:1 onto ``run_program_evolutionary_loop`` kwargs.
+    """
+
+    task_config: dict[str, Any] = Field(default_factory=dict)
+    backend_type: str = Field(default="template", pattern="^(template|llm)$")
+    backend_config: dict[str, Any] = Field(default_factory=dict)
+    islands: int = Field(default=1, ge=1, le=16)
+    pop_per_island: int = Field(default=3, ge=1, le=32)
+    generations: int = Field(default=2, ge=1, le=50)
+    max_workers: int = Field(default=1, ge=1, le=8)
+    novelty_threshold: float = Field(default=0.92, ge=0.0, le=1.0)
+    audit: bool = True
+    audit_params: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
     seed: int = 42
 
@@ -132,7 +167,16 @@ class ValidateTaskRequest(BaseModel):
 
 
 class ReportMetricRequest(BaseModel):
-    """Manually report a metric for a (tracked-only) run to enter the leaderboard."""
+    """Manually report a metric for a (tracked-only) run to enter the leaderboard.
+
+    R21 fix: ``config`` carries ``alias="config_snapshot"``. Without
+    ``populate_by_name`` pydantic v2 accepts *only* the alias, so a client
+    posting the documented field name ``config`` had its payload silently
+    dropped (default empty dict) with no validation error. Both spellings are
+    now accepted.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     metric_name: str
     direction: str = "higher"  # higher | lower
@@ -159,6 +203,20 @@ class DebugRequest(BaseModel):
 
     stage: str  # "inner" | "outer"
     audit_input_override: dict[str, Any] | None = None
+
+
+class AuditFollowupRequest(BaseModel):
+    """Researcher follow-up on a single audit constraint (F6 interaction protocol).
+
+    - ``constraint_id``: which constraint of the audit to follow up on (required).
+    - ``clarification``: optional new evidence the researcher supplies to re-score the
+      constraint (drives ``resolved`` if it reaches "verified").
+    - ``question``: optional open question recorded for the audit without re-scoring.
+    """
+
+    constraint_id: str
+    question: str | None = None
+    clarification: str | None = None
 
 
 class CollaborationAdjustments(BaseModel):

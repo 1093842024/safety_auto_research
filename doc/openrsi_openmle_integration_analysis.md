@@ -1,6 +1,8 @@
 # OpenRSI / OpenMLE 引入 safety_auto_research —— 调研与方案分析
 
-> 文档性质：**纯调研 + 方案分析**，未对任何代码做修改（按用户要求）。
+> ✅ **状态（2026-08-07）**：本文原始的"纯调研、未改代码"前提已失效——OpenRSI/OpenMLE 已于 2026-08-04 以 **Phase A–D** 正式落地（`openmle_integration/` 包 + `IslandModel` 程序级岛模型 + 本地训练/奖励桥）。本文件保留为**设计依据与方案分析**；实现细节、回归测试与闭环状态见 `doc/code_review_STATUS.md` 与 `doc/mea_harness_upgrade_plan.md`。
+
+> 文档性质：**纯调研 + 方案分析**（原始前提），未对任何代码做修改（按用户要求）。
 > 调研对象：
 > - 论文 [arXiv:2607.28568](https://arxiv.org/abs/2607.28568) *Frontis-MA1: Training an AI4AI Model towards Recursive Self-Improvement in ML Engineering*（2026-07-30 提交）
 > - 项目 `FrontisAI/OpenRSI`（本地已克隆于 `/Users/glennge/work/github/AI_research/OpenRSI/`，含 `OpenMLE-Gym/` `OpenMLE-ERL/` `OpenMLE-Evo/` 三件套 + vendored `dojo` 内核）

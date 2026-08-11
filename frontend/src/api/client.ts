@@ -133,6 +133,31 @@ export interface AuditEvent {
   constraints: Array<{ id: string; description: string; status: string; score?: number; note?: string }>;
 }
 
+/** A researcher follow-up (clarification / question) on a single audit constraint (F6). */
+export interface AuditFollowup {
+  event_id: string;
+  run_id: string;
+  audit_id: string;
+  constraint_id: string;
+  question?: string | null;
+  clarification?: string | null;
+  prior_status: string;
+  new_status: string;
+  new_score: number;
+  response?: string | null;
+  confidence: number;
+  recommendation: string;
+  resolved: boolean;
+  occurred_at?: string;
+}
+
+/** Payload for POST .../audits/{audit_id}/followup. */
+export interface AuditFollowupPayload {
+  constraint_id: string;
+  question?: string | null;
+  clarification?: string | null;
+}
+
 export interface ImprovementEvent {
   improvement_id: string;
   target_mechanism: string;
@@ -186,6 +211,18 @@ export const getAudit = async (runId: string) => {
   const data = await apiGet<any[]>(`/workflow-runs/${runId}/audit`);
   return data.map((a) => safeParse(auditItemSchema, a, "getAudit.item")) as AuditEvent[];
 };
+
+// ----- F6: audit follow-up interaction protocol -----
+export const followupAudit = (runId: string, auditId: string, payload: AuditFollowupPayload) =>
+  apiPost<AuditFollowup>(
+    `/workflow-runs/${encodeURIComponent(runId)}/audits/${encodeURIComponent(auditId)}/followup`,
+    payload as unknown as Record<string, unknown>,
+  );
+
+export const getAuditFollowups = (runId: string, auditId: string) =>
+  apiGet<AuditFollowup[]>(
+    `/workflow-runs/${encodeURIComponent(runId)}/audits/${encodeURIComponent(auditId)}/followups`,
+  );
 export const getImprovements = (runId: string) =>
   apiGet<ImprovementEvent[]>(`/workflow-runs/${runId}/improvements`);
 export const getHypoTree = (runId: string) =>
@@ -215,6 +252,8 @@ export interface BenchmarkTask {
   eval_method?: string;
   /** "platform" = runs natively on the dual loop; "agent" = executed by the agent (docker/Arbor deps stripped). */
   execution_mode?: string;
+  /** Isolation level at launch: "none" | "container-hard" | "container-soft" | "host". */
+  sandbox_isolation?: string;
   /** Concise task objective, composed from core fields. */
   goal?: string;
   /** custom-registered tasks only */
@@ -465,6 +504,51 @@ export const getStrategies = (runId?: string) =>
 export const getEvolution = (runId: string) =>
   apiGet<EvolutionCandidate[]>(`/workflow-runs/${encodeURIComponent(runId)}/evolution`);
 
+// ---------------------------------------------------------------------------
+// Program-level evolutionary search (OpenRSI island model) — drives
+// `run_program_evolutionary_loop` over the *code* space. The launch endpoint is
+// backgrounded (mirrors the config-evolution / MEA endpoints); the dedicated GET
+// returns only the `node_kind="program"` candidates for the island view.
+// ---------------------------------------------------------------------------
+
+/** Configuration for a program-level evolution launch. All fields optional. */
+export interface ProgramEvolutionConfig {
+  /** OpenMLETaskConfig fields (name/data_dir/target/id_col/direction/...). Empty -> bundled titanic preset. */
+  task_config?: Record<string, any>;
+  /** "template" (default, fully offline+deterministic) | "llm" (OpenAI-compatible chat API). */
+  backend_type?: "template" | "llm";
+  /** Backend credentials for backend_type="llm" (api_key/base_url/model/tme_open). */
+  backend_config?: Record<string, any>;
+  /** Number of islands in the OpenRSI model (1–16). */
+  islands?: number;
+  /** Candidates per island (1–32). */
+  pop_per_island?: number;
+  /** Generations per island (1–50). */
+  generations?: number;
+  /** Parallel workers (1–8). */
+  max_workers?: number;
+  /** Candidate novelty cutoff (0–1). */
+  novelty_threshold?: number;
+  /** Whether to run the outer audit at the end. */
+  audit?: boolean;
+  /** Extra audit kwargs. */
+  audit_params?: Record<string, any>;
+  /** Step/iteration budget. */
+  budget?: Record<string, any>;
+  /** RNG seed. */
+  seed?: number;
+}
+
+export const launchProgramEvolution = (runId: string, config: ProgramEvolutionConfig = {}) =>
+  apiPost<{ run_id: string; status: string; accepted: boolean }>(
+    `/workflow-runs/${encodeURIComponent(runId)}/program-evolution`,
+    config as Record<string, unknown>,
+  );
+
+/** Program-node candidates (code operators + island lineage) for a run. */
+export const getProgramEvolution = (runId: string) =>
+  apiGet<EvolutionCandidate[]>(`/workflow-runs/${encodeURIComponent(runId)}/program-evolution`);
+
 /** Validate a task registration payload; returns errors without persisting. */
 export const validateTask = (taskType: string, values: Record<string, any>) =>
   apiPost<ValidateResult>("/benchmark-tasks/validate", {
@@ -590,6 +674,16 @@ export const STATUS_CLASS: Record<string, string> = {
   exited_converged: "ok",
   cancelled: "bad",
 };
+
+/** Run statuses from which nothing can change server-side — stop polling/streaming.
+ *  Mirrors ``platform_contracts/transitions.py`` (states with no successors). */
+export const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set([
+  "succeeded",
+  "failed",
+  "exited_budget",
+  "exited_converged",
+  "cancelled",
+]);
 
 export const DECISION_LABEL: Record<string, string> = {
   accept: "ACCEPT · 接受",

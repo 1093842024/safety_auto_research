@@ -68,6 +68,12 @@ h3 { font-size: 13px; margin: 0 0 6px; color: var(--muted); text-transform: uppe
 .pill.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .pill.bad { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
 .pill.accent { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.pill.iso { background: #0e7490; color: #cffafe; border-color: transparent; }
+.pill.iso-soft { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.iso-banner { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; padding: 10px 12px;
+  border-radius: 8px; background: #0e7490; color: #cffafe; font-size: 13px; line-height: 1.5; }
+.iso-banner.warn { background: var(--warn-soft); color: var(--warn); }
+.iso-banner b { color: inherit; }
 .bar { height: 8px; border-radius: 6px; background: var(--panel-2); overflow: hidden; }
 .bar > span { display: block; height: 100%; background: var(--accent); }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -98,6 +104,11 @@ ul.tight li { margin: 2px 0; }
   overflow-x: auto; white-space: pre-wrap; word-break: break-all; margin: 8px 0; }
 .small { font-size: 12px; }
 .card.ok { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+.card.warn { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+/* form field column + input, used by the program-evolution launch form */
+.col { display: inline-flex; flex-direction: column; gap: 3px; }
+.input { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 5px 8px; font-size: 12.5px; width: 100%; box-sizing: border-box; }
+.input:focus { outline: none; border-color: var(--accent); }
 
 /* ===== Researcher-friendly shell: sidebar + main ===== */
 html, body, #root { height: 100%; }
@@ -373,3 +384,32 @@ html, body, #root { height: 100%; }
 .toast-ok { border-left-color: var(--ok); }
 .toast-warn { border-left-color: var(--warn); }
 .toast-error { border-left-color: var(--bad); }
+
+/* ===== Sidebar search + status filter (U3) ===== */
+.sidebar-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 4px 8px;
+}
+.sidebar-search,
+.sidebar-status {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.sidebar-search:focus,
+.sidebar-status:focus { outline: none; border-color: var(--accent); }
+
+/* ===== Warning banner (backend down / agent prerequisite) ===== */
+.warn-banner {
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.warn-banner strong { color: var(--warn); }

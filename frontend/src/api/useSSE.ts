@@ -36,12 +36,14 @@ export interface ProgressEvent {
 
 export function useSSE(runId: string | undefined) {
     const [connected, setConnected] = useState(false);
+    const [finished, setFinished] = useState(false);
     const [latestEvent, setLatestEvent] = useState<ProgressEvent | null>(null);
     const sourceRef = useRef<EventSource | null>(null);
 
     useEffect(() => {
         if (!runId) return;
 
+        setFinished(false);
         const es = new EventSource(`/api/workflow-runs/${encodeURIComponent(runId)}/stream`);
         sourceRef.current = es;
 
@@ -58,6 +60,16 @@ export function useSSE(runId: string | undefined) {
             }
         });
 
+        // R15/R27 fix: the server now sends a terminal "done" event when the run's
+        // driver finishes. Close the stream explicitly — otherwise EventSource sees
+        // the closed connection as an error and reconnects forever to a dead run.
+        es.addEventListener("done", () => {
+            setFinished(true);
+            setConnected(false);
+            es.close();
+            sourceRef.current = null;
+        });
+
         es.onerror = () => {
             setConnected(false);
             // EventSource auto-reconnects; we just flip the flag.
@@ -70,5 +82,5 @@ export function useSSE(runId: string | undefined) {
         };
     }, [runId]);
 
-    return { connected, latestEvent };
+    return { connected, finished, latestEvent };
 }

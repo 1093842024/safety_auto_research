@@ -24,6 +24,8 @@ interface CompareRow {
   task_name: string;
   status: string;
   metric_name: string;
+  /** "higher" | "lower" — optimization direction of the task's metric. */
+  direction?: string;
   score: number | null;
   model: string;
   fe: string;
@@ -106,15 +108,37 @@ export function CompareRuns({
 
   useEffect(() => { fetchCompare(); }, [fetchCompare]);
 
-  const sortedRows = useMemo(() =>
-    [...rows].sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity)),
-    [rows]
-  );
+  // R12 fix: rank direction-aware. A lower-is-better metric (e.g. eval_loss)
+  // used to be sorted descending, so the WORST run appeared on top.
+  const sortedRows = useMemo(() => {
+    const rank = (r: CompareRow) =>
+      typeof r.score === "number" && Number.isFinite(r.score)
+        ? (r.direction === "lower" ? -r.score : r.score)
+        : -Infinity;
+    return [...rows].sort((a, b) => rank(b) - rank(a));
+  }, [rows]);
 
-  const maxScore = useMemo(() =>
-    Math.max(...sortedRows.map((r) => r.score ?? 0), 0.01),
-    [sortedRows]
-  );
+  const { maxScore, minPositive } = useMemo(() => {
+    const vals = sortedRows
+      .map((r) => r.score)
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    const pos = vals.filter((v) => v > 0);
+    return {
+      maxScore: Math.max(...vals, 0.01),
+      minPositive: pos.length ? Math.min(...pos) : 0,
+    };
+  }, [sortedRows]);
+
+  /** Bar length: always "longer = better", whichever direction the metric runs. */
+  const barWidth = (r: CompareRow): number => {
+    if (typeof r.score !== "number" || !Number.isFinite(r.score)) return 0;
+    if (r.direction === "lower") {
+      return minPositive > 0 && r.score > 0
+        ? Math.min(100, (minPositive / r.score) * 100)
+        : 0;
+    }
+    return Math.max(0, Math.min(100, (r.score / maxScore) * 100));
+  };
 
   const recentRuns = useMemo(() =>
     [...allRuns]
@@ -177,11 +201,16 @@ export function CompareRuns({
                 <div className="compare-bar-track" style={{ flex: 1 }}>
                   <div
                     className="compare-bar-fill"
-                    style={{ width: `${((r.score ?? 0) / maxScore) * 100}%` }}
+                    style={{ width: `${barWidth(r)}%` }}
                   />
                 </div>
-                <span className="mono" style={{ minWidth: 70, textAlign: "right", fontWeight: 700 }}>
-                  {r.score !== null ? r.score.toFixed(4) : "—"}
+                <span
+                  className="mono"
+                  style={{ minWidth: 82, textAlign: "right", fontWeight: 700 }}
+                  title={r.direction === "lower" ? `${r.metric_name}（越低越好）` : r.metric_name}
+                >
+                  {typeof r.score === "number" ? r.score.toFixed(4) : "—"}
+                  {r.direction === "lower" && <span className="muted small"> ↓</span>}
                 </span>
               </div>
             ))}

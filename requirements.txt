@@ -1,0 +1,32 @@
+# safety_auto_research — core runtime dependencies (R23).
+#
+# Until now the project declared no dependencies at all: a fresh checkout could
+# only be run by guessing what to install, and one dependency was *invisible*
+# even to a careful reader (see python-multipart below). Install with:
+#
+#     pip install -r requirements.txt
+#
+# Optional stacks live in requirements-optional.txt (local LLM training) and
+# requirements-dev.txt (tests). Lower bounds reflect APIs actually relied on;
+# upper bounds are avoided so the platform can track upstream.
+
+# --- API / control plane -----------------------------------------------------
+fastapi>=0.110
+uvicorn>=0.27
+pydantic>=2.6            # v2 only: ConfigDict / model_config / populate_by_name
+
+# NOT imported anywhere in this repo, yet strictly required at runtime:
+# control_plane/routers/benchmarks.py declares ``upload_dataset(file: UploadFile)``
+# and FastAPI raises at *request* time ("Form data requires python-multipart")
+# if it is missing. Dataset upload therefore fails only in production, not at
+# import or startup, which is exactly why it must be pinned explicitly.
+python-multipart>=0.0.7
+
+# --- agent transport / config ------------------------------------------------
+requests>=2.31           # execution_plane/agent/transport.py (remote agent HTTP)
+PyYAML>=6.0              # execution_plane/agents/registry.py (agent registry)
+
+# --- evaluation / tabular research pipeline ----------------------------------
+numpy>=1.26
+pandas>=2.0
+scikit-learn>=1.4        # note: 1.6 removed make_scorer(needs_proba=...)

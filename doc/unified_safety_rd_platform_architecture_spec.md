@@ -4,6 +4,7 @@
 
 状态：Draft v1
 
+> ⚠️ **与现实实现的差距（2026-08-07 标注）**：本文是 2026-07-20 的**目标架构**草案，写于 MEA 控制循环与 OpenRSI/OpenMLE 集成**落地之前**。后续 `doc/mea_harness_upgrade_plan.md`（MEA 已落地）、`doc/openrsi_openmle_integration_analysis.md`（OpenRSI Phase A–D 已落地）、`doc/code_review_STATUS.md`（隔离/并发/ RCE 修复）已部分实现本文目标；本文未回写这些落地，仅作方向性参考，不与现状逐一对照。
 关联文档：
 - `infrastructure/README.md`：现有十层基础设施总览
 - `doc/AI_Research_for_safety.md`：安全 auto-research 方法论方向

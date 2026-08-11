@@ -8,6 +8,32 @@ import {
 const dirText = (d: string) =>
   d === "lower" ? "越低越好 ↓" : d === "higher" ? "越高越好 ↑" : d;
 
+// Isolation badge for agent-mode tasks (F3): shows how the task will execute.
+const isoBadge = (iso?: string) => {
+  switch (iso) {
+    case "container-hard":
+      return (
+        <span className="pill iso" title="Docker 容器硬隔离：数据只读挂载 + 无网络，结果回写 EvalCompletedEvent">
+          🐳 容器隔离
+        </span>
+      );
+    case "container-soft":
+      return (
+        <span className="pill iso-soft" title="Docker 不可用，退回宿主软隔离（同一条研究命令，依赖/目录隔离，无 syscall/网络沙箱）">
+          🛡️ 软隔离
+        </span>
+      );
+    case "host":
+      return (
+        <span className="pill warn" title="未设置 AGENT_SANDBOX，agent 将在宿主直接运行，无隔离">
+          ⚠️ 无隔离
+        </span>
+      );
+    default:
+      return null;
+  }
+};
+
 function TaskDetail({ t }: { t: BenchmarkTask }) {
   return (
     <div className="catalog-detail">
@@ -26,7 +52,8 @@ function TaskDetail({ t }: { t: BenchmarkTask }) {
             <span className="pill warn">agent 模式（已剥离 docker/Arbor 依赖）</span>
           ) : (
             <span className="pill ok">平台原生（双循环直接执行）</span>
-          )}
+          )}{" "}
+          {isoBadge(t.sandbox_isolation)}
         </span>
       </div>
       <div className="kv">
@@ -164,7 +191,8 @@ export function BenchmarkCatalog({ onUseTask }: { onUseTask: (taskId: string) =>
                     <span className="pill warn">agent 模式</span>
                   ) : (
                     <span className="pill ok">平台原生</span>
-                  )}
+                  )}{" "}
+                  {isoBadge(t.sandbox_isolation)}
                   <button className="btn tiny primary" onClick={() => onUseTask(t.task_id)}>
                     用此任务新建研究 →
                   </button>

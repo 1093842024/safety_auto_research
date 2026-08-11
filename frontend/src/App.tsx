@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRuns, getBenchmarkTasks, BenchmarkTask, WorkflowRunSummary, STATUS_LABEL, STATUS_CLASS, CATEGORY_LABELS, setSchemaViolationHandler } from "./api/client";
 import { ToastProvider, useToast } from "./components/Toast";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -54,14 +54,33 @@ function AppBody() {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   // When jumping from the catalog to "new research", pre-select this task.
   const [newInitialTaskId, setNewInitialTaskId] = useState<string | null>(null);
+  // UI1: distinguish "first load in progress" from "backend unreachable after we
+  // already had data" — the latter should keep showing cached runs instead of a hard error.
+  const [loading, setLoading] = useState(true);
+  const [backendDown, setBackendDown] = useState(false);
+  // U3: sidebar search + status filter for the research-records list.
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const loadedOnceRef = useRef(false);
 
   const refreshRuns = useCallback(async () => {
     try {
       const r = await getRuns();
       setRuns(r);
       setRunId((prev) => (prev ? prev : r.length ? r[r.length - 1].run_id : prev));
+      setBackendDown(false);
+      setError("");
     } catch (e: any) {
-      setError(String(e?.message || e));
+      // If we already had data, keep showing it and just flag the backend as
+      // unreachable (silent retry). Otherwise surface a hard error on first load.
+      if (loadedOnceRef.current) {
+        setBackendDown(true);
+      } else {
+        setError(String(e?.message || e));
+      }
+    } finally {
+      loadedOnceRef.current = true;
+      setLoading(false);
     }
   }, []);
 
@@ -89,11 +108,26 @@ function AppBody() {
   const runName = (r: WorkflowRunSummary) =>
     taskMap[r.target_id]?.name || r.objective_snapshot?.name || r.target_id;
 
+  // U3: apply the sidebar search + status filter before grouping, so the records
+  // list stays short and scannable as the number of runs grows.
+  const filteredRuns = useMemo<WorkflowRunSummary[]>(() => {
+    const q = search.trim().toLowerCase();
+    if (!q && statusFilter === "all") return runs;
+    return runs.filter((r) => {
+      if (statusFilter !== "all" && r.status !== statusFilter) return false;
+      if (q) {
+        const name = taskMap[r.target_id]?.name || r.objective_snapshot?.name || r.target_id;
+        if (!name.toLowerCase().includes(q)) return false;
+      }
+      return true;
+    });
+  }, [runs, search, statusFilter, taskMap]);
+
   // Group runs by category, sort each group by start time (newest first), and order the
   // groups by their most-recent run so active categories float to the top.
   const groups = useMemo<RunGroup[]>(() => {
     const m = new Map<string, WorkflowRunSummary[]>();
-    for (const r of runs) {
+    for (const r of filteredRuns) {
       const c = runCategory(r);
       if (!m.has(c)) m.set(c, []);
       m.get(c)!.push(r);
@@ -140,8 +174,36 @@ function AppBody() {
         </button>
 
         <div className="sidebar-label">研究记录 ({runs.length})</div>
+        <div className="sidebar-filter">
+          <input
+            className="sidebar-search"
+            placeholder="搜索研究…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            title="按任务名筛选研究记录"
+          />
+          <select
+            className="sidebar-status"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            title="按运行状态筛选"
+          >
+            <option value="all">全部状态</option>
+            {Object.keys(STATUS_LABEL).map((s) => (
+              <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+            ))}
+          </select>
+        </div>
         <div className="run-list">
-          {groups.length === 0 && <div className="muted small" style={{ padding: 6 }}>暂无记录</div>}
+          {groups.length === 0 && (
+            <div className="muted small" style={{ padding: 6 }}>
+              {loading
+                ? "加载中…"
+                : search || statusFilter !== "all"
+                ? "无匹配记录"
+                : "暂无记录"}
+            </div>
+          )}
           {groups.map((g) => {
             const isCollapsed = !!collapsed[g.category];
             return (
@@ -178,7 +240,23 @@ function AppBody() {
       </aside>
 
       <main className="main">
-        {error && <div className="card error">加载失败：{error}</div>}
+        {error && (
+          <div className="card error">
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <span>加载失败：{error}</span>
+              <button className="btn tiny" onClick={refreshRuns}>重试</button>
+            </div>
+          </div>
+        )}
+
+        {backendDown && (
+          <div className="card warn-banner">
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+              <span>⚠ 无法连接到后端 (:8000)，当前显示的是上次缓存的数据。正在自动重试…</span>
+              <button className="btn tiny" onClick={refreshRuns}>立即重试</button>
+            </div>
+          </div>
+        )}
 
         {view === "new" && (
           <NewResearch

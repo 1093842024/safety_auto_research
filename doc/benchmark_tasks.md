@@ -3,6 +3,7 @@
 > 本文档描述 `safety_auto_research` 控制平面内置的 **18 个研究任务** 的详细情况：任务定义、目标、训练数据、测试数据、模型方案、评价指标与脚本、基线方案、性能/参考，以及是否可由本平台双循环直接执行。
 >
 > 任务目录源码：`benchmark_tasks/__init__.py`（`BenchmarkTask` dataclass + `get_catalog()` / `get_task()` / `to_dict()`）。控制面板「新建研究」向导的 Step 1 即从该目录渲染任务卡片。
+> ⚠️ **同步说明**：本目录是 `benchmark_tasks/__init__.py` 中 `get_catalog()` 的**人工镜像**，代码增删/改任务后需手动同步此处；最后同步 **2026-08-07**。若与代码不符，以代码为准。
 
 ## 0. 总览
 

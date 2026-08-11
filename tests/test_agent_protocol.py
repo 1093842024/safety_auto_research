@@ -191,7 +191,10 @@ class ContractEndpointTest(unittest.TestCase):
         app = create_app(ControlPlaneService(Repository()))
         # FastAPI TestClient import is optional in this skeleton; only assert the route
         # is registered and the handler returns the expected keys.
-        route_paths = [r.path for r in app.routes]
+        # NB: read the path table from the OpenAPI schema rather than ``app.routes`` —
+        # since the A1 router split the app composes ``APIRouter``s, and recent FastAPI
+        # versions keep those as lazy ``_IncludedRouter`` entries instead of flattening.
+        route_paths = list(app.openapi()["paths"])
         self.assertIn("/agent/protocol", route_paths)
 
 

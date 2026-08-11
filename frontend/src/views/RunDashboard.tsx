@@ -15,6 +15,7 @@ import {
   STATUS_CLASS,
   DECISION_LABEL,
   DECISION_CLASS,
+  TERMINAL_RUN_STATUSES,
 } from "../api/client";
 import { useSSE } from "../api/useSSE";
 import { useToast } from "../components/Toast";
@@ -52,6 +53,13 @@ export function RunDashboard({ runId }: { runId: string }) {
 
   useEffect(() => {
     let alive = true;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const stop = () => {
+      if (timer != null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
     const load = async () => {
       try {
         const [r, e] = await Promise.all([getRun(runId), getEvents(runId)]);
@@ -59,16 +67,20 @@ export function RunDashboard({ runId }: { runId: string }) {
         setRun(r);
         setEvents(e);
         setPollError("");
+        // R27 fix: a finished run kept being polled every 3s forever (one run
+        // page left open = 2 requests/3s until the tab is closed). Terminal
+        // status means nothing more can change server-side.
+        if (TERMINAL_RUN_STATUSES.has(r.status)) stop();
       } catch (err: any) {
         console.warn("[Polling] Failed to fetch data for RunDashboard:", err);
         if (alive) setPollError("数据刷新失败，显示的是缓存数据。请检查后端是否运行。");
       }
     };
     load();
-    const t = setInterval(load, 3000);
+    timer = setInterval(load, 3000);
     return () => {
       alive = false;
-      clearInterval(t);
+      stop();
     };
   }, [runId]);
 
@@ -153,16 +165,39 @@ export function RunDashboard({ runId }: { runId: string }) {
   // ---- Debug state ----
   const [debugBusy, setDebugBusy] = useState<"inner" | "outer" | null>(null);
   const [debugResults, setDebugResults] = useState<DebugResult[]>([]);
+  // FL4: the debug POST returns immediately; the real work is async on the backend and
+  // surfaces as a debug_result event. Track the pending run so we can keep the "运行中…"
+  // state until the result event actually arrives.
+  const debugPendingRef = useRef<{ stage: "inner" | "outer"; before: number } | null>(null);
 
   const handleDebug = async (stage: "inner" | "outer") => {
     setDebugBusy(stage);
+    const before = events.filter(
+      (e) => e.event_type === "debug_result" && e.stage === stage,
+    ).length;
+    debugPendingRef.current = { stage, before };
     try {
       await debugRun(runId, stage);
     } catch (e: any) {
       console.error("debug error", e);
+      debugPendingRef.current = null;
+      setDebugBusy(null);
+      push(`调试启动失败：${e?.message || e}`, "error");
     }
-    setDebugBusy(null);
   };
+
+  // FL4: clear the busy state once the matching debug_result event shows up.
+  useEffect(() => {
+    const p = debugPendingRef.current;
+    if (!p) return;
+    const now = events.filter(
+      (e) => e.event_type === "debug_result" && e.stage === p.stage,
+    ).length;
+    if (now > p.before) {
+      debugPendingRef.current = null;
+      setDebugBusy(null);
+    }
+  }, [events]);
 
   // Poll debug results from events
   useEffect(() => {
@@ -357,6 +392,7 @@ export function RunDashboard({ runId }: { runId: string }) {
           debugResults={debugResults}
           onDebug={handleDebug}
           onStartExperiment={handleStartExperiment}
+          onViewEvents={() => setSub("events")}
           expBusy={expBusy}
         />
       )}
@@ -476,6 +512,7 @@ function DebugPanel({
   debugResults,
   onDebug,
   onStartExperiment,
+  onViewEvents,
   expBusy,
 }: {
   runStatus: string;
@@ -483,6 +520,7 @@ function DebugPanel({
   debugResults: DebugResult[];
   onDebug: (stage: "inner" | "outer") => void;
   onStartExperiment: () => void;
+  onViewEvents: () => void;
   expBusy: boolean;
 }) {
   const innerLatest = debugResults.filter((r) => r.stage === "inner").slice(-1)[0];
@@ -500,6 +538,11 @@ function DebugPanel({
         在启动完整实验前，可对双循环的关键环节进行<b>单独调试</b>：验证数据加载、模型训练、审计阈值是否合理。
         调试结果不会污染研究记录与榜单。
       </p>
+      {debugBusy && (
+        <p className="muted small" style={{ color: "var(--accent)", marginTop: -8, marginBottom: 16 }}>
+          ● 调试运行中… 结果将随事件流自动出现，无需刷新。
+        </p>
+      )}
 
       <div className="grid2" style={{ gap: 12 }}>
         {/* Inner loop debug */}
@@ -545,6 +588,10 @@ function DebugPanel({
           </div>
         </div>
       )}
+
+      <div className="row" style={{ marginTop: 16, justifyContent: "flex-end" }}>
+        <button className="btn tiny" onClick={onViewEvents}>查看完整事件流 →</button>
+      </div>
     </div>
   );
 }

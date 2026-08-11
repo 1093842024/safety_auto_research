@@ -1,0 +1,16 @@
+# Optional heavyweight stacks (R23). NOT needed to run the control plane, the
+# dual loop, the tabular/kaggle research pipeline or the test suite.
+#
+#     pip install -r requirements-optional.txt
+#
+# Everything here is imported lazily inside the module that needs it, so a
+# checkout without these packages degrades to "that feature is unavailable"
+# rather than failing at startup.
+
+# openmle_integration/local_train.py — local LLM policy training + reward bridge
+torch>=2.2
+transformers>=4.40
+peft>=0.10
+
+# scripts/make_text_cls_demo_dataset.py — pulls demo corpora from the Hub
+datasets>=2.18

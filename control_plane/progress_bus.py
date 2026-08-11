@@ -12,12 +12,25 @@ import asyncio
 import json
 import logging
 import time as _time
+from collections import OrderedDict
+from collections import deque
 from typing import Any, AsyncGenerator
 
 _log = logging.getLogger(__name__)
 
 # How long a subscriber's queue can grow before we drop the oldest event.
 _MAX_QUEUE_SIZE = 128
+# R15 fix: events emitted before the browser's EventSource attaches used to be
+# dropped on the floor — the frontend navigates to the run page *after* POSTing
+# the start request, so the first seconds of a run were always invisible. We now
+# keep a small per-run ring buffer and replay it to every new subscriber.
+_BACKLOG_SIZE = 64
+# Cap the number of runs kept in the replay buffer (LRU) so a long-lived server
+# does not accumulate one deque per historical run.
+_MAX_BACKLOG_RUNS = 32
+# Sentinel pushed by ``close()``: tells ``subscribe()`` to end the SSE stream
+# instead of blocking forever on ``await q.get()``.
+_EOF = {"__eof__": True}
 
 
 class ProgressBus:
@@ -32,6 +45,9 @@ class ProgressBus:
         # the first subscriber's queue, silently starving it.
         self._queues: dict[str, set[asyncio.Queue[dict[str, Any]]]] = {}
         self._conn_counts: dict[str, int] = {}  # active SSE subscribers per run
+        # R15 fix: replay buffer + finished-run marker (see module constants).
+        self._backlog: OrderedDict[str, deque[dict[str, Any]]] = OrderedDict()
+        self._finished: set[str] = set()
         # F1 fix: the serving event loop, captured by the first async request handler
         # (which always runs inside the loop). Background threads can NEVER discover
         # this loop themselves — ``asyncio.all_tasks()`` raises RuntimeError in a
@@ -49,22 +65,56 @@ class ProgressBus:
     def emit(self, run_id: str, event: dict[str, Any]) -> None:
         """Push a progress event to all subscribers of *run_id*.
 
-        Safe to call from any thread.  If no subscriber is listening the event
-        is silently dropped.
+        Safe to call from any thread. Events emitted with no subscriber attached
+        are still recorded in the run's replay buffer (R15 fix) and delivered to
+        the next subscriber, so the beginning of a run is never lost.
         """
-        q_exists = bool(self._queues.get(run_id))
-        if not q_exists:
-            return  # no subscribers — drop silently
         # Stamp the event with a server-side timestamp.
         event.setdefault("ts", _time.time())
+        self._remember(run_id, event)
+        if not self._queues.get(run_id):
+            return  # nobody listening right now — the backlog has it
         loop = self._loop
         if loop is None or loop.is_closed():
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
-                _log.warning("ProgressBus.emit: no event loop available — dropping event")
+                _log.warning("ProgressBus.emit: no event loop available — event kept in backlog only")
                 return
         loop.call_soon_threadsafe(self._enqueue, run_id, event)
+
+    def close(self, run_id: str) -> None:
+        """Signal that *run_id* produced its last event; ends open SSE streams.
+
+        R15 fix: ``subscribe()`` used to block on ``await q.get()`` forever, so a
+        finished run left its SSE connection (and the client's EventSource, and
+        the queue) open indefinitely. Background drivers call this from their
+        ``finally`` block. Safe to call from any thread and more than once.
+        """
+        self._finished.add(run_id)
+        if not self._queues.get(run_id):
+            return
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+        loop.call_soon_threadsafe(self._enqueue, run_id, dict(_EOF))
+
+    def _remember(self, run_id: str, event: dict[str, Any]) -> None:
+        buf = self._backlog.get(run_id)
+        if buf is None:
+            buf = deque(maxlen=_BACKLOG_SIZE)
+            self._backlog[run_id] = buf
+            while len(self._backlog) > _MAX_BACKLOG_RUNS:
+                old_run, _ = self._backlog.popitem(last=False)
+                self._finished.discard(old_run)
+        else:
+            self._backlog.move_to_end(run_id)
+        buf.append(event)
+        # A run that emits again after being closed is alive again (e.g. resumed).
+        self._finished.discard(run_id)
 
     def _enqueue(self, run_id: str, event: dict[str, Any]) -> None:
         for q in list(self._queues.get(run_id, ())):
@@ -98,8 +148,18 @@ class ProgressBus:
         yield self._sse_line("connected", {"run_id": run_id, "msg": "stream started"})
 
         try:
+            # R15 fix: replay whatever happened before this subscriber attached.
+            for past in list(self._backlog.get(run_id, ())):
+                yield self._sse_line("progress", past)
+            if run_id in self._finished:
+                # The run already ended — close immediately instead of hanging.
+                yield self._sse_line("done", {"run_id": run_id, "msg": "stream closed"})
+                return
             while True:
                 event = await q.get()
+                if event.get("__eof__"):
+                    yield self._sse_line("done", {"run_id": run_id, "msg": "stream closed"})
+                    return
                 yield self._sse_line("progress", event)
         except asyncio.CancelledError:
             pass

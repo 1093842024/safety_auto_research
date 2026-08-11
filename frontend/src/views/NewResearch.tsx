@@ -23,6 +23,14 @@ const RESERVED_CAPS = new Set([
   "self_evolution",
 ]);
 
+// UI4: map the audit-threshold slider value to a human-readable strictness tier so
+// users get immediate textual feedback instead of a bare number.
+function auditTierLabel(v: number): string {
+  if (v <= 0.65) return "宽松";
+  if (v <= 0.82) return "中等";
+  return "严格";
+}
+
 const MODEL_OPTIONS = [
   { value: "gbm", label: "gbm（梯度提升基线）" },
   { value: "gbm-strong", label: "gbm-strong（HistGB，更强）" },
@@ -32,6 +40,32 @@ const MODEL_OPTIONS = [
 
 const dirText = (d: string) =>
   d === "lower" ? "越低越好 ↓" : d === "higher" ? "越高越好 ↑" : d;
+
+// Isolation badge for agent-mode tasks (F3): mirrors the same mapping used in BenchmarkCatalog.
+function isoBadge(iso?: string) {
+  switch (iso) {
+    case "container-hard":
+      return (
+        <span className="pill iso" title="Docker 容器硬隔离：数据只读挂载 + 无网络，结果回写 EvalCompletedEvent">
+          🐳 容器隔离
+        </span>
+      );
+    case "container-soft":
+      return (
+        <span className="pill iso-soft" title="Docker 不可用，退回宿主软隔离（同一条研究命令，依赖/目录隔离，无 syscall/网络沙箱）">
+          🛡️ 软隔离
+        </span>
+      );
+    case "host":
+      return (
+        <span className="pill warn" title="未设置 AGENT_SANDBOX，agent 将在宿主直接运行，无隔离">
+          ⚠️ 无隔离
+        </span>
+      );
+    default:
+      return null;
+  }
+}
 
 function metricPill(t: BenchmarkTask) {
   return (
@@ -71,6 +105,7 @@ function TaskCard({
         <strong>{t.name}</strong>
         {t.supported_by_platform && <span className="pill ok">可实跑</span>}
         {t.execution_mode === "agent" && <span className="pill warn">agent 模式</span>}
+        {isoBadge(t.sandbox_isolation)}
         {isCustom && <span className="pill accent">自定义</span>}
         {isCustom && onDelete && (
           <span
@@ -112,6 +147,7 @@ function TaskCard({
         <div className="tt-row"><span className="muted">基线</span><span className="mono">baseline={t.baseline ?? "—"} · ref={t.reference ?? "—"}</span></div>
         <div className="tt-row"><span className="muted">门限</span><span className="mono">{Object.keys(t.gates || {}).length ? JSON.stringify(t.gates) : "无"}</span></div>
         <div className="tt-row"><span className="muted">执行</span><span>{t.execution_mode === "agent" ? "agent 模式（已剥离 docker/Arbor）" : "平台原生双循环"}</span></div>
+        <div className="tt-row"><span className="muted">隔离</span><span>{t.sandbox_isolation === "container-hard" ? "Docker 容器硬隔离（只读数据 + 无网络）" : t.sandbox_isolation === "container-soft" ? "软隔离（Docker 不可用）" : t.sandbox_isolation === "host" ? "无隔离（宿主运行）" : "无需沙箱（平台原生）"}</span></div>
       </div>
     </div>
   );
@@ -257,6 +293,9 @@ function ConfigForm({
             <span className="mono" style={{ minWidth: 44, textAlign: "right" }}>
               {(config.audit_threshold ?? 0.8).toFixed(2)}
             </span>
+            <span className="muted small" style={{ minWidth: 40 }}>
+              （{auditTierLabel(config.audit_threshold ?? 0.8)}）
+            </span>
           </div>
           <p className="muted small">
             外循环审计判定「改进可被接受」所需的置信门槛。越高越严格——越不容易给出 ACCEPT，
@@ -385,6 +424,17 @@ function ConfigForm({
       {/* ---------------- Inner loop — agent mode ---------------- */}
       <fieldset className="cfg-block">
         <legend>内循环 · 自主 Agent 模式</legend>
+
+        {inner.mode === "agent" && (
+          <div className="card warn-banner" style={{ marginBottom: 12 }}>
+            <strong>⚠ 自主 Agent 模式前置要求</strong>
+            <p className="muted" style={{ marginTop: 6, marginBottom: 0 }}>
+              需平台已接入远程 Agent：选择 <b>Codex / Claude Code</b> 可直连对应 CLI；选 <b>auto</b> 则依赖环境变量
+              <code> AGENT_COMMAND</code>。未完成接入时点击「开始研究」会<b>明确失败并终止</b>，不会静默回退脚本化。
+            </p>
+          </div>
+        )}
+
         <div className="field">
           <label>内循环执行方式</label>
           <div className="row" style={{ gap: 8 }}>
@@ -813,6 +863,33 @@ export function NewResearch({
             />
           </div>
 
+          {selected.sandbox_isolation === "container-hard" && (
+            <div className="iso-banner">
+              <span>🐳</span>
+              <span>
+                <b>该任务将以容器隔离方式执行</b>：研究命令在一次性 Docker 容器内运行，数据只读挂载、禁用外网，
+                最终结果作为 <b>EvalCompletedEvent</b> 回写控制平面（F3 硬隔离）。
+              </span>
+            </div>
+          )}
+          {selected.sandbox_isolation === "container-soft" && (
+            <div className="iso-banner warn">
+              <span>🛡️</span>
+              <span>
+                <b>该任务将以软隔离方式执行</b>（当前 Docker 不可用）：同一研究命令在宿主运行，仅做依赖/目录隔离，无 syscall/网络沙箱。
+              </span>
+            </div>
+          )}
+          {selected.sandbox_isolation === "host" && (
+            <div className="iso-banner warn">
+              <span>⚠️</span>
+              <span>
+                <b>当前未开启沙箱</b>（环境变量 AGENT_SANDBOX 未设置），该任务将在宿主直接运行，无隔离。
+                如需容器隔离，请在启动后端时设置 <b>AGENT_SANDBOX=1</b> 并确保 Docker 可用。
+              </span>
+            </div>
+          )}
+
           <div className="row" style={{ marginTop: 16, justifyContent: "flex-end", gap: 10 }}>
             <div style={{ marginRight: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
               <label className="tool-item">
@@ -826,8 +903,8 @@ export function NewResearch({
                 }
               </span>
             </div>
-            <button className="btn" onClick={onCancel}>
-              取消
+            <button className="btn" onClick={() => setStep(1)}>
+              返回选择
             </button>
             <button className="btn primary" disabled={busy} onClick={handleLaunch}>
               {busy ? "启动中…" : autoRun ? "开始研究 →" : "创建并进入调试 →"}

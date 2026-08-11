@@ -6,17 +6,18 @@
 <title>safety_auto_research · 技术架构图（详细版 v2）</title>
 <style>
   :root{
-    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#30363d;
-    --txt:#e6edf3; --muted:#8b949e;
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#3a4250;
+    --txt:#e6edf3; --muted:#9aa4b2;
     --fe:#f0883e; --cp:#3fb950; --ep:#bc8cff; --ct:#39c5cf; --inf:#d29922;
     --persist:#db61a2; --ext:#f85149; --accent:#58a6ff; --warn:#e3b341;
     --openrsi:#7ee787; --mea:#ff7b72;
+    --svgw:1200px;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--txt);
+  body{margin:0;background:var(--bg);color:var(--txt);font-size:15px;
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Helvetica,Arial,sans-serif;
-    line-height:1.55;}
-  header{padding:28px 28px 12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:10}
+    line-height:1.6;}
+  header{padding:24px 28px 12px;border-bottom:1px solid var(--border);background:var(--bg)}
   header h1{margin:0 0 4px;font-size:22px}
   header p{margin:0;color:var(--muted);font-size:13px}
   nav{display:flex;flex-wrap:wrap;gap:8px;padding:14px 28px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:9}
@@ -28,7 +29,11 @@
   section h2{font-size:18px;border-left:4px solid var(--accent);padding-left:10px;margin:0 0 6px}
   section .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
   .card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;overflow-x:auto}
-  svg{display:block;max-width:100%;height:auto;font-family:inherit}
+  svg{display:block;width:var(--svgw);max-width:none;height:auto;font-family:inherit}
+  svg text:not([fill]){fill:var(--txt)}
+  svg text.m{fill:#9aa4b2}
+  svg text.t{fill:var(--txt);font-weight:600}
+  svg text.lbl{fill:var(--txt)}
   .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted);padding:10px 0 0}
   .legend span{display:inline-flex;align-items:center;gap:6px}
   .legend i{width:14px;height:14px;border-radius:3px;display:inline-block}
@@ -43,12 +48,25 @@
   td code,code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px;color:#ffd9a0}
   .twocol{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   @media(max-width:900px){.twocol{grid-template-columns:1fr}}
+  .zoom{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 28px;border-bottom:1px solid var(--border);background:var(--bg);position:sticky;top:64px;z-index:8}
+  .zoom button{font-size:13px;color:var(--txt);background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:5px 12px;cursor:pointer}
+  .zoom button:hover{background:var(--panel2)}
+  .zoom .hint{font-size:12px;color:var(--muted)}
+  .zoom .sep{width:1px;height:18px;background:var(--border)}
 </style>
 </head>
 <body>
 <header>
   <h1>safety_auto_research · 平台技术架构图（详细版 v2 · @2026-08-05）</h1>
   <p>面向 AI 安全研发的自动化研究平台 · 双循环 + 元循环 + <b style="color:var(--openrsi)">OpenRSI 程序级岛模型</b> + <b style="color:var(--mea)">MEA 控制循环</b> · 控制平面 / 执行平面 / 平台契约 / 前端 SPA · 已含 2026-08-04~05 代码审查加固</p>
+  <div class="zoom">
+    <span>图表缩放：</span>
+    <button onclick="svgZoom(-120)">A− 缩小</button>
+    <button onclick="svgZoom(0)">适应宽度</button>
+    <button onclick="svgZoom(120)">A+ 放大</button>
+    <span class="sep"></span>
+    <span class="hint">已修复黑底黑字问题（深色背景 + 浅色文字，高对比）</span>
+  </div>
 </header>
 <nav>
   <a href="#overview">① 全局分层架构</a>
@@ -68,7 +86,7 @@
   <h2>① 全局分层架构总览</h2>
   <p class="sub">自顶向下 7 层 + 2 个横切面（平台契约、护栏）。新增 <b style="color:var(--openrsi)">OpenRSI/OpenMLE 集成层</b> 与 <b style="color:var(--mea)">MEA 控制层</b>（2026-08-04~05）。箭头表示主要调用 / 数据流方向。</p>
   <div class="card">
-  <svg viewBox="0 0 1120 1100" xmlns="http://www.w3.org/2000/svg" font-size="12">
+  <svg viewBox="0 0 1120 1100" xmlns="http://www.w3.org/2000/svg" font-size="14">
     <defs>
       <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
         <path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/>
@@ -234,9 +252,9 @@
     </g>
 
     <!-- guardrail note -->
-    <text x="40" y="828" class="m" font-size="11">横切护栏：</text>
-    <text x="110" y="828" class="m" font-size="11" fill="#f85149">① 内/外环隔离（OUTER_LOOP_RESERVED_CAPS）· ② 决策护栏 validate_route · ③ 状态机 transitions · ④ 冻结验证器 _FROZEN_KEYS · ⑤ 预算三维硬停 · ⑥ 算子白名单 assert_operator_inner_only(fail-closed) · ⑦ MEA Auditor≠Executor(异模型)</text>
-    <text x="40" y="850" class="m" font-size="11" fill="#ff7b72">⚠ C1 待闭环：interpreter.py 把宿主全部 env（含 *_KEY/*_TOKEN）透传给 LLM 生成代码 → 需最小 env 白名单 + 沙箱。</text>
+    <text x="40" y="828" class="m" font-size="13">横切护栏：</text>
+    <text x="110" y="828" class="m" font-size="13" fill="#f85149">① 内/外环隔离（OUTER_LOOP_RESERVED_CAPS）· ② 决策护栏 validate_route · ③ 状态机 transitions · ④ 冻结验证器 _FROZEN_KEYS · ⑤ 预算三维硬停 · ⑥ 算子白名单 assert_operator_inner_only(fail-closed) · ⑦ MEA Auditor≠Executor(异模型)</text>
+    <text x="40" y="850" class="m" font-size="13" fill="#ff7b72">⚠ C1 待闭环：interpreter.py 把宿主全部 env（含 *_KEY/*_TOKEN）透传给 LLM 生成代码 → 需最小 env 白名单 + 沙箱。</text>
   </svg>
   <div class="legend">
     <span><i style="background:#f0883e"></i>前端</span>
@@ -258,7 +276,7 @@
   <h2>② 后端模块依赖与调用流</h2>
   <p class="sub">api.py 暴露 HTTP，组合 ControlPlaneService + ResearchStateStore + ClosedLoopOrchestrator（+MEA）；执行面经 PlatformSDK 唯一通道回写。2026-08-04~05 新增 openmle_integration 包与 MEA 控制层。</p>
   <div class="card">
-  <svg viewBox="0 0 1120 780" xmlns="http://www.w3.org/2000/svg" font-size="12">
+  <svg viewBox="0 0 1120 780" xmlns="http://www.w3.org/2000/svg" font-size="14">
     <defs><marker id="a2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker>
       <marker id="a2g" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#7ee787"/></marker>
       <marker id="a2m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#ff7b72"/></marker></defs>
@@ -374,7 +392,7 @@
   <h2>③ 双循环 + 元循环 + MEA + 程序级岛模型编排时序</h2>
   <p class="sub">内循环做研究 → 外循环（layer_11）约束审计 Accept/Refine/Restart → 元循环（layer_09）自递归改进（冻结验证器 + 可证伪 + 回滚）；2026-08-05 新增 MEA（Manage-Execute-Audit）控制循环包裹，以及 OpenRSI 程序级岛模型（四算子 + IslandModel）作为并行的"程序进化"通道。</p>
   <div class="card">
-  <svg viewBox="0 0 1120 960" xmlns="http://www.w3.org/2000/svg" font-size="12">
+  <svg viewBox="0 0 1120 960" xmlns="http://www.w3.org/2000/svg" font-size="14">
     <defs><marker id="a3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker>
       <marker id="a3g" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#7ee787"/></marker>
       <marker id="a3m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#ff7b72"/></marker></defs>
@@ -419,11 +437,11 @@
 
     <!-- feedback arrows -->
     <path d="M470,360 C480,360 480,200 500,200" fill="none" stroke="#bc8cff" marker-end="url(#a3)"/>
-    <text x="476" y="300" fill="#bc8cff" font-size="11">Refine 改内循环参数</text>
+    <text x="476" y="300" fill="#bc8cff" font-size="13">Refine 改内循环参数</text>
     <path d="M930,130 C970,130 970,360 930,360" fill="none" stroke="#f85149" marker-end="url(#a3)"/>
-    <text x="936" y="250" fill="#f85149" font-size="11">策略补丁</text>
+    <text x="936" y="250" fill="#f85149" font-size="13">策略补丁</text>
     <path d="M520,460 C400,520 300,520 200,400" fill="none" stroke="#3fb950" stroke-dasharray="5 4" marker-end="url(#a3)"/>
-    <text x="300" y="540" fill="#3fb950" font-size="11">playbook+experience 回流内循环</text>
+    <text x="300" y="540" fill="#3fb950" font-size="13">playbook+experience 回流内循环</text>
 
     <!-- MEA loop (new) -->
     <rect x="500" y="470" width="600" height="120" rx="10" fill="#2a1418" stroke="#ff7b72"/>
@@ -444,7 +462,7 @@
     <text x="60" y="618" fill="#8b949e">per-gen breed → 冠军送 layer_11 冻结审计</text>
     <text x="60" y="640" fill="#8b949e">候选存档 EvolutionArchive(node_kind=program)</text>
     <rect x="60" y="650" width="390" height="14" fill="#2a1418"/>
-    <text x="64" y="661" font-size="10" fill="#ff7b72">⚠ C1：interpreter 透传宿主 env → 沙箱待闭环</text>
+    <text x="64" y="661" font-size="14" fill="#ff7b72">⚠ C1：interpreter 透传宿主 env → 沙箱待闭环</text>
 
     <!-- budget / evolution outer -->
     <rect x="40" y="390" width="430" height="60" rx="10" fill="#241d0a" stroke="#d29922"/>
@@ -474,7 +492,7 @@
   <h2>④ 能力注册表、Agent 工具面、OpenRSI 算子与护栏</h2>
   <p class="sub">基础设施层 10 环节 + kaggle_eval + layer_11 审计 = 11 个注册能力。Agent 通过 PlatformSDK 调用 run_capability；内环工具白名单剔除外环/元循环能力。2026-08-04 新增 OpenRSI 四原子算子（纯函数，受算子白名单约束）。</p>
   <div class="card">
-  <svg viewBox="0 0 1120 560" xmlns="http://www.w3.org/2000/svg" font-size="12">
+  <svg viewBox="0 0 1120 560" xmlns="http://www.w3.org/2000/svg" font-size="14">
     <defs><marker id="a4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#8b949e"/></marker></defs>
 
     <!-- capability registry -->
@@ -538,7 +556,7 @@
   <h2>⑤ 平台契约生成链（前后端单一事实来源）</h2>
   <p class="sub">pydantic 模型 → export_typescript.py → zod 类型。后端校验用 pydantic，前端用 contracts.ts（已与生成物同步并被 client.ts 引用）。OpenRSI 另有独立的零依赖 dojo 契约镜像（不进本导出链）。</p>
   <div class="card">
-  <svg viewBox="0 0 1120 500" xmlns="http://www.w3.org/2000/svg" font-size="12">
+  <svg viewBox="0 0 1120 500" xmlns="http://www.w3.org/2000/svg" font-size="14">
     <defs><marker id="a5" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#39c5cf"/></marker></defs>
 
     <rect x="40" y="60" width="260" height="200" rx="10" fill="#0e2626" stroke="#39c5cf"/>
@@ -687,7 +705,7 @@
     <line x1="370" y1="260" x2="300" y2="300" stroke="#8b949e" marker-end="url(#a6)"/>
     <line x1="460" y1="360" x2="560" y2="360" stroke="#58a6ff" marker-end="url(#s6)"/>
     <line x1="860" y1="360" x2="900" y2="400" stroke="#58a6ff" marker-end="url(#s6)"/>
-    <text x="700" y="350" fill="#58a6ff" font-size="10">fetch /api/*</text>
+    <text x="700" y="350" fill="#58a6ff" font-size="14">fetch /api/*</text>
 
     <!-- island view note -->
     <rect x="560" y="552" width="540" height="80" rx="8" fill="#0e2620" stroke="#7ee787"/>
@@ -706,7 +724,7 @@
   <h2>⑦ 持久化结构</h2>
   <p class="sub">两层持久化：控制平面用 JSON 文件（Repository，原子写 + 线程锁），双循环累积记忆用 SQLite（ResearchStateStore）。自定义任务独立 JSON。2026-08-04 起 evolution_candidates 支持 config/program 双粒度（岛模型分支）。</p>
   <div class="card">
-  <svg viewBox="0 0 1120 470" xmlns="http://www.w3.org/2000/svg" font-size="12">
+  <svg viewBox="0 0 1120 470" xmlns="http://www.w3.org/2000/svg" font-size="14">
     <defs><marker id="a7" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 Z" fill="#db61a2"/></marker></defs>
 
     <!-- JSON -->
@@ -746,7 +764,7 @@
     <text x="620" y="346" fill="#8b949e">策略生命周期：expire_pending_strategies 收尾</text>
     <text x="620" y="368" fill="#8b949e">env: RESEARCH_STATE_DB（默认 data/）</text>
     <rect x="620" y="380" width="440" height="28" rx="6" fill="#0e2620"/>
-    <text x="628" y="399" fill="#7ee787" font-size="11">★ 2026-08-04：evolution_candidates 按 node_kind(config/program) 双存；IslandModel 迁移记录 branch gen{g}.isl{i}</text>
+    <text x="628" y="399" fill="#7ee787" font-size="13">★ 2026-08-04：evolution_candidates 按 node_kind(config/program) 双存；IslandModel 迁移记录 branch gen{g}.isl{i}</text>
 
     <line x1="560" y1="230" x2="600" y2="230" stroke="#db61a2" stroke-dasharray="4 3" marker-end="url(#a7)"/>
   </svg>
@@ -786,7 +804,7 @@
 
 <!-- ===================== ⑨ 技术债 ===================== -->
 <section id="debt">
-  <h2>⑨ 技术债与待同步项（截至 2026-08-05）</h2>
+  <h2>⑨ 技术债与待同步项（已同步至 2026-08-07 · 含 08-06 修复提交 68b9515）</h2>
   <div class="notes ok">
     <p><b>✅ 已解决（2026-07-31 前端技术债清理）：</b></p>
     <p>① 契约漂移 → 重跑导出脚本，generated/ 现含 16 对象 / 14 事件，manifest 同步。② 前端副本断链 → contracts.ts 与生成物逐字节同步（修 run_id/constraints），被 client.ts 引用，safeParse 接入 getRuns/getAudit。③ 死代码 → 删 BenchmarkTasks.tsx + 移除 5 个未消费 client 函数。④ 展示常量重复 → 收口 client.ts 单一来源，4 视图改 import。⑤ 裸 fetch → 新增 compareRuns/resolveApproval 封装。验证：tsc 0 errors；加 gen:contracts 脚本。</p>
@@ -797,17 +815,34 @@
     <p>P2×12（含）：算子黑名单→<b>白名单 fail-closed</b>（INNER_LOOP_ALLOWED_CALLERS）；adapter id-merge NaN try/except；string-label LabelEncoder；evolution.mutate 删死代码；IslandModel.migrate 克隆带 fitness；set_run_status 按 status 映射 event；store.list_artifacts 精确匹配；reward maximize 方向；breed 多样性回退单最优 child；self_evolution direction 从 op 推导；审计剥离 feedback；audit 后复检预算。</p>
     <p>补测试：<code>test_p2_fixes.py</code>(13) + <code>test_review_supplementary.py</code>(12)。回归触达 177 + 补测试 49 passed（全绿）。</p>
   </div>
+  <div class="notes ok">
+    <p><b>✅ 已修复（2026-08-05 全量审查 + 2026-08-06 提交 68b9515，验证 252 passed）：</b></p>
+    <p><b>C1 环境隔离</b>：<code>interpreter.py:_safe_env</code> 仅放行白名单 + 丢弃 <code>*_KEY/TOKEN/SECRET</code>，不再 <code>dict(os.environ)</code>；超时分支 <code>os.killpg</code> 杀进程组（F2）；<code>OPENMLE_MEM_LIMIT_MB</code> 入白名单（F3）。<b>缺陷1</b>：<code>assert_inner_capability_allowed</code> 已在 <code>harness.py:83</code> 定义并被 <code>api.py:485</code>/<code>transport.py:343</code> 调用。<b>缺陷2</b>：四运行端点后台化 + 传 <code>cancel_event</code> + <code>set_run_status</code> 终态收尾。<b>缺陷3/H1</b>：<code>store_tree</code>/<code>evolution._cands</code>/<code>playbook</code> 加 RLock；<code>store.py</code> flock 移入 <code>_persist()</code> 单一写点（F1）。<b>缺陷10</b>：6 处 <code>finally</code> 释放 cancel_event（F4）。<b>M1-M5 / L1/L3/L4/L7</b>：榜单排序 / NaN·inf / fe=bool / reward novelty / adapter fe / 方向 / 空向量 / 对齐逐项核对通过；<b>L2/L3/L7 + L1</b> 按裁决矩阵落地（derive_gate_op / break→continue / alignment 告警 / _canonical_direction）。</p>
+  </div>
+  <div class="notes ok">
+    <p><b>✅ 已修复（2026-08-07 缺陷7 REST 接线）：</b></p>
+    <p><b>缺陷7 🟠</b>：<code>run_program_evolutionary_loop</code>（OpenRSI 程序进化）已正式接入 REST —— 新增 <code>POST /workflow-runs/{run_id}/program-evolution</code>（后台化驱动，沿用 缺陷2 的取消/终态/<code>capture_run_record</code> 收尾模式）+ <code>GET</code> 同路径（<code>node_kind="program"</code> 候选 + 岛视图谱系 <code>gen{g}.isl{i}</code>）。<code>ProgramEvolutionRequest</code> 暴露 <code>task_config</code>（缺 <code>data_dir</code> 回落内置 titanic preset）/ <code>backend_type</code>（<code>template</code> 默认离线确定性 / <code>llm</code> 走 <code>make_api_backend</code>）/ <code>islands</code>/<code>pop_per_island</code>/<code>generations</code>/<code>novelty_threshold</code>/<code>audit</code>/<code>budget</code>/<code>seed</code>。孤儿路径终结；前端 <code>EvolutionPanel</code> 已接入 <b>「🚀 启动程序进化」按钮</b>（可配 islands/pop_per_island/generations/max_workers/新颖度阈值/后端类型/审计，后台执行 + 2.5s 轮询 run 状态，结果实时落入十色 <code>gen{g}.isl{i}</code> 岛视图；带「停止」经 <code>cancelRun</code> 取消），<code>tsc --noEmit</code> 0 errors、<code>vite build</code> 通过。新增 <code>test_program_evolution_endpoint.py</code>(3) + 前端 client 封装 <code>launchProgramEvolution</code>/<code>getProgramEvolution</code>。</p>
+  </div>
   <div class="notes bad">
-    <p><b>🔴 待闭环高危项（2026-08-05 全量审查 + 后续，C1 / 缺陷1-11 / M1-M7 / L1-L7）：</b></p>
-    <p><b>C1 🔴（严重）</b>：<code>openmle_integration/interpreter.py:49-72</code> 把宿主<b>全部环境变量</b>（含 <code>OPENAI_API_KEY</code>/<code>LLM_JUDGE_URL</code>/DB 路径）透传给 LLM 生成的不可信代码 → <b>RCE / 密钥泄露</b>。需最小 env 白名单（清 <code>*_KEY</code>/<code>*_TOKEN</code>）+ seccomp/容器沙箱。短期未闭环。</p>
-    <p><b>缺陷1 🟠</b>：HTTP 面 <code>api.py:475</code> 端点 + <code>orchestrator.run_capability(224-299)</code> 缺 <code>assert_inner_capability_allowed</code> → 客户端可把 layer_11/layer_09 当内环能力调用。回归测试 <code>test_capabilities.py:187</code> 已加，但<b>后端本体守卫落地状态需复核</b>。</p>
-    <p><b>缺陷2 🟠</b>：4 个 run 端点（closed/dual/evolution/mea）同步阻塞、<code>cancel_event</code> 不传、<code>set_run_status</code> 不调 → 无法取消，UI 永久"运行中"。<b>缺陷3 / H1</b>：<code>store_tree</code> 与 <code>evolution._cands</code> 零锁（并发竞争）；<code>store.py</code> 每进程 Lock → 多进程部署数据损坏。</p>
-    <p><b>缺陷7 🟠</b>：<code>run_program_evolutionary_loop</code>（OpenRSI 程序进化）后端<b>无 REST 端点</b>，仅 orchestrator 直接调用 + <code>test_openmle_phase_*</code> 可达（孤儿路径）。前端 EvolutionPanel 岛视图已就绪，缺后端接线。</p>
-    <p><b>M1/M3/M5/M6 · L1-L3/L5/L7（部分开放）</b>：榜单排序反向(已修 test)、NaN/inf 无防护、<code>fe=bool</code> 崩溃、reward <code>novelty=0/1</code>、adapter 忽略 fe、zip bomb、空 embedding 余弦(L4 已修)、registry 缺 task_id KeyError(L6 已修)、<code>inner_acc</code> 未绑定(缺陷9 已修)。已锁契约：M2/M4/L4/L6/缺陷9 → <code>test_fix_regression_2026_08_05.py</code>(11)。</p>
-    <p style="color:#8b949e">测试基线：<b>245 passed</b>（较 2026-07-31 的 132 新增 113 例：openmle_phase_a 5 / phase_bc 9 / phase_d 10 / phase_d_ext 8 / mea_framework 44 / p2_fixes 13 / review_supplementary 12 / fix_regression 11 / capabilities 9 …）。前端 tsc 0 errors。全量套件须按模块分批（pandas/pyarrow 内存 SIGKILL）。</p>
+    <p><b>🔴 仍待闭环（截至 2026-08-07，仅剩 2 项）：</b></p>
+    <p><b>C1 沙箱层 ⚠️</b>：env 泄漏已堵，但代码注释明确要求生产部署<b>额外加容器 / gVisor / Firecracker 沙箱 + 隔离网络命名空间</b>（当前仅为防御纵深，非真正边界）——仍属待办建议，未落代码。</p>
+    <p><b>L5 ⏸️（设计暂缓）</b>：<code>adapter.py:135</code> 预测恒 <code>astype(int)</code>，非整数浮点目标被截断；当前内置数据集均整数标签不触发，转为「接入非整数标签任务时再修」的按需待办。</p>
+    <p><b>非阻塞设计取舍（08-06 记录，不影响发布）</b>：① MEA 离线审计器自确认（无 LLM judge 时 completion 由 exec 状态推导）；② <code>registry.enforce_separation</code> 仅查 <code>executor_default</code>、未遍历 <code>executor_overrides</code> 且 opt-in 静默关闭；③ <code>adapter.TransportExecutorAdapter.run_contract</code> 无异常包裹，CLI/网络错误会冒泡崩溃整条 MEA 循环。</p>
+    <p style="color:#8b949e">测试基线：<b>255 passed, 0 failed</b>（08-07 缺陷7 修复后；含 mea_framework 44 / openmle_phase_* 32 / p2_fixes 13 / review_supplementary 12 / fix_regression 18 / program_evolution_endpoint 3 / capabilities 9 …）。前端 tsc 0 errors。全量套件须按模块分批（pandas/pyarrow 内存 SIGKILL）。</p>
   </div>
 </section>
 
 </main>
+<script>
+function svgZoom(d){
+  var r=document.documentElement;
+  if(d===0){ r.style.setProperty('--svgw','100%'); return; }
+  var cur=getComputedStyle(r).getPropertyValue('--svgw').trim();
+  var w=(cur==='100%')?1180:parseInt(cur,10);
+  if(isNaN(w)) w=1180;
+  w=Math.max(760,Math.min(2400,w+d));
+  r.style.setProperty('--svgw',w+'px');
+}
+</script>
 </body>
 </html>

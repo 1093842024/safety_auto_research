@@ -132,6 +132,7 @@ class EventType(str, Enum):
     WORKFLOW_FINISHED = "workflow_finished"
     STAGE_CANCELLED = "stage_cancelled"
     AUDIT_COMPLETED = "audit_completed"
+    AUDIT_FOLLOWUP = "audit_followup"
     IMPROVEMENT_APPLIED = "improvement_applied"
     AGENT_STEP = "agent_step"
     DEBUG_RESULT = "debug_result"

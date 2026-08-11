@@ -230,7 +230,8 @@ def embedding_retrieval_eval(
     recalls: dict[int, float] = {k: 0.0 for k in ks}
     n = 0
     for row in rows:
-        gold = str(_pick(row, "gold", "gold_doc", "target", "relevant") or "")
+        gold_raw = _pick(row, "gold", "gold_doc", "target", "relevant")
+        gold = str(gold_raw if gold_raw is not None else "")
         ranked = _pick(row, "ranked", "ranked_docs", "topk")
         if gold == "" or ranked is None:
             continue
@@ -239,7 +240,11 @@ def embedding_retrieval_eval(
                 ranked = json.loads(ranked) if ranked.strip().startswith("[") else [ranked]
             except (json.JSONDecodeError, TypeError):
                 ranked = [ranked]
-        ranked = list(ranked)
+        # R19 fix: ``gold`` was normalized to str while ``ranked`` kept its raw
+        # JSON types, so an integer doc id (gold=42 -> "42" vs ranked=[42])
+        # never matched and recall was silently 0 for every such dataset.
+        # Compare both sides as strings.
+        ranked = [str(x) for x in ranked]
         n += 1
         for k in ks:
             topk = ranked[:k]

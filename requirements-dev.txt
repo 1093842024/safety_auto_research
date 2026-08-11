@@ -1,0 +1,13 @@
+# Development / test dependencies (R23).
+#
+#     pip install -r requirements.txt -r requirements-dev.txt
+#
+# Run the suite from the PARENT directory of this package so that
+# ``safety_auto_research`` is importable:
+#
+#     cd ..  &&  python -m pytest safety_auto_research/tests -q
+
+-r requirements.txt
+
+pytest>=8.0
+httpx>=0.27              # fastapi.testclient (TestClient) backend

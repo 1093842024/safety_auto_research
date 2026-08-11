@@ -227,6 +227,35 @@ class AuditCompletedEvent(BasePlatformEvent):
         return self
 
 
+class AuditFollowupEvent(BasePlatformEvent):
+    """A researcher follow-up (clarification / question) on a single audit constraint (F6).
+
+    The outer audit verdict (``AuditCompletedEvent``) is the *immutable* ground truth of the
+    dual loop — the follow-up never mutates it. Instead it is a *supplementary* event that
+    re-scores one constraint when a human supplies a clarification, or records an open question.
+    v1 deliberately does NOT auto-feed the result back into ``IterationRouter`` (kept for later).
+    """
+
+    event_type: EventType = Field(default=EventType.AUDIT_FOLLOWUP)
+    audit_id: str
+    constraint_id: str
+    question: str | None = None
+    clarification: str | None = None
+    prior_status: str
+    new_status: str
+    new_score: float = Field(ge=0.0, le=1.0)
+    response: str | None = None
+    confidence: float = Field(ge=0.0, le=1.0)
+    recommendation: str
+    resolved: bool = False
+
+    @model_validator(mode="after")
+    def _validate_event_type(self) -> "AuditFollowupEvent":
+        if self.event_type != EventType.AUDIT_FOLLOWUP:
+            raise ValueError("audit followup event_type must be audit_followup")
+        return self
+
+
 class AgentStepEvent(BasePlatformEvent):
     """A single step in an inner-loop agent's *execution flow* (agent mode).
 
@@ -315,6 +344,7 @@ ALL_EVENT_MODELS: tuple[type[ContractModel], ...] = (
     AttackCompletedEvent,
     LessonPromotedEvent,
     AuditCompletedEvent,
+    AuditFollowupEvent,
     AgentStepEvent,
     DebugEvent,
     ImprovementAppliedEvent,

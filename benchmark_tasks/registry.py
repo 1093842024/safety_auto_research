@@ -770,7 +770,26 @@ def _load_raw() -> list[dict[str, Any]]:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
         return data if isinstance(data, list) else []
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as exc:
+        # R7 fix: a corrupt custom-tasks file used to be silently swallowed and the
+        # caller proceeded with an EMPTY list, so ``register_custom_task`` then
+        # overwrite-wrote the file and every previously registered task was lost with
+        # no trace. Back up the corrupt file (mirrors control_plane/store.py) so the
+        # data is recoverable, then start empty.
+        import shutil as _shutil
+
+        _bak = f"{path}.corrupt.{int(time.time())}"
+        try:
+            _shutil.move(path, _bak)
+            logging.error(
+                "Corrupt custom-task store at %s backed up to %s (%s); starting empty.",
+                path, _bak, exc,
+            )
+        except OSError as _bak_exc:
+            logging.error(
+                "Corrupt custom-task store at %s (backup failed: %s): %s; starting empty.",
+                path, _bak_exc, exc,
+            )
         return []
 
 

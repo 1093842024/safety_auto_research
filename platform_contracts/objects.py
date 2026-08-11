@@ -159,6 +159,10 @@ class AuditReport(ContractModel):
     audit_confidence: float = Field(ge=0.0, le=1.0)
     recommendation: str
     report_ref: str
+    # F6 follow-up protocol: supplementary researcher clarifications/questions attached to
+    # individual constraints. Forward-compatible aggregation; the canonical record is the
+    # AuditFollowupEvent stream (the original audit verdict stays immutable).
+    followups: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ImprovementProposal(ContractModel):

@@ -13,6 +13,7 @@ platform-native tasks) actually drive the dual loop.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from typing import Any
 
@@ -550,9 +551,25 @@ def _default_eval_method(t: BenchmarkTask) -> str:
     )
 
 
+def _sandbox_isolation(t: BenchmarkTask) -> str:
+    """Isolation level the task will run under when launched in agent mode.
+
+    - "none"           platform-native (kaggle_eval / supported) dual loop; no sandbox needed
+    - "container-hard" agent mode + AGENT_SANDBOX=1 + Docker available (read-only data, no net)
+    - "container-soft" agent mode + AGENT_SANDBOX=1 but Docker unavailable (host soft isolation)
+    - "host"           agent mode but AGENT_SANDBOX not set; runs on the host with no isolation
+    """
+    if t.harness == "kaggle_eval" or t.supported_by_platform:
+        return "none"
+    if _os.environ.get("AGENT_SANDBOX") == "1":
+        return "container-hard" if shutil.which("docker") else "container-soft"
+    return "host"
+
+
 def to_dict(t: BenchmarkTask) -> dict[str, Any]:
     eval_method = t.eval_method or _default_eval_method(t)
     execution_mode = "platform" if (t.harness == "kaggle_eval" or t.supported_by_platform) else "agent"
+    sandbox_isolation = _sandbox_isolation(t)
     direction = "越高越好" if t.direction == "higher" else "越低越好"
     goal = (
         f"优化指标 {t.eval_metric}（{direction}），baseline={t.baseline}"
@@ -573,6 +590,7 @@ def to_dict(t: BenchmarkTask) -> dict[str, Any]:
         "gates": t.gates,
         "harness": t.harness,
         "execution_mode": execution_mode,
+        "sandbox_isolation": sandbox_isolation,
         "eval_method": eval_method,
         "goal": goal,
         "run_command": t.run_command,

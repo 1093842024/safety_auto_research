@@ -78,6 +78,7 @@ class PlatformContractsTest(unittest.TestCase):
             "AttackCompletedEvent",
             "LessonPromotedEvent",
             "AuditCompletedEvent",
+            "AuditFollowupEvent",
             "ImprovementAppliedEvent",
             "AgentStepEvent",
             "DebugEvent",

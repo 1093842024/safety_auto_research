@@ -24,6 +24,7 @@ deterministically.
 from __future__ import annotations
 
 import json as _json
+import logging  # R2 fix: orchestrator.py:1068 called logging.warning without importing it
 import os as _os
 import random as _random
 import tempfile as _tempfile
@@ -48,6 +49,7 @@ from .registry import AdapterRegistry
 from .registry import default_registry
 from .sdk import PlatformSDK
 from .capabilities.registry import CapabilityRegistry
+from .capabilities.sandbox_executor import sandbox_requested
 from ..control_plane.store_tree import ResearchStateStore
 from ..control_plane.evolution import DEFAULT_SURFACE
 from ..control_plane.evolution import EvolutionArchive
@@ -253,6 +255,34 @@ class ClosedLoopOrchestrator:
         self.svc.update_stage_status(
             stage.stage_run_id, UpdateStageStatusRequest(to_status=StageStatus.RUNNING)
         )
+        # ---- F3: agent-mode sandbox routing ------------------------------------
+        # When the capability is sandbox-eligible (explicit opt-in OR AGENT_SANDBOX=1),
+        # run the research command INSIDE the Docker sandbox instead of on the host.
+        # This is the promotion of the single-task F3 path into run_capability's
+        # agent mode: the agent (codex/claude) stays on the host and calls this tool;
+        # only the research artifact is confined. The host reads result.json back and
+        # reconstructs a real EvalCompletedEvent, so the closed loop sees a genuine
+        # measurement produced under isolation.
+        if sandbox_requested(capability_id, params):
+            from .capabilities.sandbox_executor import SandboxResearchExecutor
+
+            try:
+                result = SandboxResearchExecutor().execute(
+                    stage, self.sdk, {**(params or {}), "_capability_id": capability_id}
+                )
+            except Exception:
+                self.svc.update_stage_status(
+                    stage.stage_run_id, UpdateStageStatusRequest(to_status=StageStatus.FAILED)
+                )
+                stage.gate_result = GateResult.FAILED
+                self.svc._repo.put_stage_run(stage)
+                raise
+            self.svc.update_stage_status(
+                stage.stage_run_id, UpdateStageStatusRequest(to_status=result.final_status)
+            )
+            stage.gate_result = result.gate_result
+            self.svc._repo.put_stage_run(stage)
+            return stage, result
         # MEA hook: a RoleAgentAdapter fulfills the bounded subtask contract (fresh
         # context, bounded budget). The StageRun is still created for auditability.
         if agent is not None:

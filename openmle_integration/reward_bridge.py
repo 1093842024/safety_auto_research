@@ -163,11 +163,10 @@ def reward_population(
 
     out: list[RewardComponents] = []
     for c in candidates:
-        if prev_best_fitness is None:
-            prev = None
-        else:
-            prev = prev_best_fitness
-        valid = not (getattr(c, "status", "") or "").startswith("rejected")
+        prev = prev_best_fitness
+        # R25 fix: ``valid`` was computed twice; the first (weaker) assignment was
+        # dead code that only checked the "rejected" prefix and misled readers into
+        # thinking FAILED_STATUSES was not consulted.
         status = getattr(c, "status", "")
         valid = status not in FAILED_STATUSES and not (status or "").startswith("rejected")
         out.append(

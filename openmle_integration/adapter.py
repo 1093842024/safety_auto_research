@@ -293,21 +293,94 @@ class OpenMLETaskAdapter(Task):
         preds = np.asarray(preds).reshape(-1)
         correct = int(np.sum(preds == truth))
         acc = correct / len(truth) if len(truth) else 0.0
-        lower_is_better = self.cfg.direction == "lower"
+        # R20 fix: the fitness used to be hard-wired to accuracy while
+        # ``cfg.eval_metric`` was only echoed into AUX_EVAL_INFO — a task declared
+        # on f1_macro / error_rate was in fact optimized on accuracy, and with
+        # direction="lower" the adapter even reported MetricValue(accuracy,
+        # maximize=False), i.e. "minimize accuracy". Compute the declared metric
+        # when it is derivable from hard labels, and be explicit when it is not.
+        score, metric_used, fallback, effective_dir = self._score_declared_metric(preds, truth, acc)
+        declared_dir = str(self.cfg.direction or "higher").strip().lower()
+        feedback = (
+            f"{metric_used}={score:.4f} (accuracy={acc:.4f}, {correct}/{len(truth)})"
+        )
+        if fallback:
+            feedback += (
+                f" [declared metric {self.cfg.eval_metric!r} cannot be recomputed from"
+                f" hard labels in submission.csv — proxied by {metric_used}]"
+            )
         outcome = {
-            TEST_FITNESS: acc,
+            TEST_FITNESS: score,
             VALID_SOLUTION: True,
-            VALID_SOLUTION_FEEDBACK: f"accuracy={acc:.4f} ({correct}/{len(truth)})",
+            VALID_SOLUTION_FEEDBACK: feedback,
             AUX_EVAL_INFO: {
                 "exit_code": exit_code,
                 "cv_accuracy": cv_accuracy,
-                "metric": self.cfg.eval_metric,
-                "direction": self.cfg.direction,
+                "accuracy": acc,
+                "metric": metric_used,
+                "declared_metric": self.cfg.eval_metric,
+                "metric_fallback": fallback,
+                "direction": effective_dir,
+                "declared_direction": declared_dir,
             },
         }
         state["last_eval"] = outcome
-        state["last_metric"] = MetricValue(value=acc, maximize=not lower_is_better)
+        state["last_metric"] = MetricValue(value=score, maximize=effective_dir != "lower")
         return state, outcome
+
+    def _score_declared_metric(
+        self, preds: "np.ndarray", truth: "np.ndarray", acc: float
+    ) -> Tuple[float, str, bool, str]:
+        """Score ``cfg.eval_metric`` from hard labels.
+
+        Returns ``(score, metric_used, is_proxy, direction_of_score)``.
+
+        Metrics that need probabilities/scores (roc_auc, log_loss, ...) cannot be
+        recomputed from a submission file of hard labels. Rather than silently
+        reporting accuracy under the declared metric's name, we return an honest
+        proxy and flag it: ``error_rate`` for lower-is-better objectives (so the
+        value really is lower-is-better and downstream ``op == "le"`` negation
+        stays correct) and ``accuracy`` for higher-is-better ones.
+        """
+        metric = str(self.cfg.eval_metric or "accuracy").strip().lower()
+        declared_dir = str(self.cfg.direction or "higher").strip().lower()
+
+        def _proxy() -> Tuple[float, str, bool, str]:
+            if declared_dir == "lower":
+                return 1.0 - acc, "error_rate", True, "lower"
+            return acc, "accuracy", True, "higher"
+
+        if metric in ("", "accuracy", "acc", "cv_accuracy", "top1_accuracy"):
+            return acc, "accuracy", False, "higher"
+        if metric in ("error_rate", "error", "misclassification_rate"):
+            return 1.0 - acc, "error_rate", False, "lower"
+        try:
+            from sklearn.metrics import balanced_accuracy_score
+            from sklearn.metrics import f1_score
+            from sklearn.metrics import precision_score
+            from sklearn.metrics import recall_score
+
+            if metric in ("f1", "f1_binary"):
+                return float(f1_score(truth, preds, average="binary")), "f1", False, "higher"
+            if metric in ("f1_macro", "f1_micro", "f1_weighted"):
+                avg = metric.split("_", 1)[1]
+                return float(f1_score(truth, preds, average=avg)), metric, False, "higher"
+            if metric == "precision":
+                return (
+                    float(precision_score(truth, preds, average="macro", zero_division=0)),
+                    metric, False, "higher",
+                )
+            if metric == "recall":
+                return (
+                    float(recall_score(truth, preds, average="macro", zero_division=0)),
+                    metric, False, "higher",
+                )
+            if metric == "balanced_accuracy":
+                return float(balanced_accuracy_score(truth, preds)), metric, False, "higher"
+        except Exception:
+            # sklearn edge cases (single-class truth, unseen labels) -> proxy.
+            return _proxy()
+        return _proxy()
 
     @staticmethod
     def _build_preprocessor(X: pd.DataFrame, fe: str = "basic") -> ColumnTransformer:

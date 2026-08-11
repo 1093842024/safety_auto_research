@@ -47,6 +47,41 @@ def _clean_score(value: float) -> float:
     return v
 
 
+def _select_objective(
+    scores: dict[str, list[float]], metric_name: str, direction: str
+) -> float | None:
+    """Pick the value that represents a run, honouring the task's direction.
+
+    R12 fix: ``capture_run_record`` (leaderboard) and ``compare_runs``
+    (side-by-side view) used to disagree — the latter always took ``max`` of an
+    ``accuracy``-first lookup, so for lower-is-better tasks (e.g. ``eval_loss``)
+    it reported the *worst* iteration and ranked runs backwards. Both now share
+    this selector.
+
+    Priority: declared metric -> executor ``primary`` -> accuracy-like
+    (always higher-is-better) -> any remaining metric.
+    """
+    if not scores:
+        return None
+    lower_is_better = str(direction).strip().lower() == "lower"
+    metric = str(metric_name).strip().lower()
+
+    def _best_dir(vals: list[float]) -> float:
+        return min(vals) if lower_is_better else max(vals)
+
+    for nm, vals in scores.items():
+        base = nm.lower().replace("eval.", "")
+        if base == metric or nm.lower() == metric:
+            return _best_dir(vals)
+    if "primary" in scores:
+        return _best_dir(scores["primary"])
+    for cand in ("accuracy", "eval.accuracy", "cv_accuracy", "score"):
+        if cand in scores:
+            # Accuracy-like metrics are always higher-is-better; never invert.
+            return max(scores[cand])
+    return _best_dir(scores[next(iter(scores))])
+
+
 # Map a target StageStatus to the event_type used in StageStatusChangedEvent.
 _STAGE_EVENT_TYPE: dict[StageStatus, EventType] = {
     StageStatus.QUEUED: EventType.STAGE_QUEUED,
@@ -175,6 +210,37 @@ class ControlPlaneService:
         self._emit_workflow_status_change(run, WorkflowStatus.RUNNING, EventType.WORKFLOW_STARTED)
         return run
 
+    def end_debug_session(self, run_id: str) -> WorkflowRun:
+        """Release a run that was temporarily started for stage-isolated debugging.
+
+        R13 fix: ``POST /workflow-runs/{id}/debug`` pushes a REQUESTED run to
+        RUNNING (a StageRun can only be created for a running workflow) but
+        nothing ever moved it back — the run list then showed a permanent
+        "运行中" zombie for a run that is doing nothing.
+
+        A debug session is *not* a workflow execution, so the run is returned to
+        REQUESTED rather than closed with a terminal status (terminal states have
+        no successors and would block the later real experiment). This
+        deliberately bypasses ``validate_workflow_status_transition``: RUNNING ->
+        REQUESTED must stay an illegal edge for drivers; releasing a debug
+        session is not a workflow transition. No-op unless the run is still
+        RUNNING (i.e. a real driver has not taken it over in the meantime).
+        """
+        run = self._require_workflow_run(run_id)
+        if run.status != WorkflowStatus.RUNNING:
+            return run
+        from_status = run.status
+        run.status = WorkflowStatus.REQUESTED
+        self._repo.append_event(
+            WorkflowStatusChangedEvent(
+                run_id=run.run_id,
+                event_type=EventType.WORKFLOW_REQUESTED,
+                from_status=from_status,
+                to_status=WorkflowStatus.REQUESTED,
+            )
+        )
+        return run
+
     def cancel_workflow_run(self, run_id: str) -> WorkflowRun:
         run = self._require_workflow_run(run_id)
         self._emit_workflow_status_change(run, WorkflowStatus.CANCELLED, _WORKFLOW_TERMINAL_TYPE)
@@ -258,36 +324,12 @@ class ControlPlaneService:
         if not scores:
             return None
 
-        def _best_dir(vals: list[float]) -> float:
-            # Apply the task's optimization direction to the REAL objective.
-            return max(vals) if direction == "higher" else min(vals)
-
-        def _best_higher(vals: list[float]) -> float:
-            # Accuracy-like metrics are always higher-is-better; never invert direction.
-            return max(vals)
-
-        # 1) exact (prefix-insensitive) match on the task's declared metric
-        target: float | None = None
-        for nm, vals in scores.items():
-            base = nm.lower().replace("eval.", "")
-            if base == metric_name or nm.lower() == metric_name:
-                target = _best_dir(vals)
-                break
-        # 2) the executor's "primary" metric carries the real objective value -> use it
-        #    (direction-aware) before falling back to accuracy (P1-3 fix: avoids picking
-        #    the WORST run for lower-is-better tasks whose declared metric isn't a key).
-        if target is None and "primary" in scores:
-            target = _best_dir(scores["primary"])
-        # 3) accuracy-like fallback (always higher-is-better; never invert direction)
+        # Selection order (declared metric -> primary -> accuracy-like -> any) is
+        # shared with ``compare_runs`` via ``_select_objective`` so the leaderboard
+        # and the comparison view never disagree about a run's score (R12 fix).
+        target = _select_objective(scores, metric_name, direction)
         if target is None:
-            for cand in ("accuracy", "eval.accuracy", "cv_accuracy", "score"):
-                if cand in scores:
-                    target = _best_higher(scores[cand])
-                    break
-        # 4) last resort: any available metric, direction-aware
-        if target is None:
-            nm = next(iter(scores))
-            target = _best_dir(scores[nm])
+            return None
 
         try:
             score_val = round(_clean_score(target), 6)
@@ -495,22 +537,38 @@ class ControlPlaneService:
             obj = run.objective_snapshot or {}
             cfg = obj.get("config", {}) if isinstance(obj.get("config"), dict) else {}
             il = cfg.get("inner_loop", {}) if isinstance(cfg, dict) else {}
-            # Harvest best metric from events.
-            best_score: float | None = None
-            metric_name = str(obj.get("eval_metric") or "accuracy")
+            task_id = obj.get("benchmark_task_id") or run.target_id
+            metric_name = str(obj.get("eval_metric") or "accuracy").strip().lower()
+            # R12 fix: the direction must come from the task registry (canonical),
+            # falling back to the run snapshot; the previous implementation always
+            # took max(accuracy) and therefore reported the WORST iteration for
+            # lower-is-better tasks such as ``eval_loss``.
+            direction = self._canonical_direction(task_id) or str(
+                obj.get("direction") or "higher"
+            ).strip().lower()
+            # Harvest every numeric metric sample, then apply the shared selector.
+            scores: dict[str, list[float]] = {}
             for e in self._repo.list_events(run.run_id):
-                if e.get("event_type") == "eval_completed":
-                    m = e.get("metrics", {}) or {}
-                    v = m.get("accuracy") or m.get("primary") or m.get(metric_name)
-                    if isinstance(v, (int, float)):
-                        if best_score is None or v > best_score:
-                            best_score = v
+                if e.get("event_type") != "eval_completed":
+                    continue
+                mm = e.get("metrics") or {}
+                if not isinstance(mm, dict):
+                    continue
+                for k, v in mm.items():
+                    try:
+                        fv = float(v)
+                    except (TypeError, ValueError):
+                        continue
+                    if math.isfinite(fv):
+                        scores.setdefault(str(k), []).append(fv)
+            best_score = _select_objective(scores, metric_name, direction)
             results.append({
                 "run_id": rid,
-                "task_id": obj.get("benchmark_task_id") or run.target_id,
+                "task_id": task_id,
                 "task_name": obj.get("name") or "",
                 "status": run.status.value if hasattr(run.status, "value") else str(run.status),
                 "metric_name": metric_name,
+                "direction": direction,
                 "score": best_score,
                 "model": il.get("model") or cfg.get("model") or "—",
                 "fe": il.get("fe") or ("rich" if cfg.get("fe") else "basic"),

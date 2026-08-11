@@ -76,7 +76,7 @@
 - **Phase C · 程序级岛模型**：`control_plane/evolution.py::IslandModel`（`seed`/`best`/`migrate` 跨岛迁移，branch `gen{g}.isl{i}`）+ `orchestrator.run_program_evolutionary_loop`（:1451）+ `_breed_program_generation`（:1711）。与 config 进化（`run_evolutionary_loop` 扁平种群）并存于 `EvolutionArchive`，靠 `Candidate.node_kind`（config/program）区分、双粒度新颖性过滤（config 余弦≥0.92 拒；program 精确代码字符串 set 去重）。
 - **Phase D · 本地训练 + 奖励桥**：`reward_bridge.py`（`reward_func`/`reward_population`，validity/improvement/diversity/parsimony）把 fitness 翻成 RL 风格 reward；`local_train.py`（`LocalLLMTrainer`，`detect_device` MPS/CPU，≤0.6B LoRA）在 Mac 上训练轻量 generator 反哺算子后端；`ApiLLMOperatorBackend` 对接第三方 OpenAI 兼容 API。
 
-> ⚠️ **接线状态**：程序级进化（`run_program_evolutionary_loop`）目前**仅在 `orchestrator` 直接调用与 `test_openmle_phase_*` 测试可达，后端尚无 REST 端点**（计划中的 `api.py` 接线为待办，见第 9 节缺陷 7）。前端 `EvolutionPanel` 已支持岛视图（`gen{g}.isl{i}` 十色着色）。
+> ✅ **接线状态（2026-08-07 修复 缺陷7）**：程序级进化已正式接入 REST —— `POST /workflow-runs/{run_id}/program-evolution`（后台化驱动 `run_program_evolutionary_loop`，沿用 缺陷2 的取消/终态/record 收尾模式）+ `GET` 同路径（`node_kind="program"` 候选 + 岛视图谱系）。`backend_type` 支持 `template`（默认，离线确定性）/ `llm`（OpenAI 兼容 API）；`task_config` 缺 `data_dir` 时回落到内置 titanic preset。孤儿路径终结：前端 `EvolutionPanel` 已接入 **「🚀 启动程序进化」按钮**（可配 islands/pop_per_island/generations/max_workers/新颖度阈值/后端类型/审计，后台执行并轮询结果落入十色 `gen{g}.isl{i}` 岛视图，带「停止」取消），`tsc --noEmit` 0 errors、`vite build` 通过。
 
 **MEA（Manage-Execute-Audit）控制循环：**
 
@@ -320,7 +320,7 @@ cd /Users/glennge/work/github/AI_research
     safety_auto_research/tests/ -q
 ```
 
-当前基线 **245 passed**（2026-08-05；较 2026-07-31 的 132 新增 113 例，主要来自 OpenRSI/OpenMLE 四阶段测试与 MEA / 审查回归）。主要覆盖：`control_plane`、`dual_loop`（双循环隔离与终态 + `ContextSeparationTest`）、`playbook`、`phase2`（held-out/LLM judge/经验生命周期/预算）、`evolution`（种群/选择/双粒度新颖性/IslandModel/候选序列化）、`benchmark_registry`、`benchmark_suites`、`research_records`（榜单方向感知）、`capabilities`、`execution_plane`、`platform_contracts`；**新增** `openmle_phase_a`(5)/`openmle_phase_bc`(9)/`openmle_phase_d`(10)/`openmle_phase_d_ext`(8)（OpenRSI 四阶段）、`mea_framework`(44)（MEA 框架）、`p2_fixes`(13)/`review_supplementary`(12)/`fix_regression_2026_08_05`(11)（审查回归）。前端 `npx tsc --noEmit` 0 errors。
+当前基线 **255 passed, 0 failed**（2026-08-07 缺陷7 修复后；较 2026-08-06 的 252 新增 3 例 `test_program_evolution_endpoint`）。主要覆盖：`control_plane`、`dual_loop`（双循环隔离与终态 + `ContextSeparationTest`）、`playbook`、`phase2`（held-out/LLM judge/经验生命周期/预算）、`evolution`（种群/选择/双粒度新颖性/IslandModel/候选序列化）、`benchmark_registry`、`benchmark_suites`、`research_records`（榜单方向感知）、`capabilities`、`execution_plane`、`platform_contracts`；**新增** `openmle_phase_a`(5)/`openmle_phase_bc`(9)/`openmle_phase_d`(10)/`openmle_phase_d_ext`(8)（OpenRSI 四阶段）、`mea_framework`(44)（MEA 框架）、`p2_fixes`(13)/`review_supplementary`(12)/`fix_regression_2026_08_05`(18)（审查回归）、`program_evolution_endpoint`(3)（缺陷7 REST 接线）。前端 `npx tsc --noEmit` 0 errors。
 
 > ⚠️ 全量套件一次性加载会因内存（pandas/pyarrow）触发 SIGKILL（exit 137），CI 须按模块分批运行；受管 venv 已加 `tests/conftest.py` 设 `future.infer_string=False` 规避 pandas 3.0 的 pyarrow segfault。
 
@@ -335,7 +335,7 @@ cd /Users/glennge/work/github/AI_research
 - **Agent 模式真实接入**：通过环境变量 `AGENT_COMMAND`（Codex / WorkBuddy CLI）接入 `RemoteAgentHarness` 后，agent 模式（含全部 harness 依赖任务）即可真正执行自主内循环——`system_prompt/skills/tools/step_plan` 与任务核心信息（`task_spec`）会完整传给外部 agent；未接入时启动明确失败并终止。
 - **代理环境变量**：本机若设置 `HTTP_PROXY`，对 `127.0.0.1`/`localhost` 的 curl 会被拦截返回 502，需加 `--noproxy '*'` 或用 `localhost`（浏览器不受此影响）。
 - **前端代理**：Vite 开发服务器将 `/api` 代理到 `:8000`；若后端未运行，前端请求会返回 500，应先确认后端存活。
-- **OpenRSI 解释器沙箱（C1，待闭环）**：`openmle_integration/interpreter.py` 执行 LLM 生成的不可信代码时，当前把宿主全部环境变量（含 `OPENAI_API_KEY` / `LLM_JUDGE_URL` / DB 路径）透传给子进程，存在 RCE / 密钥泄露风险。短期需最小 env 白名单（清掉 `*_KEY`/`*_TOKEN`），长期需 seccomp / 容器沙箱隔离。详见 `doc/code_review_2026-08-05.md`（C1 严重项）。
+- **OpenRSI 解释器沙箱（C1，待闭环）**：`openmle_integration/interpreter.py` 执行 LLM 生成的不可信代码时，当前把宿主全部环境变量（含 `OPENAI_API_KEY` / `LLM_JUDGE_URL` / DB 路径）透传给子进程，存在 RCE / 密钥泄露风险。短期需最小 env 白名单（清掉 `*_KEY`/`*_TOKEN`），长期需 seccomp / 容器沙箱隔离。详见 `doc/code_review_STATUS.md`（C1 严重项，附录 A/B 亦含相关修复）。
 - **数据文件**：`data/` 为运行时生成，建议纳入 `.gitignore`。
 
 ---
@@ -346,17 +346,11 @@ cd /Users/glennge/work/github/AI_research
 - `execution_plane/README.md` — 执行平面、双循环、AgentHarness、能力注册
 - `execution_plane/agent/PROTOCOL.md` — 接入外部 agent 的线协议契约
 - `infrastructure/README.md` — 十层研究基础设施资产总览
-- `doc/unified_safety_rd_platform_architecture_spec.md` — 平台架构 spec
-- `doc/dual_loop_upgrade_plan.md` — 双循环升级方案
-- `doc/harness_gap_analysis_and_upgrade_plan.md` — **Harness 工程差距分析与三期升级规划**（对照 Weng 综述，三期全部落地）
-- `doc/code_review_2026-07-30_round3.md` — 全项目代码审查 Round3（32 项缺陷 + 批 1→4 修复执行结果）
-- `doc/code_review_2026-08-04.md` — 全项目代码审查（P1×4 + P2×12 修复执行记录 + 五.3 补测试 5 项落地）
-- `doc/benchmark_suites_integration.md` — 基准套件（SAB / MLE-bench）集成说明
+- **设计文档总索引**：[`doc/README.md`](doc/README.md)（按「活动待办 / 代码审查 / 架构设计 / 研究调研 / 基准任务 / 历史归档」分类，含状态列）
+- `doc/unified_safety_rd_platform_architecture_spec.md` — 平台目标架构 spec（Draft v1）
 - `doc/benchmark_tasks.md` — **内置 18 个研究任务的逐任务详解**（定义/数据/模型/指标/基线/性能）
-- `doc/code_review_2026-08-05.md` — 全项目代码审查（C1 严重 / 缺陷1-11 / M1-M7 / L1-L7 发现 + 修复路线图 + 回归测试）
-- `doc/mea_harness_upgrade_plan.md` — **MEA（Manage-Execute-Audit）控制循环升级方案**（2026-08-05，已落地）
-- `doc/openrsi_openmle_integration_analysis.md` — **OpenRSI/OpenMLE 集成分析**（Phase A–D 落地记录，54KB）
+- `doc/code_review_STATUS.md` — **全量代码审查与修复状态（权威活文档，后续审查只更新此文件）**
 
 ---
 
-*最后更新：2026-08-05 · OpenRSI/OpenMLE 四阶段集成（`openmle_integration/` 包 + `IslandModel` 程序级岛模型 + 本地训练/奖励桥）+ MEA（Manage-Execute-Audit）控制循环落地 + 全项目代码审查（C1 严重项 / 缺陷1-11 / M1-M7 / L1-L7 发现与修复路线图）。详见 `doc/code_review_2026-08-05.md`、`doc/mea_harness_upgrade_plan.md`、`doc/openrsi_openmle_integration_analysis.md`。测试基线 245 passed。*
+*最后更新：2026-08-07 · 文档树重构（审查系列合并为 `doc/code_review_STATUS.md` 活文档、旧快照归档 `doc/archive/`、删除重复 `Deep_Dive_Direction2_3_RL_Extension.md`）。功能状态：OpenRSI/OpenMLE 四阶段集成 + MEA 控制循环落地 + 全项目代码审查（C1 / 缺陷1-11 / M1-M7 / L1-L7）已闭环，测试基线 252 passed。仍待闭环：缺陷7（程序进化无 REST 端点，已于 08-07 补后端+前端）、C1 沙箱层、L5（非整数标签，设计暂缓）。详见 `doc/code_review_STATUS.md`、`doc/mea_harness_upgrade_plan.md`、`doc/openrsi_openmle_integration_analysis.md`。*

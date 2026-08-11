@@ -13,6 +13,7 @@ from .executors import StubCapabilityExecutor
 from .kaggle_eval_executor import KaggleEvalExecutor
 from .audit_executor import AuditExecutor
 from .self_evolution_executor import SelfEvolutionExecutor
+from .sandbox_executor import SandboxResearchExecutor
 from ..executors import AttackExecutor
 from ..executors import EvalExecutor
 from ..executors import LessonExecutor
@@ -130,6 +131,36 @@ _CAPABILITIES: list[tuple[str, str, str, str, str, str, object | None]] = [
         "audit_report",
         AuditExecutor(),
     ),
+    (
+        "kaggle_eval_sandbox",
+        "kaggle_eval_sandbox",
+        "Kaggle 真实评测（Docker 沙箱）",
+        "在隔离容器内运行真实 Kaggle 评测",
+        "agent 模式的 kaggle_eval：研究命令在一次性 Docker 容器内执行（只读数据、无网络、掉权），"
+        "产出真实 EvalCompletedEvent。由 run_capability 在 AGENT_SANDBOX=1 时自动路由。",
+        "eval_report",
+        SandboxResearchExecutor(),
+    ),
+    (
+        "run_research_sandbox",
+        "run_research_sandbox",
+        "容器内通用研究执行",
+        "在隔离容器内运行任意研究命令",
+        "agent 把任意研究命令（research_cmd，容器内路径 /repo/...、/data/...）放进一次性 Docker 沙箱执行，"
+        "读回 result.json 并发出真实 EvalCompletedEvent。供 16 个非原生 tracked-only 任务接入容器内真跑。",
+        "eval_report",
+        SandboxResearchExecutor(),
+    ),
+    (
+        "text_cls_sandbox",
+        "text_cls_sandbox",
+        "文本分类评测（Docker 沙箱）",
+        "在隔离容器内运行真实文本分类评测",
+        "agent 模式的 text_classification：TF-IDF + 线性模型在一次性 Docker 容器内训练/评测（只读数据、"
+        "无网络），产出真实 EvalCompletedEvent。由 run_capability 在 AGENT_SANDBOX=1 时自动路由。",
+        "eval_report",
+        SandboxResearchExecutor(),
+    ),
 ]
 
 _PARAM_SCHEMA: dict[str, object] = {
@@ -181,7 +212,7 @@ def default_capability_registry() -> CapabilityRegistry:
     # Capabilities that are *extra* (demo / dual-loop) rather than one of the ten
     # R&D infrastructure layers — excluded from the infra-layer catalog but still
     # discoverable by an agent via list_all_capabilities().
-    _NON_INFRA = {"kaggle_eval", "layer_11_external_audit"}
+    _NON_INFRA = {"kaggle_eval", "layer_11_external_audit", "kaggle_eval_sandbox", "run_research_sandbox", "text_cls_sandbox"}
     for cid, lcode, lname, title, desc, atype, ex in _CAPABILITIES:
         is_infra = cid not in _NON_INFRA
         reg.register(

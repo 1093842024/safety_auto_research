@@ -87,16 +87,56 @@ def _stable_hash(tok: str) -> int:
     return int.from_bytes(hashlib.blake2b(tok.encode("utf-8"), digest_size=8).digest(), "little")
 
 
-def _embed(text: str, dim: int = 256) -> list[float]:
-    """Deterministic dependency-free embedding: hashed bag-of-tokens, L2-normalized."""
+def _embed_tokens(tokens: list[str], dim: int = 256) -> list[float]:
+    """Hashed bag-of-tokens over an *explicit* token list, L2-normalized."""
 
     vec = [0.0] * dim
-    for tok in re.findall(r"[a-z0-9一-鿿]+", text.lower()):
+    for tok in tokens:
         vec[_stable_hash(tok) % dim] += 1.0
     norm = sum(v * v for v in vec) ** 0.5
     if norm > 0:
         vec = [v / norm for v in vec]
     return vec
+
+
+def _embed(text: str, dim: int = 256) -> list[float]:
+    """Deterministic dependency-free embedding: hashed bag-of-tokens, L2-normalized."""
+
+    return _embed_tokens(re.findall(r"[a-z0-9一-鿿]+", text.lower()), dim=dim)
+
+
+# R6 fix: keys that are *run context*, not search dimensions. They are byte-identical
+# for every candidate in a population, so including them in the novelty fingerprint
+# only dilutes the signal — and ``data_dir`` is catastrophic: an absolute path
+# tokenizes into a dozen shared tokens (users/glennge/work/github/...), pushing the
+# cosine between two genuinely different models (gbm vs rf) up to 0.972, above the
+# 0.92 threshold. The whole population then gets rejected as "not novel" and the
+# evolutionary search silently degenerates to a single candidate.
+NON_SEARCH_KEYS: frozenset[str] = frozenset({
+    "data_dir", "preset", "threshold", "target", "id_col", "task_id", "run_id",
+    "output_dir", "work_dir", "seed", "_capability_id",
+})
+
+
+def novelty_tokens(params: dict[str, Any]) -> list[str]:
+    """Fingerprint tokens for novelty scoring: one ``key=value`` token per search dim.
+
+    Two changes vs. the old "tokenize the whole JSON blob" approach:
+      * run-context keys (:data:`NON_SEARCH_KEYS`) are dropped entirely;
+      * each surviving entry contributes exactly **one** token, so a long value
+        (a path, a list of dropped columns) cannot outweigh the model choice.
+
+    With the default surface (``fe`` / ``model`` / ``cv_folds``) a single-gene
+    difference now yields cosine ≈ 0.67, comfortably below the 0.92 threshold, while
+    an exact duplicate still scores 1.0.
+    """
+
+    toks: list[str] = []
+    for k in sorted(params):
+        if k in NON_SEARCH_KEYS:
+            continue
+        toks.append(f"{k}={json.dumps(params[k], sort_keys=True, ensure_ascii=False)}")
+    return toks
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -132,12 +172,17 @@ def parse_island_index(branch: str) -> int:
 
 
 def max_similarity(params: dict[str, Any], archived: list[dict[str, Any]]) -> float:
-    """Cosine similarity of this config to the most similar archived config."""
+    """Cosine similarity of this config to the most similar archived config.
+
+    R6 fix: scores over :func:`novelty_tokens` (search dimensions only) instead of the
+    raw ``candidate_text`` JSON blob. ``candidate_text`` is still the *identity* key
+    used for exact dedup elsewhere and is intentionally left untouched.
+    """
 
     if not archived:
         return 0.0
-    v = _embed(candidate_text(params))
-    return max(_cosine(v, _embed(candidate_text(a))) for a in archived)
+    v = _embed_tokens(novelty_tokens(params))
+    return max(_cosine(v, _embed_tokens(novelty_tokens(a))) for a in archived)
 
 
 # ---------------------------------------------------------------------- operators

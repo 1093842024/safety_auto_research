@@ -212,15 +212,25 @@ class KaggleEvalExecutor(StageExecutor):
         # ---- Multi-metric evaluation ----
         # Primary metric: configurable via params["eval_metric"] or objective_snapshot.
         # Defaults to "accuracy" for backward compatibility with titanic/spaceship.
+        # R10 fix: ``make_scorer(roc_auc_score, needs_proba=True, ...)`` is DEAD on
+        # modern scikit-learn — ``needs_proba`` was removed in 1.6, so it is forwarded
+        # as an unexpected kwarg to ``roc_auc_score`` and every fold raises. With
+        # ``cross_val_score``'s default ``error_score=np.nan`` the failure is swallowed
+        # and the metric silently returns ``[nan nan nan]`` (measured on sklearn 1.9.0),
+        # i.e. an AUC-optimised task produced a NaN fitness with no error surfaced.
+        # Use scikit-learn's own probability-aware scorer names instead, picking the
+        # binary vs. one-vs-rest variant from the actual label cardinality.
+        _n_classes = int(pd.Series(y_fit).nunique())
+        _auc_scorer = "roc_auc" if _n_classes <= 2 else "roc_auc_ovr"
         _SCORERS: dict[str, Any] = {
             "accuracy": "accuracy",
             "f1": make_scorer(f1_score, average="macro"),
             "f1_macro": make_scorer(f1_score, average="macro"),
             "precision": make_scorer(precision_score, average="macro", zero_division=0),
             "recall": make_scorer(recall_score, average="macro", zero_division=0),
-            "roc_auc": make_scorer(roc_auc_score, needs_proba=True, average="macro", multi_class="ovr"),
+            "roc_auc": _auc_scorer,
             "log_loss": "neg_log_loss",
-            "auc": make_scorer(roc_auc_score, needs_proba=True, average="macro", multi_class="ovr"),
+            "auc": _auc_scorer,
         }
         run = sdk.load_object(f"run:{stage_run.run_id}")
         obj = run.objective_snapshot or {}
@@ -259,6 +269,9 @@ class KaggleEvalExecutor(StageExecutor):
         op = derive_gate_op(params, obj)
         passed = (primary <= threshold) if op == "le" else (primary >= threshold)
         gate_passed = passed
+        # eval_metric is a display label, not a numeric value; carried in the event,
+        # and used as the key/name for the primary metric surfaced in `metrics`.
+        _eval_metric_name = _eval_metric
 
         metrics = {
             "accuracy": round(accuracy, 4),
@@ -268,6 +281,12 @@ class KaggleEvalExecutor(StageExecutor):
             "primary": round(primary, 4),
             "primary_std": round(primary_std, 4),
         }
+        # Surface the chosen primary metric *by its own name* so any eval_metric
+        # (f1 / auc / log_loss / precision / recall …) is carried explicitly in the
+        # event, not only under the generic "primary" key. accuracy / f1_macro are
+        # already present above, so guard against overwriting them.
+        if _eval_metric_name not in metrics:
+            metrics[_eval_metric_name] = round(primary, 4)
         # ---- held-out one-shot scoring (for the audit's generalization check) ----
         if X_ho is not None:
             model.fit(X_fit, y_fit)
@@ -280,8 +299,6 @@ class KaggleEvalExecutor(StageExecutor):
             metrics["heldout_frac"] = heldout_frac
         elif heldout_skipped:
             metrics["heldout_skipped"] = True
-        # eval_metric is a display label, not a numeric value; carried in the event.
-        _eval_metric_name = _eval_metric
 
         eval_suite_id = params.get("eval_suite_id", f"kaggle-{preset}-{target}")
         report_ref = f"kaggle-eval://{stage_run.stage_run_id}"
@@ -310,12 +327,16 @@ class KaggleEvalExecutor(StageExecutor):
                 "suite": eval_suite_id,
                 "gate_passed": gate_passed,
                 "accuracy": round(accuracy, 4),
+                "eval_metric": _eval_metric_name,
                 "model": model_name,
                 "preset": preset,
             },
         )
         sdk.record_metric(stage_run.run_id, "eval.accuracy", round(accuracy, 4), tags={"suite": eval_suite_id})
         sdk.record_metric(stage_run.run_id, "eval.f1_macro", round(f1, 4), tags={"suite": eval_suite_id})
+        # Record the metric that actually drove the gate, so the leaderboard / timeseries
+        # can plot the right series regardless of which eval_metric the task declares.
+        sdk.record_metric(stage_run.run_id, f"eval.{_eval_metric_name}", round(primary, 4), tags={"suite": eval_suite_id})
 
         return ExecResult(
             final_status=StageStatus.SUCCEEDED,

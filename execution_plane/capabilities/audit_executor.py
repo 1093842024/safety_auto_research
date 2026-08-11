@@ -62,6 +62,27 @@ def _status_from_score(score: float) -> str:
     return "missing"
 
 
+def evaluate_constraint(
+    claim: str,
+    judge: Callable[[str, str, str], float],
+    answer: str,
+    evidence: str,
+) -> tuple[float, str]:
+    """Re-score a single claim/constraint with the (deterministic) judge.
+
+    Shared by the F6 follow-up endpoint: a researcher supplies a *clarification*
+    that addresses one audit constraint, and this recomputes that constraint's
+    score/status without re-running the full outer audit. Mirrors the claim-support
+    scoring path inside :meth:`AuditExecutor.execute`.
+
+    Returns ``(score, status)`` where ``status`` is one of
+    ``verified`` / ``partial`` / ``missing`` (see :func:`_status_from_score`).
+    """
+
+    score = float(judge(answer, claim, evidence))
+    return score, _status_from_score(score)
+
+
 class AuditExecutor(StageExecutor):
     """Constraint-wise external audit of an inner-loop answer."""
 
