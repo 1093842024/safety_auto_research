@@ -1,0 +1,49 @@
+{
+  "sequences": [
+    {
+      "file": "markov_order1.bin",
+      "family": "markov_order1",
+      "size": 35086
+    },
+    {
+      "file": "markov_order2.bin",
+      "family": "markov_order2",
+      "size": 35086
+    },
+    {
+      "file": "periodic_clean.bin",
+      "family": "periodic_clean",
+      "size": 35086
+    },
+    {
+      "file": "periodic_noisy.bin",
+      "family": "periodic_noisy",
+      "size": 35086
+    },
+    {
+      "file": "nested_structure.bin",
+      "family": "nested_structure",
+      "size": 35086
+    },
+    {
+      "file": "math_recurrence.bin",
+      "family": "math_recurrence",
+      "size": 35086
+    },
+    {
+      "file": "multi_regime.bin",
+      "family": "multi_regime",
+      "size": 35086
+    },
+    {
+      "file": "run_length.bin",
+      "family": "run_length",
+      "size": 35086
+    },
+    {
+      "file": "incompressible.bin",
+      "family": "incompressible",
+      "size": 35086
+    }
+  ]
+}

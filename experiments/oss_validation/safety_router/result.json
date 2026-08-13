@@ -1,0 +1,8 @@
+{
+  "split": "data/test_public.npz",
+  "total_params": 2081,
+  "accuracy": 0.640625,
+  "unsafe_recall": 0.6875,
+  "safe_recall": 0.59375,
+  "passed_constraints": true
+}

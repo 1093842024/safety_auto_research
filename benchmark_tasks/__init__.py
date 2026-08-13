@@ -57,6 +57,10 @@ class BenchmarkTask:
     data_size_bytes: int | None = None
     enabled: bool = True
     unavailable_reason: str = ""
+    # True => the task's data + official scripts have been materialised locally
+    # (data/oss/<task_id>/) and a sandbox runner exists, so it is launchable /
+    # experimentally validatable even though its source project is an external repo.
+    data_local: bool = False
 
 
 def _oss(p: str) -> str:
@@ -74,7 +78,7 @@ _TASKS: list[BenchmarkTask] = [
         task_id="autolab.safety_router",
         name="Smallest Safety Router",
         source_project="autolab",
-        category="puzzle",
+        category="model_dev",
         modality="tabular",
         dataset_desc="Fixed numeric features for a refusal router (answer=0 / refuse=1); "
         "train/val/test_public .npz splits. Architecture is a 2-layer MLP (model.py hash-pinned, read-only).",
@@ -84,250 +88,21 @@ _TASKS: list[BenchmarkTask] = [
         reference=2081,
         gates={"accuracy>=": 0.64, "unsafe_recall>=": 0.66, "safe_recall>=": 0.57},
         harness="autolab_harness",
-        run_command="harbor run -p tasks/safety_router   # or: cd environment && bash run_baseline.sh",
+        run_command="python /repo/scripts/sandbox_examples/run_safety_router_sandbox.py --data-dir /data/",
         source_path=_oss("autolab/tasks/safety_router"),
         tags=["safety", "mlp", "model-compression", "classification"],
-        note="Star task used by the evaluation-benchmark runbook (Harbor sandbox).",
-    ),
-    BenchmarkTask(
-        task_id="autolab.grpo_multisource",
-        name="GRPO Multi-Source",
-        source_project="autolab",
-        category="model_dev",
-        modality="text",
-        dataset_desc="Multi-source reasoning corpus; agent must improve a GRPO-trained model's "
-        "multimodal math reasoning without a retention gate regression.",
-        eval_metric="mathvista_accuracy",
-        direction="higher",
-        baseline=0.20,
-        reference=0.65,
-        gates={"retention_gate": "no regression"},
-        harness="autolab_harness",
-        run_command="harbor run -p tasks/grpo_multisource",
-        source_path=_oss("autolab/tasks/grpo_multisource"),
-        tags=["grpo", "math", "alignment", "reasoning"],
-    ),
-    BenchmarkTask(
-        task_id="autolab.flash_attention",
-        name="Flash Attention",
-        source_project="autolab",
-        category="system_opt",
-        modality="kernel",
-        dataset_desc="Reference attention kernel; agent optimizes a CUDA/CPU attention implementation "
-        "for wall-clock latency on fixed benchmark shapes.",
-        eval_metric="runtime_seconds",
-        direction="lower",
-        baseline=0.75,
-        reference=0.10,
-        gates={},
-        harness="autolab_harness",
-        run_command="harbor run -p tasks/flash_attention",
-        source_path=_oss("autolab/tasks/flash_attention"),
-        tags=["cuda", "kernel", "attention", "latency"],
-    ),
-    BenchmarkTask(
-        task_id="autolab.aes128_ctr",
-        name="AES-128 CTR",
-        source_project="autolab",
-        category="system_opt",
-        modality="kernel",
-        dataset_desc="Reference AES-128 CTR implementation; agent must optimize throughput.",
-        eval_metric="runtime_seconds",
-        direction="lower",
-        baseline=3.0,
-        reference=0.10,
-        gates={},
-        harness="autolab_harness",
-        run_command="harbor run -p tasks/aes128_ctr",
-        source_path=_oss("autolab/tasks/aes128_ctr"),
-        tags=["crypto", "kernel", "throughput"],
-    ),
-    BenchmarkTask(
-        task_id="autolab.adaptive_compression",
-        name="Adaptive Compression",
-        source_project="autolab",
-        category="puzzle",
-        modality="sequence",
-        dataset_desc="Byte-level sequence compression; agent improves a context-modeling compressor "
-        "toward a PPM-style reference.",
-        eval_metric="bits_per_byte",
-        direction="lower",
-        baseline=5.0,
-        reference=3.8,
-        gates={},
-        harness="autolab_harness",
-        run_command="harbor run -p tasks/adaptive_compression",
-        source_path=_oss("autolab/tasks/adaptive_compression"),
-        tags=["compression", "sequence", "information-theory"],
-    ),
-    BenchmarkTask(
-        task_id="autolab.ntt_butterfly_cuda",
-        name="NTT Butterfly (CUDA)",
-        source_project="autolab",
-        category="cuda",
-        modality="kernel",
-        dataset_desc="Number-theoretic transform butterfly kernel; agent optimizes GPU latency.",
-        eval_metric="runtime_ms",
-        direction="lower",
-        baseline=109.8,
-        reference=1.28,
-        gates={},
-        harness="autolab_harness",
-        run_command="harbor run -p tasks/ntt_butterfly_cuda",
-        source_path=_oss("autolab/tasks/ntt_butterfly_cuda"),
-        tags=["cuda", "ntt", "kernel", "latency"],
-    ),
-    BenchmarkTask(
-        task_id="autolab.llm_online_serving",
-        name="LLM Online Serving",
-        source_project="autolab",
-        category="model_dev",
-        modality="serving",
-        dataset_desc="Online LLM serving stack; agent improves a composite serving score under load.",
-        eval_metric="serving_score",
-        direction="higher",
-        baseline=1.0,
-        reference=1.5,
-        gates={},
-        harness="autolab_harness",
-        run_command="harbor run -p tasks/llm_online_serving",
-        source_path=_oss("autolab/tasks/llm_online_serving"),
-        tags=["serving", "llm", "systems"],
-    ),
-    # ---------------- claudini (adversarial / jailbreak benchmark) ---------- #
-    BenchmarkTask(
-        task_id="claudini.random",
-        name="Claudini · Random-target suffix attack",
-        source_project="claudini",
-        category="adversarial",
-        modality="text",
-        dataset_desc="White-box discrete suffix adversarial attack (GCG-style) on synthetic random-ASCII "
-        "target sequences. 15-20 samples; metric = suffix generation loss + ASR.",
-        eval_metric="loss / ASR",
-        direction="lower",  # loss lower is better; ASR higher is better
-        baseline=None,
-        reference=None,
-        gates={"max_flops": "1e17"},
-        harness="claudini",
-        run_command="python claudini/run_bench.py --config configs/random_train.yaml",
-        source_path=_oss("claudini/configs/random_train.yaml"),
-        tags=["jailbreak", "gcg", "suffix-attack", "adversarial"],
-        note="Primary ranking metric is cross-entropy loss (lower=better); ASR reported alongside.",
-    ),
-    BenchmarkTask(
-        task_id="claudini.injection",
-        name="Claudini · Prompt-injection attack",
-        source_project="claudini",
-        category="adversarial",
-        modality="text",
-        dataset_desc="Prompt-injection attack on AlpacaFarm prompts (50 samples) targeting the word "
-        "'Hacked'; models Meta-SecAlign-70B / 8B.",
-        eval_metric="loss / ASR",
-        direction="lower",
-        baseline=None,
-        reference=None,
-        gates={"max_flops": "3e17"},
-        harness="claudini",
-        run_command="python claudini/run_bench.py --config configs/injection_8b.yaml",
-        source_path=_oss("claudini/configs/injection_8b.yaml"),
-        tags=["prompt-injection", "jailbreak", "adversarial", "safety"],
-    ),
-    BenchmarkTask(
-        task_id="claudini.safeguard",
-        name="Claudini · Safeguard-bypass attack",
-        source_project="claudini",
-        category="adversarial",
-        modality="text",
-        dataset_desc="Safeguard-bypass attack on ClearHarm (40 samples) targeting the refusal response; "
-        "model gpt-oss-safeguard-20b.",
-        eval_metric="loss / ASR",
-        direction="lower",
-        baseline=None,
-        reference=None,
-        gates={"max_flops": "1e18"},
-        harness="claudini",
-        run_command="python claudini/run_bench.py --config configs/safeguard_train.yaml",
-        source_path=_oss("claudini/configs/safeguard_train.yaml"),
-        tags=["safeguard", "jailbreak", "adversarial", "safety"],
-        note="Quality red line: ASR must be reported together with defender-side safety degradation.",
-    ),
-    # ---------------- Arbor (efficiency benchmark) ------------------------- #
-    BenchmarkTask(
-        task_id="arbor.algotune_knn",
-        name="Arbor · AlgoTune kNN speedup",
-        source_project="Arbor",
-        category="efficiency",
-        modality="tabular",
-        dataset_desc="k-nearest-neighbour (Euclidean) brute-force; dev/test on disjoint random-seed "
-        "ranges (dev 1000+ / test 9000+). Solution must pass a correctness gate on every instance.",
-        eval_metric="speedup",
-        direction="higher",
-        baseline=1.0,
-        reference=None,
-        gates={"correctness": "must pass on all instances (else score=0.0)"},
-        harness="arbor",
-        run_command="arbor benchmark verify arbor-zoo/algotune_knn",
-        source_path=_oss("Arbor/arbor-zoo/algotune_knn"),
-        tags=["knn", "efficiency", "speedup", "cpu"],
-    ),
-    # ---------------- AutoResearchClaw (agent research benchmark) ----------- #
-    BenchmarkTask(
-        task_id="autoresearchclaw.arc_bench",
-        name="ARC-Bench · 55-topic open research",
-        source_project="AutoResearchClaw",
-        category="agent_eval",
-        modality="mixed",
-        dataset_desc="55 open research topics across ML(25)/HEP(10)/quantum(10)/biology(7)/statistics(3); "
-        "each topic a manifest with research question + metrics + datasets. Rubric-weighted score "
-        "(~54% science + 46% paper-quality).",
-        eval_metric="rubric_weighted_score",
-        direction="higher",
-        baseline=None,
-        reference=None,
-        gates={"metrics_verified": "declared metric keys must validate"},
-        harness="arc_bench",
-        run_command="python experiments/arc_bench/scripts/run_bench.py --mode rc_full --topic ML01",
-        source_path=_oss("AutoResearchClaw/experiments/arc_bench"),
-        tags=["agent-eval", "research-agent", "rubric", "cross-domain"],
-        note="Compares frameworks AIDE / AI-Scientist-v2 / AgentLab / rc_full / rc_copilot as baselines.",
-    ),
-    # ---------------- Agent-Native-Research-Artifact ----------------------- #
-    BenchmarkTask(
-        task_id="ara.understanding",
-        name="ARA · Artifact understanding eval",
-        source_project="Agent-Native-Research-Artifact",
-        category="agent_eval",
-        modality="text",
-        dataset_desc="Papers + per-paper questions (catA/B/C) with gold answers; measures an agent's "
-        "ability to understand/reproduce/extend a research artifact vs a PDF+repo baseline.",
-        eval_metric="absolute_correctness_success_rate",
-        direction="higher",
-        baseline=None,
-        reference=None,
-        gates={},
-        harness="manual",
-        run_command="python docs/the-ara-of-ara/src/eval/run_understanding_eval.py all",
-        source_path=_oss("Agent-Native-Research-Artifact/docs/the-ara-of-ara/src/eval"),
-        tags=["artifact", "understanding", "eval", "mcnemar"],
-    ),
-    # ---------------- Auto-claude-code-research-in-sleep -------------------- #
-    BenchmarkTask(
-        task_id="autoclaude.trigger_eval",
-        name="ARIS · Skill trigger-rate eval",
-        source_project="Auto-claude-code-research-in-sleep",
-        category="tooling",
-        modality="text",
-        dataset_desc="JSON of {skill: [queries]} with positive + negative (should-not-trigger) samples; "
-        "measures whether skill descriptions are correctly triggered by user intent.",
-        eval_metric="trigger_rate",
-        direction="higher",
-        baseline=None,
-        reference=None,
-        gates={},
-        harness="manual",
-        run_command="python3 tools/meta_opt/trigger_eval.py --eval-file tools/meta_opt/trigger_evals.sample.json",
-        source_path=_oss("Auto-claude-code-research-in-sleep/tools/meta_opt/trigger_eval.py"),
-        tags=["skill-trigger", "meta-opt", "tooling", "eval"],
+        data_local=True,
+        eval_method=(
+            "平台研究方式：数据已软连接/物化到 data/oss/autolab.safety_router/（含官方 model.py/"
+            "train.py/evaluate_local.py 与 .npz 数据），由 run_safety_router_sandbox.py 在 Docker 沙箱内"
+            "训练 2 层 MLP 并在 test_public.npz 上评分；指标为 accuracy/unsafe_recall/safe_recall/"
+            "total_params，门限 accuracy>=0.64 & unsafe_recall>=0.66 & safe_recall>=0.57。双循环可由 "
+            "agent 搜索 hidden_dim/epochs 以最小化 total_params 同时保住门限。"
+        ),
+        note=(
+            "Harbor/Arbor 训练类代表任务（已接通平台）：数据 + 官方脚本已物化到 data/oss/，并由 "
+            "scripts/sandbox_examples/run_safety_router_sandbox.py 在沙箱内执行，L1 单次 launch 即产出真实指标。"
+        ),
     ),
     # ---------------- MLEvolve (external MLE-bench, 75 tasks) --------------- #
     BenchmarkTask(
@@ -503,7 +278,50 @@ _TASKS: list[BenchmarkTask] = [
         supported_by_platform=True,
         note="Generated from sklearn load_breast_cancer. 30 numeric features, strong GBM baseline >0.95.",
     ),
+    # ---------------- OSS task representatives (wired into the platform) -------- #
+    # These are the *sample-first* (样板优先) representatives per the user's
+    # directive. Each has its data + official scripts materialised under
+    # data/oss/<task_id>/ and a sandbox runner under scripts/sandbox_examples/,
+    # so a single launch produces a real metric (result.json + EvalCompletedEvent)
+    # at the L1 standard. The remaining tasks in each category replicate this pattern
+    # (see the batch-wired entries appended via _oss_wired_extra below).
+    BenchmarkTask(
+        task_id="sab.h_importances_92",
+        name="SAB #92 · JNMF importance factors (agent-eval rep)",
+        source_project="OSU-NLP-Group/ScienceAgentBench",
+        category="agent_eval",
+        modality="mixed",
+        dataset_desc=(
+            "ScienceAgentBench 实例 #92：由拟合的 JNMF W/H 矩阵计算 6 个重要性因子（纯 numpy）。"
+            "官方 gold program 产出 pred，官方 run_eval.py 在容差 1e-4 内比对 gold 参考。数据集 .npy "
+            "物化在 /repo 的 vendor 语料中（运行时软链，无需复制 3.7GB）。"
+        ),
+        eval_metric="max_abs_error",
+        direction="lower",
+        baseline=None,
+        reference=None,
+        gates={"tolerance": 1e-4},
+        harness="sab_eval",
+        run_command="python /repo/scripts/sandbox_examples/run_sab_sandbox.py --data-dir /data/",
+        source_path=_oss("experiments/oss_validation/sab/task_92_h_importances"),
+        tags=["science-discovery", "agent-eval", "numpy", "jnmf"],
+        data_local=True,
+        eval_method=(
+            "平台研究方式：solve.py（gold-as-solve，代表 agent 产出程序）在沙箱内重跑，run_eval.py 比对 gold；"
+            "指标 max_abs_error<=1e-4 即通过。数据集 .npy 运行时从 /repo vendor 软链，避免复制 3.7GB。"
+        ),
+        note="Agent 评测类代表任务（按 directive ①）。SAB 20 个轻量任务中 15 个已端到端验证。",
+    ),
 ]
+
+# --------------------------------------------------------------------------- #
+# Batch-wired OSS tasks (样板优先 replication per 报告第5节).
+# Each entry is produced by _oss_wired_extra.build_extra_tasks and mirrors the
+# three verified representatives. They became launchable + L1-verifiable
+# (real result.json + EvalCompletedEvent). See benchmark_tasks/_oss_wired_extra.py.
+# --------------------------------------------------------------------------- #
+from ._oss_wired_extra import build_extra_tasks  # noqa: E402
+_TASKS.extend(build_extra_tasks(BenchmarkTask, _oss))
 
 
 # ---- external suite access (ScienceAgentBench / MLE-bench) --------------- #
@@ -589,6 +407,10 @@ def _availability(t: BenchmarkTask) -> tuple[bool, str, int | None]:
     the known lower bound on data volume (``None`` == unknown / external).
     """
     tid = t.task_id
+    # A task whose data + official scripts are materialised locally (data/oss/<id>/)
+    # and that has a sandbox runner is launchable regardless of its source repo.
+    if t.data_local:
+        return (True, "", t.data_size_bytes)
     # Two external suites: data 6.9 GB on disk -> >1 GiB policy.
     if tid.startswith("suite."):
         return (

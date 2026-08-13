@@ -1,0 +1,51 @@
+{
+  "generated": "2026-08-12T02:03:44+00:00",
+  "mode": "codex+eval",
+  "requested_ids": [
+    67
+  ],
+  "summary": {
+    "n": 1,
+    "pass": 1,
+    "fail": 0,
+    "skipped": 0
+  },
+  "records": [
+    {
+      "instance_id": 67,
+      "task_dir": "task_67_CogSci_pattern_high_sim",
+      "codex": {
+        "stage": "codex_gen",
+        "returncode": 0,
+        "stdout_tail": [
+          "Implemented and ran `solve.py`.",
+          "",
+          "- Generates `pred_results/CogSci_pattern_high_sim_data_pred.csv`",
+          "- Reproduces the exact `ccobra` syllogism and response ordering",
+          "- Verified all `14 / 14` rounded prediction cells match gold",
+          "- `run_eval.py` could not run because `pandas` is not installed; equivalent validation passed independently",
+          "- Did not modify `run_eval.py` or gold files"
+        ],
+        "stderr_tail": [
+          "",
+          "- Generates `pred_results/CogSci_pattern_high_sim_data_pred.csv`",
+          "- Reproduces the exact `ccobra` syllogism and response ordering",
+          "- Verified all `14 / 14` rounded prediction cells match gold",
+          "- `run_eval.py` could not run because `pandas` is not installed; equivalent validation passed independently",
+          "- Did not modify `run_eval.py` or gold files",
+          "tokens used",
+          "4,765"
+        ]
+      },
+      "eval": {
+        "stage": "eval",
+        "success": true,
+        "returncode": 0,
+        "output_tail": [
+          "(1, '14 / 14')"
+        ]
+      },
+      "status": "pass"
+    }
+  ]
+}

@@ -52,3 +52,10 @@ Thumbs.db
 
 # Runtime cache
 cache/
+
+# OSS benchmark validation runtime artifacts (large, regenerable)
+**/.venvs/
+data/kaggle/**/result_*.json
+data/kaggle/F3_*REPORT*.md
+scripts/*.whl
+experiments/oss_validation/sab/task_*

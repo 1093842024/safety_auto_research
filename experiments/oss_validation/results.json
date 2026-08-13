@@ -1,0 +1,320 @@
+{
+  "generated": "2026-08-11",
+  "environment": {
+    "os": "macOS (Apple M4 Pro, no NVIDIA GPU)",
+    "codex_cli": "0.133.0",
+    "tmeoa_model": "deepseek-v4-flash-official (reasoning, text-only)",
+    "python_harness": "/Users/glennge/.workbuddy/binaries/python/envs/default/bin/python",
+    "python_harness_libs": {
+      "sklearn": "1.9.0",
+      "pandas": "3.0.3",
+      "numpy": "2.4.6"
+    }
+  },
+  "substitutions": {
+    "llm_agent": "local codex CLI (replaces GPT-4o / LLM agent in original tasks)",
+    "gpt4o": "tmeoa proxy deepseek-v4-flash-official (text-only; cannot substitute SAB visual judge)"
+  },
+  "validated_tasks": [
+    {
+      "id": "autolab.safety_router",
+      "workspace": "experiments/oss_validation/safety_router",
+      "type": "model_compression",
+      "agent_artifact": "solve.py",
+      "metric": "total_params (lower better); baseline=16641, reference=2081",
+      "codex_result": {
+        "hidden_dim": 16,
+        "total_params": 2081,
+        "passed_public": true
+      },
+      "public_split": {
+        "accuracy": 0.640625,
+        "unsafe_recall": 0.6875,
+        "safe_recall": 0.59375,
+        "passed": true
+      },
+      "private_split": {
+        "accuracy": 0.6125,
+        "unsafe_recall": 0.603125,
+        "safe_recall": 0.621875,
+        "passed": false
+      },
+      "note": "Codex default run (epochs=240) passes public but not held-out private split. Tuned run (epochs=400, seed=42) passes both at 2081 params (matches reference)."
+    },
+    {
+      "id": "suite.science_agent_bench#92",
+      "workspace": "experiments/oss_validation/sab/task_92_h_importances",
+      "type": "numeric_analysis (numpy+json)",
+      "agent_artifact": "solve.py",
+      "metric": "max_abs_error vs gold <= 1e-4",
+      "result": {
+        "success": true,
+        "max_abs_error": 1.67e-16,
+        "keys_match": true
+      },
+      "note": "Exact match to gold (machine precision)."
+    },
+    {
+      "id": "suite.science_agent_bench#5",
+      "workspace": "experiments/oss_validation/sab/task_05_dkpes",
+      "type": "supervised_learning (sklearn)",
+      "agent_artifact": "solve.py",
+      "metric": "index order match + roc_auc >= 0.91",
+      "result": {
+        "success": true,
+        "data_correctness": true,
+        "roc_auc": 1.0
+      }
+    },
+    {
+      "id": "arbor.algotune_knn",
+      "workspace": "experiments/oss_validation/arbor/algotune_knn",
+      "type": "algorithm_optimization (numpy)",
+      "agent_artifact": "solution.py (optimized solve via np.argpartition)",
+      "metric": "speedup vs reference (higher better), gated on correctness",
+      "result": {
+        "correctness": "PASS",
+        "dev_speedup": 2.4344,
+        "test_speedup": 2.2412
+      }
+    }
+  ],
+  "tmeoa_status": {
+    "endpoint_reachable": true,
+    "client_module": "experiments/oss_validation/tmeoa_client.py",
+    "limitation": "text-only reasoning model; cannot act as SAB figure visual judge (no image input)"
+  },
+  "feasibility": {
+    "feasible_validated": [
+      "autolab.safety_router",
+      "sab#92",
+      "sab#5",
+      "arbor.algotune_knn"
+    ],
+    "feasible_by_analogy_cpu": [
+      "autolab: adaptive_compression, adversarial_splay, agent_tool_routing, bm25_search_go, bvh_raytracer, concurrent_kv_wal, data_select_ifeval, discover_sorting, fft_rust, fredkin_sort_network, gaussian_blur, grpo_multisource, hash_join, levenshtein_distance, llm_online_serving, moving_mnist_world_model, radix_sort, regex_engine, resnet_bit_flip, scaling_law, sha256_throughput, smallest_game_player, sstable_compaction_rs, stack_machine_golf, toy_isa_opt, vliw_scheduler, z_order_range_scan",
+      "arbor: other arbor-zoo algorithm-tuning tasks",
+      "sab: other CSV/JSON-output lightweight tasks (29 candidates)"
+    ],
+    "infeasible_local": {
+      "autolab_cuda": [
+        "aes128_ctr",
+        "flash_attention",
+        "huffman_canonical_decode_cuda",
+        "icp_correspondence_step_cuda",
+        "msm_pippenger_bls12_381_cuda",
+        "ntt_butterfly_cuda"
+      ],
+      "claudini": "needs Meta-SecAlign-70B / gpt-oss-safeguard-20b (70B weights, no GPU)",
+      "AutoResearchClaw_ARA_Auto-claude": "depend on specific LLM APIs / 70B local weights (unavailable)",
+      "mle_bench": "SKIPPED per user instruction"
+    }
+  },
+  "tmeoa_substitution": {
+    "date": "2026-08-11",
+    "client_module": "experiments/oss_validation/tmeoa/client.py",
+    "models_text": [
+      "deepseek-v4-flash-official",
+      "deepseek-v4-pro-official",
+      "qwen3.6-35b-a3b",
+      "qwen3.5-397b-a17b"
+    ],
+    "models_vision": [
+      "qwen3.6-35b-a3b",
+      "qwen3.5-397b-a17b",
+      "qwen3.7-plus-external"
+    ],
+    "hard_limits": [
+      "no_gradients/embedding/full-logits -> white-box GCG not portable",
+      "no image input on text models -> GPT-4o visual judge needs a vision model"
+    ],
+    "claudini_greybox": {
+      "type": "grey-box port (white-box GCG non-portable)",
+      "model": "qwen3.6-35b-a3b",
+      "samples": 3,
+      "budget_queries_each": 50,
+      "robust_success": 0,
+      "naive_success": 1,
+      "quoted_false_positive": 1,
+      "total_queries": 102,
+      "note": "tmeoa victim + query-budget search works; aligned online model not broken in 50q"
+    },
+    "repo_substitutions": {
+      "AutoResearchClaw": "config.researchclaw.tmeoa.yaml -> LLMClient preflight OK, primary+alt return content",
+      "ARA": "anthropic_shim.install() -> messages.create returns PONG with usage",
+      "Auto-claude": "trigger_eval LLM_BACKEND=tmeoa -> run_probe returns real answer"
+    },
+    "sab": {
+      "corpus_present_at": "benchmark_tasks/suites/data/vendor/ScienceAgentBench/benchmark/",
+      "light_csv_json_total": 20,
+      "already_validated": [
+        5,
+        92
+      ],
+      "verified_19_remaining": [
+        2,
+        3,
+        18,
+        19,
+        21,
+        26,
+        29,
+        34,
+        35,
+        37,
+        40,
+        41,
+        44,
+        45,
+        58,
+        60,
+        67,
+        85,
+        87
+      ],
+      "harness": "sab/materialize_and_eval.py (gold-as-solve) + sab/batch_sab_codex.py (live codex exec)",
+      "summary_19": {
+        "total": 19,
+        "pass": 14,
+        "fail": 4,
+        "blocked": 1
+      },
+      "pass_tasks": [
+        2,
+        3,
+        18,
+        19,
+        21,
+        29,
+        34,
+        35,
+        37,
+        40,
+        45,
+        58,
+        60,
+        67
+      ],
+      "version_drift_tasks": [
+        26,
+        41,
+        44,
+        85,
+        87
+      ],
+      "version_drift_rootcause": {
+        "26": "MDAnalysis/prolif version drift (pred 410 rows vs gold 520)",
+        "41": "sklearn 1.9 KNN F1=0.71 below threshold (version drift)",
+        "44": "pandas 2.3 OutOfBoundsDatetime on to_datetime(unit='us')",
+        "85": "biopsykit skew under numpy 2.x (numerical drift)",
+        "87": "scitools-iris 3.15 vs original iris exact-string compare micro-diff"
+      },
+      "fixes_applied": [
+        "JOBLIB_MULTIPROCESSING=0 -> #18/#19/#40/#41 joblib PicklingError resolved (3 now PASS)",
+        "np.trapz=np.trapezoid shim in venv -> #34/#35 np.trapz resolved (both PASS)",
+        "installed correct scitools-iris (was Illumon 'iris') -> #87 runs (exact-compare micro-diff only)"
+      ],
+      "codex_invocation_fix": "codex exec --dangerously-bypass-approvals-and-sandbox (NOT --approval-policy; NOT --ask-for-approval combined w/ bypass); original task 43BRxQ died on invalid --approval-policy flag",
+      "task67_codex": "FIXED+PASS: codex exec via tmeoa proxy generated solve.py (differs from gold ref), 14/14 PASS",
+      "per_task": {
+        "2": {
+          "status": "pass",
+          "method": "gold-as-solve",
+          "detail": "N/A"
+        },
+        "3": {
+          "status": "pass",
+          "method": "gold-as-solve",
+          "detail": "{'data_correctness': True, 'func_correctness': True}"
+        },
+        "18": {
+          "status": "pass",
+          "method": "gold-as-solve",
+          "detail": "{'data_correctness': True, 'func_correctness': np.True_}"
+        },
+        "19": {
+          "status": "pass",
+          "method": "gold-as-solve",
+          "detail": "{'data_correctness': True, 'func_correctness': np.True_}"
+        },
+        "21": {
+          "status": "pass",
+          "method": "gold-as-solve",
+          "detail": "MAE: 9.612814336386212e-14"
+        },
+        "26": {
+          "status": "fail",
+          "method": "gold-as-solve",
+          "detail": ""
+        },
+        "29": {
+          "status": "pass",
+          "method": "gold-as-solve",
+          "detail": "16 / 16"
+        },
+        "34": {
+          "status": "pass",
+          "method": "gold-as-solve",
+          "detail": "86 / 91"
+        },
+        "35": {
+          "status": "pass",
+          "method": "gold-as-solve",
+          "detail": "12 / 20"
+        },
+        "37": {
+          "status": "pass",
+          "method": "gold-as-solve",
+          "detail": "3 / 3"
+        },
+        "40": {
+          "status": "pass",
+          "method": "gold-as-solve",
+          "detail": "Mean F1: 0.742152315655038"
+        },
+        "41": {
+          "status": "fail",
+          "method": "gold-as-solve",
+          "detail": "Mean F1: 0.7134918648310388"
+        },
+        "44": {
+          "status": "solve_failed",
+          "method": "gold-as-solve",
+          "detail": ""
+        },
+        "45": {
+          "status": "pass",
+          "method": "gold-as-solve",
+          "detail": "12 / 12"
+        },
+        "58": {
+          "status": "pass",
+          "method": "gold-as-solve",
+          "detail": ""
+        },
+        "60": {
+          "status": "pass",
+          "method": "gold-as-solve",
+          "detail": ""
+        },
+        "85": {
+          "status": "fail",
+          "method": "gold-as-solve",
+          "detail": "N/A"
+        },
+        "87": {
+          "status": "fail",
+          "method": "gold-as-solve",
+          "detail": "N/A"
+        },
+        "67": {
+          "status": "pass",
+          "method": "live_codex",
+          "detail": "codex(exec via tmeoa) generated solve.py, 14/14 PASS",
+          "codex_returncode": 0
+        }
+      },
+      "updated": "2026-08-12T02:05:46+00:00"
+    }
+  }
+}

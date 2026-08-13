@@ -1,0 +1,15 @@
+{
+  "task_id": "ara.understanding",
+  "eval_layer": "understanding",
+  "port": "L1 tmeoa substitution",
+  "sentinel": "this file marks the materialised data dir",
+  "note": "Subset of the ARA understanding eval. The full eval runs a multi-agent paper/artifact exploration pipeline (Claude sub-agents) and an Opus judge for absolute-correctness scoring. Here the 'agent' is the tmeoa LLM gateway (qwen3.6-35b-a3b) and scoring is a transparent contains-check/rubric proxy against gold key tokens (NOT the Opus judge). Paper PDFs/artifacts are NOT bundled (not present in the sibling repo), so this is a closed-book port: the model answers from parametric knowledge only. Honest proxy, see port_notes in result.json.",
+  "papers": [
+    {"paper_id": "adaptive-pruning", "categories": ["A", "B"]},
+    {"paper_id": "rebench-fix_embedding", "categories": ["A", "C"]}
+  ],
+  "questions_dir": "questions",
+  "total_questions_materialised": 30,
+  "default_sample": 5,
+  "source": "Agent-Native-Research-Artifact/docs/the-ara-of-ara/src/eval"
+}

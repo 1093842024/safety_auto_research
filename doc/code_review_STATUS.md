@@ -1054,3 +1054,36 @@ text 能力经真实 `SandboxResearchExecutor.execute` 在 docker 硬隔离下**
 | B：agent_mode / agent_protocol / api_endpoints / audit_followup / control_plane / control_plane_structure / execution_plane / mea_framework | 108 passed（15 subtests） |
 | C：openmle_phase_a / bc / d / d_ext / p2_fixes / phase2 / platform_contracts / playbook / program_evolution_endpoint / research_records | 88 passed |
 | **合计** | **328 passed, 0 failed**（R1–R30 基线 317 + 本轮新增 11） |
+
+---
+
+## 附录 C-4. OSS 任务实验验证（codex 替代 LLM Agent · tmeoa 替代 GPT-4o，2026-08-11）
+
+按用户要求对精选外部 OSS 研究任务做「数据收集 + 实验验证」：本机 `codex` CLI 替代原任务 LLM agent（生成解题程序），tmeoa 代理 `deepseek-v4-flash-official` 替代 GPT-4o，本地自带 eval 脚本打分。
+
+### 关键工程事实
+- `python`/`python3`（PATH）= 裸 managed 3.13.12，**无 sklearn/pandas**；managed venv（`.../envs/default/bin/python`）含 sklearn 1.9.0 / pandas 3.0.3 / numpy 2.4.6。→ 统一改为 **codex 只生成程序（agent 角色），harness 用 managed venv 跑分**（更贴合 SAB 原设计）。
+- codex 须在 git 仓库内运行（否则 `Not inside a trusted directory`）。workspace 全部置于 `safety_auto_research/experiments/oss_validation/`。
+- macOS 无 `timeout`；tmeoa `deepseek-v4-flash-official` 是**推理模型**，须 `max_tokens≥2000` 并读 `choices[0].message.content`。
+- `benchmark_tasks/suites/data/vendor/ScienceAgentBench/` 实际含**完整 benchmark**（3.7GB：datasets/eval_programs/gold_programs），`science_agent_bench.py` 注释「数据未分发」已过时。
+
+### 已跑通（4 个任务，覆盖 3 个 suite）
+| 任务 | 产出 | 评分 | 状态 |
+|---|---|---|---|
+| autolab.safety_router | solve.py, hidden=16→2081 参数 | 公开 split 过 / 私有 split 未过（acc 0.6125，泛化缺口） | ⚠️ |
+| SAB #92 (JNMF) | solve.py (numpy+json) | 与 gold 误差 1.67e-16，全键对 | ✅ |
+| SAB #5 (DKPES RF) | solve.py (sklearn) | AUROC=1.0 ≥0.91 | ✅ |
+| arbor.algotune_knn | solution.py (`np.argpartition`) | 正确 PASS；dev 2.43x / held-out 2.24x | ✅ |
+
+> safety_router 私有 split 未过是真实泛化发现：调参可解（hidden=16, epochs=400, seed=42 → 私有 acc 0.656，仍 2081 参数匹配 reference）。
+
+### 可行性结论
+- **可行（已验证/可类推）**：autolab 其余 CPU 任务（~27 个，如 adaptive_compression/levenshtein_distance/hash_join…）；arbor-zoo 算法调优；SAB 102 任务中 29 个轻量候选（CSV/JSON 产出类可直接类推，部分需 ccobra/biopsykit）。
+- **不可行（本地）**：autolab CUDA 任务 6 个（aes128_ctr/flash_attention/ntt_butterfly_cuda… 需 GPU）；claudini（需 70B 权重 Meta-SecAlign-70B/gpt-oss-safeguard-20b）；AutoResearchClaw/ARA/Auto-claude（需特定大模型 API/权重）；mle_bench 按用户要求跳过。
+- **tmeoa 限制**：纯文本推理模型，**无法忠实替代 SAB figure 的 GPT-4o visual judge**（无图像输入）。非 figure 任务（#92/#5）不需要 GPT-4o，本地确定性评分即可。
+
+### 产物
+- `experiments/oss_validation/REPORT_2026-08-11.md`（完整报告）
+- `experiments/oss_validation/results.json`（结构化结果）
+- `experiments/oss_validation/tmeoa_client.py`（GPT-4o 替代客户端）
+- 各任务 workspace：`safety_router/`、`sab/task_92_h_importances/`、`sab/task_05_dkpes/`、`arbor/algotune_knn/`（均含 solve.py/solution.py + run_eval/eval + result.json）

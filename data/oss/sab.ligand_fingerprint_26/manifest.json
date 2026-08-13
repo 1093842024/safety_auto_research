@@ -1,0 +1,15 @@
+{
+  "task_id": "sab.ligand_fingerprint_26",
+  "sab_instance_id": 26,
+  "kind": "sentinel",
+  "note": "Heavy data stays read-only in the SAB vendor corpus; the sandbox runner symlinks per-task datasets from there. This dir is a contract sentinel only.",
+  "vendor_corpus": "benchmark_tasks/suites/data/vendor/ScienceAgentBench/benchmark",
+  "gold_program": "benchmark_tasks/suites/data/vendor/ScienceAgentBench/benchmark/gold_programs/ligand_fingerprint.py",
+  "eval_program": "benchmark_tasks/suites/data/vendor/ScienceAgentBench/benchmark/eval_programs/eval_fingerprint.py",
+  "domain": "Computational Chemistry",
+  "external_deps_not_in_sandbox_image": [
+    "MDAnalysis",
+    "prolif"
+  ],
+  "run_command": "python /repo/scripts/sandbox_examples/run_sab_sandbox.py --data-dir /data/ --task sab.ligand_fingerprint_26"
+}

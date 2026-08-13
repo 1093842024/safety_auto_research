@@ -1,0 +1,5 @@
+split: test
+correctness: PASS
+reference_median_s: 0.058702
+solution_median_s: 0.025925
+score: 2.2643

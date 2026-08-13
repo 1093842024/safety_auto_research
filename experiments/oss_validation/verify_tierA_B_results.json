@@ -1,0 +1,336 @@
+{
+  "image": "safety-research-sandbox:full",
+  "sab": [
+    {
+      "task_id": "sab.bio_eventrelated_analyze_29",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 0.0,
+      "passed": true,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: 16 / 16"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.cft_37",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 0.0,
+      "passed": true,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: 3 / 3"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.cogsci_pattern_high_sim_67",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 0.0,
+      "passed": true,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: 14 / 14"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.deforestation_21",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 0.0,
+      "passed": true,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: MAE: 7.528107612832576e-15"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.dili_models_ecfp_rf_18",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 0.0,
+      "passed": true,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: {'data_correctness': True, 'func_correctness': True}"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.dili_models_ecfp_svm_19",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 0.0,
+      "passed": true,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: {'data_correctness': True, 'func_correctness': True}"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.hrv_analyze_34",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 0.0,
+      "passed": true,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: 86 / 91"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.imu_44",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 1.0,
+      "passed": false,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "solve.py failed:   File \"/usr/local/lib/python3.11/site-packages/pandas/core/tools/datetimes.py\", line 523, in _to_datetime_with_unit |     raise OutOfBoundsDatetime( | pandas._libs.tslibs.np_datetime.OutOfBoundsDatetime: cannot convert input with unit 'us'",
+        "eval: eval_run:FileNotFoundError:[Errno 2] No such file or directory: 'pred_results/imu_pred.json'"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.ligand_fingerprint_26",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 1.0,
+      "passed": false,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: eval_run:ValueError:Found input variables with inconsistent numbers of samples: [520, 410]"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.mat_feature_select_2",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 1.0,
+      "passed": false,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: N/A"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.md_knn_41",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 1.0,
+      "passed": false,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: Mean F1: 0.7134918648310388"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.md_rf_40",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 0.0,
+      "passed": true,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: Mean F1: 0.7410444716442268"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.nvc_accuracies_60",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 0.0,
+      "passed": true,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.nvc_gen_ind_58",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 0.0,
+      "passed": true,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.polynomial_fit_87",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 1.0,
+      "passed": false,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: N/A"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.predict_bulk_modulus_3",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 0.0,
+      "passed": true,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: {'data_correctness': True, 'func_correctness': True}"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.questionnaire_45",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 0.0,
+      "passed": true,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: 12 / 12"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.rrv_analyze_35",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 0.0,
+      "passed": true,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: 12 / 20"
+      ],
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "sab.saliva_85",
+      "group": "sab",
+      "returncode": 0,
+      "primary": 1.0,
+      "passed": false,
+      "eval_metric": "max_abs_error",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": [
+        "eval: N/A"
+      ],
+      "stderr_tail": ""
+    }
+  ],
+  "custom_torch": [
+    {
+      "task_id": "custom.4_2",
+      "group": "custom_torch",
+      "returncode": 0,
+      "primary": 1.0,
+      "passed": true,
+      "eval_metric": "top1_accuracy",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": null,
+      "stderr_tail": ""
+    },
+    {
+      "task_id": "custom.4_3",
+      "group": "custom_torch",
+      "returncode": 0,
+      "primary": 1.0,
+      "passed": true,
+      "eval_metric": "accuracy",
+      "isolation": {
+        "data_readonly": true,
+        "network_blocked": true
+      },
+      "notes": null,
+      "stderr_tail": ""
+    }
+  ]
+}

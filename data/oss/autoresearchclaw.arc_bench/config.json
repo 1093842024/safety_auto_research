@@ -1,0 +1,30 @@
+{
+  "task_id": "autoresearchclaw.arc_bench",
+  "port": "L1 tmeoa substitution (single-topic ML01)",
+  "sentinel": "this file marks the materialised data dir for the ML01 topic",
+  "topic": "ML01",
+  "title": "Dropout regularization strategies on shallow tabular MLPs",
+  "research_question": "Does the choice of dropout variant (standard / spatial / variational) matter more for probability calibration than for test accuracy on tabular classification with shallow MLPs?",
+  "conditions": [
+    "no_dropout",
+    "standard_dropout_p30",
+    "standard_dropout_p50",
+    "spatial_dropout_p30",
+    "mc_dropout_p30_T20"
+  ],
+  "metrics": [
+    {"name": "test_accuracy", "direction": "maximize", "range": [0.0, 1.0]},
+    {"name": "ece", "direction": "minimize", "range": [0.0, 1.0]},
+    {"name": "nll", "direction": "minimize", "range": [0.0, 10.0]},
+    {"name": "brier", "direction": "minimize", "range": [0.0, 1.0]}
+  ],
+  "datasets": ["breast_cancer", "wine", "digits"],
+  "hypotheses": [
+    {"id": "H1", "statement": "Variational / MC dropout produces lower ECE than standard element-wise dropout on at least 2 of 3 tabular classification benchmarks, averaged over >=5 seeds."},
+    {"id": "H2", "statement": "Test-set accuracy differs by <2 absolute percentage points between dropout variants on datasets where all methods exceed 95% accuracy."},
+    {"id": "H3", "statement": "The no-dropout control is strictly worse than at least one dropout variant in ECE on at least 2 of 3 datasets."}
+  ],
+  "rubric_weight_summary": {"code": 2, "exec": 2, "results": 3},
+  "note": "Single-topic L1 slice of the 55-topic ARC-Bench. In the original bench a research framework (AIDE / rc_full / rc_copilot / AI-Scientist-v2 / AgentLab) executes real code over >=5 seeds and is rubric-judged. Here the 'research agent' is the tmeoa LLM gateway (qwen3.6-35b-a3b): it is prompted with the manifest and must produce a structured result (per-condition metric numbers + per-hypothesis verdicts + writeup). The runner computes a real rubric_weighted_score proxy from that output (metric coverage x condition coverage x hypothesis coverage x plausibility), NOT the full manual rubric. See port_notes in result.json.",
+  "source": "AutoResearchClaw/experiments/arc_bench"
+}

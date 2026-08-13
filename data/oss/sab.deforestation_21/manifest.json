@@ -1,0 +1,14 @@
+{
+  "task_id": "sab.deforestation_21",
+  "sab_instance_id": 21,
+  "kind": "sentinel",
+  "note": "Heavy data stays read-only in the SAB vendor corpus; the sandbox runner symlinks per-task datasets from there. This dir is a contract sentinel only.",
+  "vendor_corpus": "benchmark_tasks/suites/data/vendor/ScienceAgentBench/benchmark",
+  "gold_program": "benchmark_tasks/suites/data/vendor/ScienceAgentBench/benchmark/gold_programs/deforestation.py",
+  "eval_program": "benchmark_tasks/suites/data/vendor/ScienceAgentBench/benchmark/eval_programs/eval_deforestation.py",
+  "domain": "Geographical Information Science",
+  "external_deps_not_in_sandbox_image": [
+    "geopandas"
+  ],
+  "run_command": "python /repo/scripts/sandbox_examples/run_sab_sandbox.py --data-dir /data/ --task sab.deforestation_21"
+}

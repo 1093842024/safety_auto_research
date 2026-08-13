@@ -28,15 +28,18 @@ import socket
 import numpy as np
 
 try:
-    import librosa
-    import torch
-    import torch.nn as nn
-    import torch.nn.functional as F
-    from torch.utils.data import DataLoader, Dataset, random_split
+    import librosa  # noqa: F401
     _OK = True
 except Exception as _e:  # pragma: no cover
     _OK = False
     _ERR = _e
+
+# torch is always present in the sandbox image; import it at module load so the
+# model class below (which references torch.nn) can be defined unconditionally.
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader, Dataset, random_split
 
 
 def probe_readonly(data_dir: str) -> bool:

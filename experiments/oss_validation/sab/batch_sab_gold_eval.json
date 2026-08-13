@@ -1,0 +1,254 @@
+{
+  "generated": "2026-08-12T07:41:39+00:00",
+  "method": "gold-as-solve (reference program) -> run_eval.py",
+  "requested_ids": [
+    87
+  ],
+  "summary": {
+    "n_total": 18,
+    "pass": 17,
+    "fail": 1,
+    "blocked": 0
+  },
+  "records": [
+    {
+      "instance_id": 2,
+      "task_dir": "task_02_mat_feature_select",
+      "solve": {
+        "ok": true,
+        "returncode": 0
+      },
+      "grade": {
+        "success": true,
+        "detail": "N/A"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 3,
+      "task_dir": "task_03_predict_bulk_modulus",
+      "solve": {
+        "ok": true,
+        "returncode": 0
+      },
+      "grade": {
+        "success": true,
+        "detail": "{'data_correctness': True, 'func_correctness': True}"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 18,
+      "task_dir": "task_18_DILI_models_ECFP_RF",
+      "solve": {
+        "ok": true,
+        "returncode": 0
+      },
+      "grade": {
+        "success": true,
+        "detail": "{'data_correctness': True, 'func_correctness': np.True_}"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 19,
+      "task_dir": "task_19_DILI_models_ECFP_SVM",
+      "solve": {
+        "ok": true,
+        "returncode": 0
+      },
+      "grade": {
+        "success": true,
+        "detail": "{'data_correctness': True, 'func_correctness': np.True_}"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 21,
+      "task_dir": "task_21_deforestation",
+      "solve": {
+        "ok": true,
+        "returncode": 0
+      },
+      "grade": {
+        "success": true,
+        "detail": "MAE: 9.612814336386212e-14"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 26,
+      "task_dir": "task_26_ligand_fingerprint",
+      "solve": {
+        "ok": true,
+        "returncode": 0,
+        "interpreter": "/Users/glennge/work/github/AI_research/safety_auto_research/experiments/oss_validation/sab/.venvs/t26/bin/python"
+      },
+      "grade": {
+        "success": true,
+        "detail": "{'data_correctness': True, 'func_correctness': True}"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 29,
+      "task_dir": "task_29_bio_eventrelated_analyze",
+      "solve": {
+        "ok": true,
+        "returncode": 0
+      },
+      "grade": {
+        "success": true,
+        "detail": "16 / 16"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 34,
+      "task_dir": "task_34_HRV_analyze",
+      "solve": {
+        "ok": true,
+        "returncode": 0
+      },
+      "grade": {
+        "success": true,
+        "detail": "86 / 91"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 35,
+      "task_dir": "task_35_RRV_analyze",
+      "solve": {
+        "ok": true,
+        "returncode": 0
+      },
+      "grade": {
+        "success": true,
+        "detail": "12 / 20"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 37,
+      "task_dir": "task_37_cft",
+      "solve": {
+        "ok": true,
+        "returncode": 0
+      },
+      "grade": {
+        "success": true,
+        "detail": "3 / 3"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 40,
+      "task_dir": "task_40_MD_RF",
+      "solve": {
+        "ok": true,
+        "returncode": 0
+      },
+      "grade": {
+        "success": true,
+        "detail": "Mean F1: 0.742152315655038"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 41,
+      "task_dir": "task_41_MD_KNN",
+      "solve": {
+        "ok": true,
+        "returncode": 0,
+        "interpreter": "/Users/glennge/work/github/AI_research/safety_auto_research/experiments/oss_validation/sab/.venvs/t41/bin/python"
+      },
+      "grade": {
+        "success": true,
+        "detail": "Mean F1: 0.7327536454926705"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 44,
+      "task_dir": "task_44_imu",
+      "solve": {
+        "ok": true,
+        "returncode": 0,
+        "interpreter": "/Users/glennge/work/github/AI_research/safety_auto_research/experiments/oss_validation/sab/.venvs/t44_85/bin/python"
+      },
+      "grade": {
+        "success": true,
+        "detail": "3 / 3"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 45,
+      "task_dir": "task_45_questionnaire",
+      "solve": {
+        "ok": true,
+        "returncode": 0
+      },
+      "grade": {
+        "success": true,
+        "detail": "12 / 12"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 58,
+      "task_dir": "task_58_nvc_gen_ind",
+      "solve": {
+        "ok": true,
+        "returncode": 0
+      },
+      "grade": {
+        "success": true,
+        "detail": ""
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 60,
+      "task_dir": "task_60_nvc_accuracies",
+      "solve": {
+        "ok": true,
+        "returncode": 0
+      },
+      "grade": {
+        "success": true,
+        "detail": ""
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 85,
+      "task_dir": "task_85_saliva",
+      "solve": {
+        "ok": true,
+        "returncode": 0,
+        "interpreter": "/Users/glennge/work/github/AI_research/safety_auto_research/experiments/oss_validation/sab/.venvs/t44_85/bin/python"
+      },
+      "grade": {
+        "success": true,
+        "detail": "N/A"
+      },
+      "status": "pass"
+    },
+    {
+      "instance_id": 87,
+      "task_dir": "task_87_polynomial_fit",
+      "solve": {
+        "ok": true,
+        "returncode": 0,
+        "interpreter": "/Users/glennge/work/github/AI_research/safety_auto_research/experiments/oss_validation/sab/.venvs/t87/bin/python"
+      },
+      "grade": {
+        "success": false,
+        "detail": "N/A"
+      },
+      "status": "fail"
+    }
+  ]
+}

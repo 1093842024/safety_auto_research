@@ -1,0 +1,21 @@
+{
+  "papers": [
+    {
+      "paper_id": "adaptive-pruning",
+      "benchmark": "paperbench",
+      "artifact_dir": "code/artifacts/adaptive-pruning",
+      "pdf_path": "code/pdfs/adaptive-pruning.pdf",
+      "rubric_path": "code/eval/rubrics/adaptive-pruning.json",
+      "categories": ["A", "B"]
+    },
+    {
+      "paper_id": "rebench-fix_embedding",
+      "benchmark": "rebench",
+      "artifact_dir": "code/artifacts/rebench-fix_embedding",
+      "baseline_dir": "code/artifacts/rebench-repo/ai_rd_fix_embedding",
+      "categories": ["A", "C"]
+    }
+  ],
+  "total": 2,
+  "note": "Subset of the full ARA paper_registry.json, materialised for the L1 tmeoa understanding port. Full registry has 31 papers across 5 benchmarks."
+}
