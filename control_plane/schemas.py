@@ -323,3 +323,28 @@ class FlywheelRequest(BaseModel):
     eval_metric: str = "accuracy"
     heldout_frac: float = Field(default=0.3, ge=0.1, le=0.5)
     heldout_seed: int = 42
+
+
+class FlywheelScheduleRequest(BaseModel):
+    """Body for ``POST .../flywheel/schedule`` — event-driven auto-trigger.
+
+    The scheduler polls ``badcase_path`` (a CSV whose row count == accumulated badcase
+    samples) every ``poll_interval_sec`` and, when ``count >= threshold``, runs a
+    full ``badcase_retrain`` iteration using the same fields as :class:`FlywheelRequest`.
+    """
+
+    badcase_path: str
+    threshold: int = Field(default=50, ge=1)
+    poll_interval_sec: float = Field(default=30.0, ge=1.0, le=3600.0)
+    auto_clear_after_trigger: bool = True
+    preset: str = "titanic"
+    target: str | None = None
+    model: str = "gbm"
+    fe: str = "basic"
+    drop_cols: list[str] = Field(default_factory=list)
+    data_dir: str | None = None
+    badcase_ratio: float = Field(default=0.3, ge=0.05, le=0.9)
+    regression_tol: float = Field(default=0.0, ge=0.0)
+    eval_metric: str = "accuracy"
+    heldout_frac: float = Field(default=0.3, ge=0.1, le=0.5)
+    heldout_seed: int = 42

@@ -1157,3 +1157,48 @@ text 能力经真实 `SandboxResearchExecutor.execute` 在 docker 硬隔离下**
 - 前端 `FlywheelPanel.tsx`（侧栏「🔄 数据飞轮」）+ client.ts `createWorkflowRun`/`runFlywheel`/`getFlywheelIterations`。
 - `scripts/run_flywheel_demo.py` e2e demo：真实 Titanic 一轮飞轮，实证回归门（`ratio=0.10` ACCEPT / `0.15,0.20` REJECT——灾难性遗忘被硬护栏拦住）。
 - 测试 `test_flywheel.py` 4 例 + `test_control_plane_structure.py` 路由表更新；受影响套件 62 passed + tsc 0 errors。
+
+### D.8 B 飞轮型 Phase 1.6（2026-09-08，非审查项，自动标注层 + 事件驱动调度）
+
+承接 `doc/auto_research_task_taxonomy.md` §七.1 + §十。一次性补齐飞轮四步闭环中缺失的第 2 步（自动标注），并把"人工按按钮跑一轮"升级为"事件驱动调度"。
+
+**新增后端模块**
+
+| 组件 | 位置 | 说明 |
+|---|---|---|
+| Provider 目录 | `execution_plane/llm/providers.py` | 默认 `http://v2.open.venus.oa.com/llmproxy`，OpenAI 兼容；`MODEL_CATALOG` 10 个模型 id 与用户列表逐字一致；`VENUS_*` env 变量覆盖；`to_dict()` 末 4 位掩码 |
+| LLM client | `execution_plane/llm/client.py` | 零依赖（仅 `urllib.request`），HTTP 401 / JSON 损坏 / 字段缺失 → `LLMClientError` |
+| 自动标注 | `execution_plane/llm/auto_label.py` | 三级 label 解析（严格 JSON → `label: X` → 首非空 token）；`label_rows(rows, ..., batch_size=1)` 一行一调 |
+| 能力执行器 | `execution_plane/capabilities/auto_label_executor.py` | 注册为 `auto_label`；合并原 label（LLM 返回空时保留原值）；输出带 target 列的 CSV；发真实 `EvalCompletedEvent` |
+| 后端调试端点 | `control_plane/routers/llm.py` | `/agent/llm/{models,provider,chat,test-label}`；响应中 `provider` 永远走掩码形式 |
+| 调度器 | `control_plane/routers/flywheel.py`（`_scheduler_loop` + 3 个端点） | `POST/GET/DELETE /workflow-runs/{id}/flywheel/schedule`；daemon 线程 + `threading.Event`；single-flight；iteration 异常被 inner try/except 捕获（loop 不死）；单实例 `_SchedulerState`（loop 与 `_schedulers` 共享） |
+
+**前端模块**
+
+- `frontend/src/views/LlmPanel.tsx`：Provider 表单 + 10 模型 select + 单轮 chat + 批量标注（可编辑行）；侧栏新增「🧠 LLM 标注调试」。
+- `frontend/src/views/FlywheelPanel.tsx` 新增「⏰ 事件驱动调度」卡片：badcase_path / threshold / poll_interval_sec / auto_clear_after_trigger 表单 + ▶启动/■停止/刷新按钮；调度运行时每 3s 拉新状态，自动触发与人工迭代同曲线展示。
+- `frontend/src/App.tsx` + `client.ts`：`llm` 视图 + LLM/scheduler API 类型与方法；`FlywheelScheduleConfig as unknown as Record<string, unknown>` 修复 ts2352。
+
+**修复（Phase 1.6 实施过程中暴露的 3 个真问题）**
+
+- 🟠 `_SchedulerState` 双实例 bug：loop 参数与 `_schedulers[id]` 之前各持一份，loop 写状态没人读，`last_check_at=0.0` 永远不变。改为先构造 state、再构造 thread、最后 `state.thread = thread`（late-bind），全程同一对象。
+- 🟠 调度器触发前未 `start_workflow_run` 导致 `ConflictError: stages can only be created for a running workflow`（与一次性 `run_flywheel_iteration` 对齐：在 `try orchestrator.run_capability` 之前先 `try svc.start_workflow_run(run_id)`）。
+- 🟡 测试 badcase CSV 假数据（`{"text": "..."}`）让 `_build_xy` 在 titanic Name 列上抛 KeyError，调度看似沉默（不增 trigger_count）。测试改为真 titanic schema + 用 `data_dir=/no/such/path` 强制失败（验证异常不杀线程）。
+
+**测试**
+
+- `tests/test_llm.py`（13 例）：ProviderConfig 优先链 + chat_url 幂等 + api_key 掩码 + 10 模型目录逐字；`LLMClient.chat` 正常 / 401 / JSON 损坏；`_parse_label_response` 三级；`label_rows` 一行一调 + 单行错误继续；`/agent/llm/{models,provider,chat,test-label}` 端点 4 例。
+- `tests/test_flywheel_scheduler.py`（3 例）：start/status/stop 端到端 + 二次 start 409 + 异常不杀线程。
+- `test_control_plane_structure.py` 路由表新增 5 条路由；method 顺序 `("DELETE","GET","POST")`（FastAPI 声明序）。
+- `test_capabilities.py::test_protocol_exposes_capabilities` 能力数 19→20。
+- `scripts/run_auto_label_demo.py`：e2e demo（auto_label 12 行 + 调度 auto-fire）。
+
+**回归**：6 批合计 **479 passed**，tsc 0 errors。
+
+**坑（勿再踩）**
+
+- `_SchedulerState` 必须**单实例**。
+- 调度器必须先 `start_workflow_run` 再 `run_capability`。
+- `poll_interval_sec < 1.0` 被 Pydantic `ge=1.0` 拒（422）。
+- badcase CSV 必须用真 titanic schema，否则 executor 在 `_build_xy` 失败不增 trigger_count。
+- 并行 Edit 同一文件多次 `replace_all=false` 可能丢失；最终文件只保留一部分（需重读再补 Edit）。

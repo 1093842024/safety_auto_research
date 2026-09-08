@@ -29,6 +29,7 @@ from safety_auto_research.control_plane.routers import build_evolution_router
 from safety_auto_research.control_plane.routers import build_experiments_router
 from safety_auto_research.control_plane.routers import build_flywheel_router
 from safety_auto_research.control_plane.routers import build_integrity_router
+from safety_auto_research.control_plane.routers import build_llm_router
 from safety_auto_research.control_plane.routers import build_loops_router
 from safety_auto_research.control_plane.routers import build_observability_router
 from safety_auto_research.control_plane.routers import build_research_records_router
@@ -50,6 +51,7 @@ ROUTER_BUILDERS = (
     build_research_records_router,
     build_experiments_router,
     build_flywheel_router,
+    build_llm_router,
     build_integrity_router,
 )
 
@@ -63,6 +65,10 @@ ROUTER_BUILDERS = (
 #     stays deterministic instead of depending on the launching shell.
 EXPECTED_ROUTES: dict[str, tuple[str, ...]] = {
     "/agent/protocol": ("GET",),
+    "/agent/llm/chat": ("POST",),
+    "/agent/llm/models": ("GET",),
+    "/agent/llm/provider": ("GET",),
+    "/agent/llm/test-label": ("POST",),
     "/benchmark-suites": ("GET",),
     "/benchmark-suites/{suite_id}": ("GET",),
     "/benchmark-suites/{suite_id}/baselines": ("GET",),
@@ -102,6 +108,7 @@ EXPECTED_ROUTES: dict[str, tuple[str, ...]] = {
     "/workflow-runs/{run_id}/evaluate": ("POST",),
     "/workflow-runs/{run_id}/evolution": ("GET", "POST"),
     "/workflow-runs/{run_id}/flywheel": ("GET", "POST"),
+    "/workflow-runs/{run_id}/flywheel/schedule": ("DELETE", "GET", "POST"),
     "/workflow-runs/{run_id}/hypo-tree": ("GET",),
     "/workflow-runs/{run_id}/improvements": ("GET",),
     "/workflow-runs/{run_id}/integrity-check": ("POST",),

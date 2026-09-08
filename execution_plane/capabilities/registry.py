@@ -12,6 +12,7 @@ from .base import InfraCapability
 from .executors import StubCapabilityExecutor
 from .kaggle_eval_executor import KaggleEvalExecutor
 from .badcase_retrain_executor import BadcaseRetrainExecutor
+from .auto_label_executor import AutoLabelExecutor
 from .audit_executor import AuditExecutor
 from .self_evolution_executor import SelfEvolutionExecutor
 from .sandbox_executor import SandboxResearchExecutor
@@ -134,6 +135,17 @@ _CAPABILITIES: list[tuple[str, str, str, str, str, str, object | None]] = [
         BadcaseRetrainExecutor(),
     ),
     (
+        "auto_label",
+        "auto_label",
+        "LLM 自动标注",
+        "调用第三方 LLM 为未标注 badcase 打标",
+        "B 飞轮型第 2 步：接入 OpenAI 兼容 LLM（默认 Venus 代理，10 个模型目录），"
+        "对待标注 CSV 按提示词模板逐行推理，返回带 label 列的 CSV，可直接喂给 badcase_retrain。"
+        "Provider URL / API Key / 模型可在请求中覆盖，便于提示词调试。",
+        "eval_report",
+        AutoLabelExecutor(),
+    ),
+    (
         "layer_11_external_audit",
         "layer_11_external_audit",
         "外部审计（双循环外环）",
@@ -254,7 +266,7 @@ def default_capability_registry() -> CapabilityRegistry:
     # Capabilities that are *extra* (demo / dual-loop) rather than one of the ten
     # R&D infrastructure layers — excluded from the infra-layer catalog but still
     # discoverable by an agent via list_all_capabilities().
-    _NON_INFRA = {"kaggle_eval", "badcase_retrain", "layer_11_external_audit", "kaggle_eval_sandbox", "run_research_sandbox", "text_cls_sandbox", "image_cls_sandbox", "audio_cls_sandbox", "embedding_sandbox"}
+    _NON_INFRA = {"kaggle_eval", "badcase_retrain", "auto_label", "layer_11_external_audit", "kaggle_eval_sandbox", "run_research_sandbox", "text_cls_sandbox", "image_cls_sandbox", "audio_cls_sandbox", "embedding_sandbox"}
     for cid, lcode, lname, title, desc, atype, ex in _CAPABILITIES:
         is_infra = cid not in _NON_INFRA
         reg.register(

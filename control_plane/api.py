@@ -29,6 +29,7 @@ from .routers import build_evolution_router
 from .routers import build_experiments_router
 from .routers import build_flywheel_router
 from .routers import build_integrity_router
+from .routers import build_llm_router
 from .routers import build_loops_router
 from .routers import build_observability_router
 from .routers import build_research_records_router
@@ -47,6 +48,9 @@ _ROUTER_BUILDERS = (
     build_research_records_router,
     build_experiments_router,
     build_flywheel_router,
+    # LLM debug surface (auto-label prompts + provider config) — registered before
+    # the integrity suite so the LLM paths are visible at their natural position.
+    build_llm_router,
     # Opt-in integrity gates (spark-to-paper integration). Registered last and
     # always: the ``INTEGRITY_GATES`` env switch gates the endpoints' *behaviour*,
     # not their registration, so the OpenAPI surface never depends on the

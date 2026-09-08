@@ -1,10 +1,14 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   createWorkflowRun,
   runFlywheel,
   getFlywheelIterations,
   FlywheelIteration,
   FlywheelResult,
+  startFlywheelScheduler,
+  getFlywheelScheduler,
+  stopFlywheelScheduler,
+  FlywheelSchedulerStatus,
 } from "../api/client";
 
 const PRESETS = [
@@ -41,9 +45,28 @@ export function FlywheelPanel() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
 
+  // Scheduler (event-driven auto-trigger) state.
+  const [badcasePath, setBadcasePath] = useState("");
+  const [threshold, setThreshold] = useState(50);
+  const [pollIntervalSec, setPollIntervalSec] = useState(30);
+  const [autoClear, setAutoClear] = useState(true);
+  const [schedulerStatus, setSchedulerStatus] = useState<FlywheelSchedulerStatus | null>(null);
+  const [schedulerError, setSchedulerError] = useState("");
+  const [schedulerBusy, setSchedulerBusy] = useState(false);
+
   const refreshIterations = useCallback(async (rid: string) => {
     const iters = await getFlywheelIterations(rid);
     setIterations(iters);
+  }, []);
+
+  const refreshScheduler = useCallback(async (rid: string) => {
+    try {
+      const s = await getFlywheelScheduler(rid);
+      setSchedulerStatus(s);
+      setSchedulerError("");
+    } catch (e: any) {
+      setSchedulerError(String(e?.message || e));
+    }
   }, []);
 
   const doIteration = async (rid: string) => {
@@ -91,6 +114,74 @@ export function FlywheelPanel() {
       setRunning(false);
     }
   };
+
+  // ---- Scheduler handlers ----
+  const startScheduler = async () => {
+    if (!runId) {
+      setSchedulerError("请先启动飞轮（创建一个 run）");
+      return;
+    }
+    if (!badcasePath.trim()) {
+      setSchedulerError("badcase_path 必填（指向将被追加坏例的 CSV 文件）");
+      return;
+    }
+    setSchedulerBusy(true);
+    setSchedulerError("");
+    try {
+      await startFlywheelScheduler(runId, {
+        badcase_path: badcasePath.trim(),
+        threshold,
+        poll_interval_sec: pollIntervalSec,
+        auto_clear_after_trigger: autoClear,
+        preset,
+        model,
+        eval_metric: evalMetric,
+        badcase_ratio: badcaseRatio,
+        regression_tol: regressionTol,
+      });
+      await refreshScheduler(runId);
+      await refreshIterations(runId);
+    } catch (e: any) {
+      setSchedulerError(String(e?.message || e));
+    } finally {
+      setSchedulerBusy(false);
+    }
+  };
+
+  const stopScheduler = async () => {
+    if (!runId) return;
+    setSchedulerBusy(true);
+    setSchedulerError("");
+    try {
+      await stopFlywheelScheduler(runId);
+      await refreshScheduler(runId);
+      await refreshIterations(runId);
+    } catch (e: any) {
+      setSchedulerError(String(e?.message || e));
+    } finally {
+      setSchedulerBusy(false);
+    }
+  };
+
+  // Poll scheduler status while it's running (cheap read).
+  useEffect(() => {
+    if (!runId || !schedulerStatus?.scheduled) return;
+    let alive = true;
+    const t = setInterval(() => {
+      if (!alive) return;
+      refreshScheduler(runId).then(() => {
+        if (!alive) return;
+        // While the scheduler fires, the iteration list grows too.
+        refreshIterations(runId).catch(() => {
+          /* swallow — status card already shows the truth */
+        });
+      });
+    }, 3000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [runId, schedulerStatus?.scheduled, refreshScheduler, refreshIterations]);
 
   const fmt = (v: number | undefined, digits = 4) =>
     typeof v === "number" ? v.toFixed(digits) : "—";
@@ -158,11 +249,11 @@ export function FlywheelPanel() {
             <label>&nbsp;</label>
             {!runId ? (
               <button className="btn primary" onClick={start} disabled={running}>
-                {running ? "运行中…" : "启动飞轮"}
+                {running ? "运行中..." : "启动飞轮"}
               </button>
             ) : (
               <button className="btn primary" onClick={iterateAgain} disabled={running}>
-                {running ? "运行中…" : "再跑一轮"}
+                {running ? "运行中..." : "再跑一轮"}
               </button>
             )}
           </div>
@@ -170,6 +261,161 @@ export function FlywheelPanel() {
 
         {error && (
           <div className="card error" style={{ marginTop: 12 }}>运行失败：{error}</div>
+        )}
+      </div>
+
+      {/* ============================================================== */}
+      {/* Event-driven scheduler: poll a badcase CSV, auto-fire iteration */}
+      {/* ============================================================== */}
+      <div className="card">
+        <h2>⏰ 事件驱动调度（auto-trigger）</h2>
+        <p className="muted">
+          外部业务把坏例持续 append 到 <code>badcase_path</code>（CSV）→ 当行数 ≥ <code>threshold</code>，
+          调度器自动跑一轮 <code>badcase_retrain</code>（沿用上方数据集 / 模型 / 回归指标 / 配比 / 容差）。
+          调度器与飞轮 run 一对一，启动前需先点击"启动飞轮"创建 run。
+        </p>
+
+        <div className="row" style={{ marginTop: 10, gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div className="field" style={{ minWidth: 320, flex: 1 }}>
+            <label>badcase_path（持续追加坏例的 CSV）</label>
+            <input
+              type="text"
+              value={badcasePath}
+              placeholder="/abs/path/to/badcase.csv"
+              onChange={(e) => setBadcasePath(e.target.value)}
+            />
+          </div>
+          <div className="field" style={{ width: 120 }}>
+            <label>threshold（行数）</label>
+            <input
+              type="number"
+              step="1"
+              min="1"
+              value={threshold}
+              onChange={(e) => setThreshold(Math.max(1, Number(e.target.value)))}
+            />
+          </div>
+          <div className="field" style={{ width: 140 }}>
+            <label>poll_interval_sec</label>
+            <input
+              type="number"
+              step="1"
+              min="1"
+              max="3600"
+              value={pollIntervalSec}
+              onChange={(e) => setPollIntervalSec(Math.max(1, Number(e.target.value)))}
+            />
+          </div>
+          <div className="field" style={{ width: 200 }}>
+            <label>触发后清空 CSV</label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={autoClear}
+                onChange={(e) => setAutoClear(e.target.checked)}
+              />
+              <span className="muted small">auto_clear_after_trigger</span>
+            </label>
+          </div>
+          <div className="field">
+            <label>&nbsp;</label>
+            <div className="row" style={{ gap: 6 }}>
+              {!schedulerStatus?.scheduled ? (
+                <button
+                  className="btn primary"
+                  onClick={startScheduler}
+                  disabled={!runId || schedulerBusy}
+                  title={!runId ? "先启动飞轮" : ""}
+                >
+                  {schedulerBusy ? "启动中..." : "▶ 启动调度"}
+                </button>
+              ) : (
+                <button
+                  className="btn"
+                  onClick={stopScheduler}
+                  disabled={schedulerBusy}
+                >
+                  {schedulerBusy ? "停止中..." : "■ 停止调度"}
+                </button>
+              )}
+              <button className="btn tiny" onClick={() => runId && refreshScheduler(runId)}>
+                刷新状态
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {schedulerError && (
+          <div className="card error" style={{ marginTop: 10 }}>调度错误：{schedulerError}</div>
+        )}
+
+        {schedulerStatus && (
+          <div style={{ marginTop: 14 }}>
+            <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+              <span className={`pill ${schedulerStatus.scheduled ? "ok" : "warn"}`}>
+                {schedulerStatus.scheduled ? "RUNNING · 监听中" : "STOPPED · 未运行"}
+              </span>
+              {typeof schedulerStatus.trigger_count === "number" && (
+                <span className="pill gray">已触发 {schedulerStatus.trigger_count} 次</span>
+              )}
+              {schedulerStatus.last_verdict && (
+                <span
+                  className={`pill ${
+                    schedulerStatus.last_verdict === "ACCEPT" ? "ok" : "bad"
+                  }`}
+                >
+                  最近：{schedulerStatus.last_verdict}
+                </span>
+              )}
+              {schedulerStatus.error && (
+                <span className="pill bad">err: {schedulerStatus.error.slice(0, 60)}</span>
+              )}
+            </div>
+            <div className="grid2">
+              <div>
+                <div className="kv">
+                  <span className="muted">run_id</span>
+                  <span className="mono small">{schedulerStatus.run_id}</span>
+                </div>
+                <div className="kv">
+                  <span className="muted">started_at</span>
+                  <span className="mono small">
+                    {schedulerStatus.started_at
+                      ? new Date(schedulerStatus.started_at * 1000).toLocaleString()
+                      : "—"}
+                  </span>
+                </div>
+                <div className="kv">
+                  <span className="muted">last_check_at</span>
+                  <span className="mono small">
+                    {schedulerStatus.last_check_at
+                      ? new Date(schedulerStatus.last_check_at * 1000).toLocaleString()
+                      : "—"}
+                  </span>
+                </div>
+              </div>
+              <div>
+                <div className="kv">
+                  <span className="muted">last_badcase_count</span>
+                  <span className="mono">{schedulerStatus.last_badcase_count ?? "—"}</span>
+                </div>
+                <div className="kv">
+                  <span className="muted">last_trigger_at</span>
+                  <span className="mono small">
+                    {schedulerStatus.last_trigger_at
+                      ? new Date(schedulerStatus.last_trigger_at * 1000).toLocaleString()
+                      : "—"}
+                  </span>
+                </div>
+                <div className="kv">
+                  <span className="muted">last_detail</span>
+                  <span className="mono small">
+                    {schedulerStatus.last_detail?.slice(0, 80) || "—"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
@@ -230,6 +476,7 @@ export function FlywheelPanel() {
           <h2>飞轮历史 · 坏例覆盖率曲线</h2>
           <p className="muted">
             每轮重训后的坏例召回（badcase accuracy）。回归门失败的轮次会被拒绝、不计入改进。
+            调度器自动触发的轮次与人工"再跑一轮"产生的轮次并列出现在同一条曲线。
           </p>
           <div className="compare-chart" style={{ marginTop: 10 }}>
             {iterations.map((it, i) => {

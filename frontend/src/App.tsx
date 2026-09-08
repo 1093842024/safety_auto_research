@@ -8,6 +8,7 @@ import { BenchmarkCatalog } from "./views/BenchmarkCatalog";
 import { Leaderboard } from "./views/Leaderboard";
 import { CompareRuns } from "./views/CompareRuns";
 import { FlywheelPanel } from "./views/FlywheelPanel";
+import { LlmPanel } from "./views/LlmPanel";
 
 const CAT_FALLBACK = "未分类";
 
@@ -49,7 +50,16 @@ function AppBody() {
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [taskMap, setTaskMap] = useState<Record<string, BenchmarkTask>>({});
   const [runId, setRunId] = useState<string>("");
-  const [view, setView] = useState<"welcome" | "new" | "run" | "catalog" | "leaderboard" | "compare" | "flywheel">("welcome");
+  const [view, setView] = useState<
+  | "welcome"
+  | "new"
+  | "run"
+  | "catalog"
+  | "leaderboard"
+  | "compare"
+  | "flywheel"
+  | "llm"
+>("welcome");
   const [error, setError] = useState<string>("");
   // Per-category collapse state for the research-records sidebar.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -309,6 +319,8 @@ function AppBody() {
         )}
 
         {view === "flywheel" && <FlywheelPanel />}
+
+        {view === "llm" && <LlmPanel />}
 
         {view === "run" && runId && <RunDashboard runId={runId} />}
 

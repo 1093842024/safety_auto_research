@@ -11,6 +11,7 @@ from .research_records import build_research_records_router
 from .experiments import build_experiments_router
 from .integrity import build_integrity_router
 from .flywheel import build_flywheel_router
+from .llm import build_llm_router
 
 __all__ = [
     "build_workflow_runs_router",
@@ -22,4 +23,5 @@ __all__ = [
     "build_experiments_router",
     "build_integrity_router",
     "build_flywheel_router",
+    "build_llm_router",
 ]

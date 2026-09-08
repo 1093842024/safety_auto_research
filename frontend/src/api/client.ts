@@ -818,3 +818,112 @@ export const runFlywheel = (runId: string, config: FlywheelConfig = {}) =>
 export const getFlywheelIterations = (runId: string) =>
   apiGet<FlywheelIteration[]>(`/workflow-runs/${encodeURIComponent(runId)}/flywheel`);
 
+// ---------------------------------------------------------------------------
+// Flywheel scheduler (event-driven auto-trigger): polls the badcase CSV and
+// fires ``run_capability(badcase_retrain)`` when the row count crosses a threshold.
+// ---------------------------------------------------------------------------
+
+export interface FlywheelScheduleConfig {
+  badcase_path: string;
+  threshold?: number;
+  poll_interval_sec?: number;
+  auto_clear_after_trigger?: boolean;
+  preset?: string;
+  target?: string | null;
+  model?: string;
+  fe?: string;
+  drop_cols?: string[];
+  data_dir?: string | null;
+  badcase_ratio?: number;
+  regression_tol?: number;
+  eval_metric?: string;
+  heldout_frac?: number;
+  heldout_seed?: number;
+}
+
+export interface FlywheelSchedulerStatus {
+  run_id: string;
+  scheduled: boolean;
+  started_at?: number;
+  last_check_at?: number;
+  last_badcase_count?: number;
+  last_trigger_at?: number;
+  trigger_count?: number;
+  last_verdict?: string;
+  last_detail?: string;
+  error?: string;
+  config?: FlywheelScheduleConfig;
+}
+
+export const startFlywheelScheduler = (runId: string, config: FlywheelScheduleConfig) =>
+  apiPost<{ run_id: string; scheduled: boolean; threshold: number; poll_interval_sec: number; started_at: number }>(
+    `/workflow-runs/${encodeURIComponent(runId)}/flywheel/schedule`,
+    config as unknown as Record<string, unknown>,
+  );
+
+export const getFlywheelScheduler = (runId: string) =>
+  apiGet<FlywheelSchedulerStatus>(`/workflow-runs/${encodeURIComponent(runId)}/flywheel/schedule`);
+
+export const stopFlywheelScheduler = (runId: string) =>
+  fetch(`/api/workflow-runs/${encodeURIComponent(runId)}/flywheel/schedule`, {
+    method: "DELETE",
+    headers: { Accept: "application/json" },
+  }).then(async (res) => {
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json();
+  });
+
+// ---------------------------------------------------------------------------
+// LLM provider config + auto-label debug surface (B-flywheel step 2).
+// ---------------------------------------------------------------------------
+
+export interface LlmModelInfo {
+  id: string;
+  label: string;
+  family: string;
+}
+
+export interface LlmProviderInfo {
+  base_url: string;
+  api_key_masked: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  timeout_sec: number;
+}
+
+export interface LlmProviderRequest {
+  base_url?: string | null;
+  api_key?: string | null;
+  model?: string | null;
+  temperature?: number | null;
+  max_tokens?: number | null;
+  timeout_sec?: number | null;
+}
+
+export const getLlmModels = () =>
+  apiGet<{ models: LlmModelInfo[]; default: LlmProviderInfo }>("/agent/llm/models");
+
+export const getLlmProvider = () => apiGet<LlmProviderInfo>("/agent/llm/provider");
+
+export const chatLlm = (req: { system: string; user: string; provider?: LlmProviderRequest; model?: string | null }) =>
+  apiPost<{ ok: boolean; text?: string; model?: string; error?: string; provider?: LlmProviderInfo }>(
+    "/agent/llm/chat",
+    req as Record<string, unknown>,
+  );
+
+export const testLlmLabel = (req: {
+  rows: Array<Record<string, unknown>>;
+  system_prompt?: string;
+  user_template?: string;
+  provider?: LlmProviderRequest;
+  model?: string | null;
+  batch_size?: number;
+}) =>
+  apiPost<{
+    ok: boolean;
+    error?: string;
+    provider?: LlmProviderInfo;
+    labels: Array<{ row: Record<string, unknown>; label: string; raw: string; error?: string | null }>;
+  }>("/agent/llm/test-label", req as Record<string, unknown>);
+

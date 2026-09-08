@@ -429,11 +429,12 @@ class ProtocolEndpointTest(unittest.TestCase):
         # + the three F3 sandbox capabilities (kaggle_eval_sandbox / run_research_sandbox /
         # text_cls_sandbox) + the three 2026-08-11 classifier sandbox capabilities
         # (image_cls_sandbox / audio_cls_sandbox / embedding_sandbox) + the B-flywheel
-        # badcase_retrain capability = 19.
-        self.assertEqual(len(data["capabilities"]), 19)
+        # badcase_retrain capability + the auto_label capability = 20.
+        self.assertEqual(len(data["capabilities"]), 20)
         cap_ids = [c["capability_id"] for c in data["capabilities"]]
         self.assertIn("kaggle_eval", cap_ids)
         self.assertIn("badcase_retrain", cap_ids)
+        self.assertIn("auto_label", cap_ids)
         self.assertIn("layer_11_external_audit", cap_ids)
         self.assertIn("kaggle_eval_sandbox", cap_ids)
         self.assertIn("run_research_sandbox", cap_ids)
