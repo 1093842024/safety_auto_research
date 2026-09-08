@@ -392,6 +392,12 @@ def _sandbox_isolation(t: BenchmarkTask) -> str:
     return "host"
 
 
+# The 1 GiB data-size policy: a task whose materialised data lower bound exceeds
+# this is grayed out from training-optimization (the "data-size > 1 GiB" rule the
+# ``_availability`` docstring promises).
+_ONE_GIB = 1 << 30
+
+
 def _availability(t: BenchmarkTask) -> tuple[bool, str, int | None]:
     """Gray-out policy for the benchmark catalog.
 
@@ -408,8 +414,17 @@ def _availability(t: BenchmarkTask) -> tuple[bool, str, int | None]:
     """
     tid = t.task_id
     # A task whose data + official scripts are materialised locally (data/oss/<id>/)
-    # and that has a sandbox runner is launchable regardless of its source repo.
+    # and that has a sandbox runner is launchable regardless of its source repo —
+    # *unless* its declared data lower bound still exceeds the 1 GiB policy. (The
+    # size check lives here rather than as a name-prefix rule so a future curated
+    # task that materialises >1 GiB locally cannot slip through as enabled.)
     if t.data_local:
+        if t.data_size_bytes is not None and t.data_size_bytes > _ONE_GIB:
+            return (
+                False,
+                f"训练/评测数据 >1GB（{t.data_size_bytes:,} bytes，超出本地可训练策略）",
+                t.data_size_bytes,
+            )
         return (True, "", t.data_size_bytes)
     # Two external suites: data 6.9 GB on disk -> >1 GiB policy.
     if tid.startswith("suite."):

@@ -1133,6 +1133,14 @@ text 能力经真实 `SandboxResearchExecutor.execute` 在 docker 硬隔离下**
 - N1/N2/N4：✅ **已修复（2026-09-08）**。
   - N1：`gate_runner.gate_svg` 子进程加 `timeout`（默认 60s，`ctx["svg_audit_timeout"]` 可调），`TimeoutExpired` → `_failed`。
   - N2：新增 `_sanitize_svg_audit_args` 闭合白名单（8 个 tuning 旗标），拒绝 `--json`/`--selftest`/位置参数/旗标形值，注入在 spawn 前被拦（已实证 + 单测/HTTP 双覆盖）。
-  - N4：补 5 类测试（gate 级 timeout/白名单/machinery-unavailable×3 + HTTP 级 svg 端到端/注入拒绝/deep/终态边界/空体语义）。integrity 套件 121 passed（含 29 subtests）。
-- N3/N5/N6/N7：低优先级，待下轮 P2 批次。
-- 本轮审查-only 阶段未改动代码；修复阶段仅改 `integrity_suite/gate_runner.py`、`control_plane/routers/integrity.py`（字段说明）+ 两个测试文件 + 本文档。
+  - N4：补 5 类测试（gate 级 timeout/白名单/machinery-unavailable×3 + HTTP 级 svg 端到端/注入拒绝/deep/终态边界/空体语义）。
+- N3/N5/N6/N7：✅ **已修复（2026-09-08，P2 批次）**。
+  - N3：`benchmark_tasks/__init__.py` 加 `_ONE_GIB` 常量 + `data_local` 分支真实阈值检查（`data_size_bytes > 1<<30` → 置灰）；补边界测试（>1GiB 置灰 / ≤1GiB 与 None 放行）。注：原建议「`suite.*` 的 6_900_000_000 字面量改用 `t.data_size_bytes`」不成立——suite 任务的 `data_size_bytes` 字段为 None（外部未物化），硬编码值是有意的「估算下界」，故保留。
+  - N5：`svg_audit.py` `walk` 加 `_MAX_DEPTH=256` 深度上限（`nesting_too_deep` 替代 RecursionError）+ `--max-bytes`（默认 50 MiB）输入大小上限（`file_too_large`，解析前拒绝并写报告）；补 3000 层嵌套/超大小两类测试。
+  - N6①：`adversarial_review` 空 scores 时改进类 claim 现在报 `significance_no_data`（原先静默放行）；补测试。
+  - N6②：**核实后不改**——`max(rel_tol, rel_tol*abs(v))` 与建议的 `rel_tol*max(1,abs(v))` 数学等价，0.02 绝对容差底是有意的 abs_tol 设计（近零指标值相对容差无意义），非缺陷。
+  - N7①：`run_embedding_sandbox.py` 按 `eval_metric` 映射 topk（recall_at_1/5/10 各自诚实计算，原先 recall_at_1 是 top-10 值的拷贝）。
+  - N7②：`benchmarks.py` embedding_dim 路由回退 64 → 768（与 registry 表单默认对齐）。
+  - N7③：**核实后不改**——`data_size_bytes` 字段保留给未来前端消费（N3 修复后语义更诚实），死字段无害。
+- 回归：受影响套件 185 passed（29 subtests），0 failed。
+- 本轮仅改 `benchmark_tasks/__init__.py`、`integrity_suite/{svg_audit,adversarial_review}.py`、`control_plane/routers/benchmarks.py`、`scripts/sandbox_examples/run_embedding_sandbox.py` + 三个测试文件 + 本文档。

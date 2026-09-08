@@ -106,15 +106,25 @@ def gate_adversarial_review(ctx: dict) -> GateOutcome:
                  "claim": claim[:80], "evidence": evidence[:80]}
             )
 
-        # (2) significance claim without variance in the data.
+        # (2) significance claim without variance — or any data at all — to back it.
+        # The empty-data case used to be silently missed (min over an empty set
+        # defaults to 0, which no branch caught), so an improvement claim with no
+        # scores slipped through (review 2026-09-08 N6).
         if _IMPROVEMENT.search(claim) and _NUM.search(claim):
-            min_len = min((len(s) for s in clean.values()), default=0)
-            if 0 < min_len < 2:
+            if not clean:
                 issues.append(
-                    {"rule": "significance_no_variance", "i": i, "id": cid,
+                    {"rule": "significance_no_data", "i": i, "id": cid,
                      "claim": claim[:80],
-                     "note": "claim asserts an improvement but no series has >=2 samples"}
+                     "note": "claim asserts an improvement but there are no scores at all"}
                 )
+            else:
+                min_len = min(len(s) for s in clean.values())
+                if min_len < 2:
+                    issues.append(
+                        {"rule": "significance_no_variance", "i": i, "id": cid,
+                         "claim": claim[:80],
+                         "note": "claim asserts an improvement but no series has >=2 samples"}
+                    )
 
         # (3) relative gain whose magnitude beats any plausible data spread.
         m = _RELATIVE_GAIN.search(claim)

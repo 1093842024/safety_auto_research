@@ -180,28 +180,35 @@ def main() -> int:
     q_expected = np.array(q_expected)
 
     sims = q_vecs @ corpus_emb.T
-    k = args.topk
-    hits = 0
-    for i, exp in enumerate(q_expected):
-        top = np.argsort(-sims[i])[:k]
-        if exp in top:
-            hits += 1
-    recall = hits / max(len(q_expected), 1)
+    # Sort each query's similarities once, descending; recall@k for k <= 10 is a
+    # prefix check against the sorted indices.
+    order = np.argsort(-sims, axis=1)[:, :10]
+
+    def _recall_at(k: int) -> float:
+        hits = sum(1 for i, exp in enumerate(q_expected) if exp in order[i, :k])
+        return hits / max(len(q_expected), 1)
+
+    # Report each recall@k honestly (previously recall_at_1 was a copy of the
+    # top-10 value, so recall_at_1/recall_at_10 were indistinguishable). The
+    # eval_metric decides which k gates pass/fail.
+    _K_BY_METRIC = {"recall_at_1": 1, "recall_at_5": 5, "recall_at_10": 10, "recall": 10}
+    k_eval = _K_BY_METRIC.get(args.eval_metric, args.topk)
+    recall = _recall_at(k_eval)
 
     op = args.op
     passed = (recall <= args.threshold) if op == "le" else (recall >= args.threshold)
 
     metrics = {
         "primary": round(float(recall), 4),
-        "recall_at_1": round(float(recall), 4),
-        "recall_at_10": round(float(recall), 4),
+        "recall_at_1": round(_recall_at(1), 4),
+        "recall_at_5": round(_recall_at(5), 4),
+        "recall_at_10": round(_recall_at(10), 4),
         "n_pairs": float(len(pairs)),
         "n_queries": float(len(q_expected)),
         "dim": float(args.dim),
         "epochs": float(args.epochs),
     }
-    if args.eval_metric not in metrics:
-        metrics[args.eval_metric] = round(float(recall), 4)
+    metrics.setdefault(args.eval_metric, round(float(recall), 4))
 
     result = {
         "preset": "embedding_cls",

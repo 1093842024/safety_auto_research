@@ -55,6 +55,15 @@ SUB_FLOOR = 0.7                         # a sub/superscript may go this far unde
 # the exported PDF (the historical "check-mark rendered in DejaVu Sans" defect). Draw these as paths.
 _GLYPH_OK = set("‘’“”–—…·×±° ")
 
+# A pathologically nested SVG would blow the interpreter's recursion limit inside
+# the recursive ``Audit.walk`` traversal and crash the whole process with an
+# unhelpful RecursionError. Cap the nesting at a depth no real figure comes near.
+_MAX_DEPTH = 256
+
+# Default input-size cap: a single SVG far beyond this is a pathological input
+# (or a raster/JSON blob mislabelled .svg), never a hand-authored figure.
+_DEFAULT_MAX_BYTES = 50 * 1024 * 1024
+
 
 def _local(tag) -> str:
     return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
@@ -329,7 +338,12 @@ class Audit:
         self.warnings.append({"code": code, "detail": detail, **kw})
 
     # -- traversal ------------------------------------------------
-    def walk(self, el, mat, inherited, order=[0], in_defs=False):  # noqa: B006 (document-order counter)
+    def walk(self, el, mat, inherited, order=[0], in_defs=False, depth=0):  # noqa: B006 (document-order counter)
+        if depth > _MAX_DEPTH:
+            self.err("nesting_too_deep",
+                     f"element nesting exceeds {_MAX_DEPTH} levels — refusing to recurse "
+                     f"further (pathological input, not a hand-authored figure)")
+            return
         tag = _local(el.tag)
         if tag in FORBIDDEN_TAGS:
             self.err("forbidden_element",
@@ -415,7 +429,7 @@ class Audit:
             self._marker(el)
 
         for child in el:
-            self.walk(child, mat, cur, order, in_defs)
+            self.walk(child, mat, cur, order, in_defs, depth + 1)
 
     def _marker_size(self, ref) -> float:
         m = re.match(r"url\(\s*#([^)\s]+)\s*\)", str(ref or "").strip())
@@ -677,6 +691,8 @@ def build_parser():
     p.add_argument("--tol", type=float, default=0.5, help="canvas overflow tolerance (default 0.5)")
     p.add_argument("--port-gap", type=float, default=6.0,
                    help="max distance a connector end may sit from a card edge (default 6)")
+    p.add_argument("--max-bytes", type=int, default=_DEFAULT_MAX_BYTES,
+                   help="reject SVGs larger than this many bytes (default 50 MiB)")
     p.add_argument("--json", help="also write the report here")
     p.add_argument("--quiet", action="store_true", help="print only the one-line verdict")
     p.add_argument("--selftest", action="store_true")
@@ -761,6 +777,16 @@ def main() -> int:
     if not path.is_file():
         print(f"no such file: {path}", file=sys.stderr)
         return 2
+    if path.stat().st_size > args.max_bytes:
+        audit = Audit(args)
+        audit.err("file_too_large",
+                  f"SVG is {path.stat().st_size} bytes > {args.max_bytes} — pathological input")
+        rep = audit.report(path)
+        if args.json:
+            Path(args.json).write_text(json.dumps(rep, indent=2), encoding="utf-8")
+        print(f"FAIL  {path.name}  file too large ({path.stat().st_size} > {args.max_bytes} bytes)",
+              file=sys.stderr)
+        return 1
     rep = Audit(args).run(path)
     if args.json:
         Path(args.json).write_text(json.dumps(rep, indent=2), encoding="utf-8")

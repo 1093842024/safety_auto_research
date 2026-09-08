@@ -53,6 +53,7 @@ def _make_task(task_id: str, task_type: str = "", **kw) -> BenchmarkTask:
         data_size_bytes=kw.get("data_size_bytes"),
         enabled=kw.get("enabled", True),
         unavailable_reason=kw.get("unavailable_reason", ""),
+        data_local=kw.get("data_local", False),
     )
 
 
@@ -98,6 +99,27 @@ def test_platform_and_classifier_tasks_enabled():
         spec = next(s for s in bt_registry.TASK_TYPE_SPECS if s["type_id"] == tt)
         assert spec["executable"] is True
         assert spec["harness"].endswith("_sandbox")
+
+
+def test_data_local_task_over_1gib_is_grayed_out():
+    """The 1 GiB policy must apply to *locally materialised* data too — a data_local
+    task that declares a lower bound over the threshold cannot slip through as
+    enabled just because the materialisation path exists (review 2026-09-08 N3)."""
+    enabled, reason, size = _availability(
+        _make_task("custom.huge", data_local=True, data_size_bytes=(1 << 30) + 1)
+    )
+    assert enabled is False
+    assert "1GB" in reason
+    assert size == (1 << 30) + 1
+
+
+def test_data_local_task_within_1gib_is_enabled():
+    """At or below the threshold (and when the size is unknown), data_local wins."""
+    for size in (1 << 30, (1 << 30) - 1, 0, None):
+        enabled, reason, _ = _availability(
+            _make_task("custom.small", data_local=True, data_size_bytes=size)
+        )
+        assert enabled is True, (size, reason)
 
 
 # --------------------------------------------------------------------------- #

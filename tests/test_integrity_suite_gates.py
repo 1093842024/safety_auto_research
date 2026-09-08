@@ -129,6 +129,25 @@ class SvgAuditCliTest(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
 
+    def test_deeply_nested_svg_does_not_crash(self):
+        """Pathological nesting must yield a named error, not a RecursionError that
+        kills the whole process (review 2026-09-08 N5). 3000 levels would blow the
+        interpreter recursion limit without the depth cap."""
+        nesting = 3000
+        svg = ('<svg viewBox="0 0 100 100">' + "<g>" * nesting
+               + "<text>x</text>" + "</g>" * nesting + "</svg>")
+        rc, report = self._audit(svg)
+        self.assertEqual(rc, 1, report)
+        codes = {e["code"] for e in report["errors"]}
+        self.assertIn("nesting_too_deep", codes)
+
+    def test_oversized_svg_is_rejected_with_a_report(self):
+        """An input far past the size cap must be rejected *before* parsing, with a
+        report the gate can consume (file_too_large) rather than a silent hang."""
+        rc, report = self._audit("x" * 200, "--max-bytes", "100")
+        self.assertEqual(rc, 1, report)
+        self.assertIn("file_too_large", {e["code"] for e in report["errors"]})
+
     def test_min_font_px_threshold_is_respected(self):
         """The type floor is a knob, not a constant — the gate passes it through."""
         rc_default, rep_default = self._audit(_SMALL_TYPE_SVG)

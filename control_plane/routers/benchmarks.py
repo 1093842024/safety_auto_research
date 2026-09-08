@@ -396,7 +396,9 @@ def build_benchmarks_router(deps: ControlPlaneDeps) -> APIRouter:
                 tc = task.type_config or {}
                 inner_agent_config["task_type"] = "embedding_contrastive"
                 inner_agent_config["data_subdir"] = tc.get("data_subdir") or "embedding_demo"
-                inner_agent_config["dim"] = tc.get("embedding_dim", 64)
+                # 768 matches the registry form default (registry.py embedding_dim);
+                # a missing key should fall back to the same value the form pre-fills.
+                inner_agent_config["dim"] = tc.get("embedding_dim", 768)
                 inner_agent_config["epochs"] = tc.get("num_epochs", 30)
                 if tc.get("target_value") is not None:
                     inner_agent_config["threshold"] = float(tc["target_value"])

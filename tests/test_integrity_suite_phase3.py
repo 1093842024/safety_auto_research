@@ -131,6 +131,16 @@ class AdversarialReviewTest(TestCase):
         self.assertFalse(out.ok)
         self.assertTrue(any(i["rule"] == "significance_no_variance" for i in out.payload["issues"]))
 
+    def test_significance_claim_without_any_data_fails(self):
+        """An improvement claim with *no* scores at all must still be red (review
+        2026-09-08 N6①) — the empty-data case used to be silently missed."""
+        ctx = {"claims": [{"id": "c", "claim": "improves accuracy by 0.05",
+                           "evidence": "no data recorded"}],
+               "scores": {}}
+        out = adversarial_review.gate_adversarial_review(ctx)
+        self.assertFalse(out.ok)
+        self.assertTrue(any(i["rule"] == "significance_no_data" for i in out.payload["issues"]))
+
     def test_well_formed_claims_pass(self):
         out = adversarial_review.gate_adversarial_review(
             {"claims": _GOOD_CLAIMS, "scores": _GOOD_SCORES})
