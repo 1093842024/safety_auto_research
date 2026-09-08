@@ -16,6 +16,8 @@ from .auto_label_executor import AutoLabelExecutor
 from .audit_executor import AuditExecutor
 from .self_evolution_executor import SelfEvolutionExecutor
 from .sandbox_executor import SandboxResearchExecutor
+from .literature_research_executor import LiteratureResearchExecutor
+from .data_pipeline_executor import DataPipelineExecutor
 from ..executors import AttackExecutor
 from ..executors import EvalExecutor
 from ..executors import LessonExecutor
@@ -27,9 +29,9 @@ _CAPABILITIES: list[tuple[str, str, str, str, str, str, object | None]] = [
         "01_literature_research",
         "文献检索",
         "检索安全研究文献",
-        "检索并汇总与对抗安全/对齐相关的论文、基准与数据集",
+        "检索并汇总与对抗安全/对齐相关的论文、基准与数据集（arxiv REST API + 可选 GitHub）",
         "paper_set",
-        None,
+        LiteratureResearchExecutor(),
     ),
     (
         "layer_02_idea_generation_evaluation",
@@ -63,9 +65,9 @@ _CAPABILITIES: list[tuple[str, str, str, str, str, str, object | None]] = [
         "05_data_evaluation_cleaning",
         "数据评估清洗",
         "评估并清洗数据集",
-        "评估数据质量、去毒/去重并产出清洗后数据集",
+        "数据质量评估 + 采集 / 合成 / 自动标注 / 清洗去重 + PII 脱敏（cleaning mode 真实现：minhash dedup + z-score 噪声过滤 + PII regex；其它 mode 暂留 stub 见 Phase 2.1）",
         "dataset_release",
-        None,
+        DataPipelineExecutor(),
     ),
     (
         "layer_06_code_development",

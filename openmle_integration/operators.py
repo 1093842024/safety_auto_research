@@ -8,8 +8,10 @@ construct prompts and call the LLM, then hand execution back to ``Task.step_task
 
 Two backend implementations ship:
   * :class:`TemplateOperatorBackend` — deterministic, **offline**; returns curated,
-    known-good sklearn programs (and folds in failure feedback / combines parents as
-    required). Used for tests and for any deployment without a wired LLM.
+    known-good programs spanning sklearn **and the open-domain frameworks that are
+    importable in-process** (xgboost / lightgbm / torch, each with an ``ImportError``
+    fallback to sklearn), and folds in failure feedback / combines parents as required.
+    Used for tests and for any deployment without a wired LLM.
   * :class:`LLMOperatorBackend` — thin adapter over any ``(prompt: str) -> str``
     callable (e.g. an OpenAI / Codex / WorkBuddy client). Drop-in for real agentic
     generation; the four operators need no change.
@@ -108,21 +110,149 @@ def _hash_int(text: Optional[str]) -> int:
     return int(hashlib.md5((text or "").encode("utf-8")).hexdigest(), 16)
 
 
-# Diverse base models for the seed population (the "model space" the Draft operator
-# explores offline; a real LLM backend would explore architectures freely).
-_DRAFT_MODELS = [
-    "RandomForestClassifier(n_estimators=200, random_state=42)",
-    "GradientBoostingClassifier(n_estimators=200, random_state=42)",
-    "RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)",
-    "LogisticRegression(max_iter=1000)",
-]
+# --------------------------------------------------------------------------
+# Open-domain framework templates (torch / xgboost / lightgbm)
+# --------------------------------------------------------------------------
+# The offline backend is no longer sklearn-only. In addition to the curated sklearn
+# templates it can emit programs that train with xgboost, lightgbm, or a small torch
+# MLP. Each open-domain program wraps its framework import in ``try/except ImportError``
+# so it degrades gracefully to an sklearn RandomForest baseline when the framework is
+# absent from the sandbox interpreter -- the seed population stays runnable everywhere
+# (auto-degradation), while still genuinely exploring open-domain architectures when the
+# framework is installed.
+_FRAMEWORK_IMPORT_MAP = {
+    "torch": "torch",
+    "xgboost": "xgboost",
+    "lightgbm": "lightgbm",
+}
 
 
-def _draft_program(target: str, id_col: str, variant: int = 0) -> str:
-    model = _DRAFT_MODELS[variant % len(_DRAFT_MODELS)]
+def _probe_frameworks() -> "frozenset[str]":
+    """Return the set of open-domain frameworks importable in this process.
+
+    Deterministic and side-effect free. Used to decide which open-domain templates the
+    backend emits: emitting a template for a framework that can't even be imported here
+    would waste a diversity slot on a program that just falls back to sklearn.
+    """
+
+    import importlib.util
+
+    out = set()
+    for key, mod in _FRAMEWORK_IMPORT_MAP.items():
+        try:
+            if importlib.util.find_spec(mod) is not None:
+                out.add(key)
+        except Exception:  # noqa: BLE001 -- probe must never raise
+            pass
+    return frozenset(out)
+
+
+def _sklearn_draft(target: str, id_col: str, model: str) -> str:
     return _header(target, id_col) + (
         f"clf = Pipeline([('pre', pre), ('clf', {model})])\n"
     ) + _fit_predict("")
+
+
+def _xgboost_draft(target: str, id_col: str, *, n_estimators: int = 200,
+                   max_depth: int = 6, random_state: int = 42) -> str:
+    return _header(target, id_col) + (
+        "try:\n"
+        "    import xgboost as xgb\n"
+        f"    clf = Pipeline([('pre', pre), ('clf', xgb.XGBClassifier(\n"
+        f"        n_estimators={n_estimators}, max_depth={max_depth}, random_state={random_state}))])\n"
+        "except ImportError:\n"
+        "    clf = Pipeline([('pre', pre), ('clf', RandomForestClassifier(n_estimators=200, random_state=42))])\n"
+    ) + _fit_predict("")
+
+
+def _lightgbm_draft(target: str, id_col: str, *, n_estimators: int = 200,
+                    num_leaves: int = 31, random_state: int = 42) -> str:
+    return _header(target, id_col) + (
+        "try:\n"
+        "    import lightgbm as lgb\n"
+        f"    clf = Pipeline([('pre', pre), ('clf', lgb.LGBMClassifier(\n"
+        f"        n_estimators={n_estimators}, num_leaves={num_leaves}, random_state={random_state}, verbose=-1))])\n"
+        "except ImportError:\n"
+        "    clf = Pipeline([('pre', pre), ('clf', RandomForestClassifier(n_estimators=200, random_state=42))])\n"
+    ) + _fit_predict("")
+
+
+def _torch_draft(target: str, id_col: str, *, hidden: int = 64, epochs: int = 20,
+                 lr: float = 0.01, random_state: int = 42) -> str:
+    head = _header(target, id_col)
+    body = (
+        "try:\n"
+        "    import torch\n"
+        "    import torch.nn as nn\n"
+        "    torch.set_num_threads(1)\n"
+        f"    torch.manual_seed({random_state})\n"
+        "    Xd = pre.fit_transform(X)\n"
+        "    Xd = Xd.toarray() if hasattr(Xd, 'toarray') else Xd\n"
+        "    Xe = pre.transform(X_eval)\n"
+        "    Xe = Xe.toarray() if hasattr(Xe, 'toarray') else Xe\n"
+        "    Xd = torch.tensor(Xd, dtype=torch.float32)\n"
+        "    Xe = torch.tensor(Xe, dtype=torch.float32)\n"
+        "    yt = torch.tensor(y.values, dtype=torch.long)\n"
+        "    n_cls = int(y.nunique())\n"
+        f"    net = nn.Sequential(nn.Linear(Xd.shape[1], {hidden}), nn.ReLU(), nn.Linear({hidden}, {hidden}), nn.ReLU(), nn.Linear({hidden}, n_cls))\n"
+        f"    opt = torch.optim.Adam(net.parameters(), lr={lr})\n"
+        "    lossf = nn.CrossEntropyLoss()\n"
+        f"    for _ in range({epochs}):\n"
+        "        opt.zero_grad()\n"
+        "        out = net(Xd)\n"
+        "        loss = lossf(out, yt)\n"
+        "        loss.backward()\n"
+        "        opt.step()\n"
+        "    with torch.no_grad():\n"
+        "        preds = net(Xe).argmax(dim=1).numpy()\n"
+        "except ImportError:\n"
+        "    clf = Pipeline([('pre', pre), ('clf', RandomForestClassifier(n_estimators=200, random_state=42))])\n"
+        "    clf.fit(X, y)\n"
+        "    preds = clf.predict(X_eval)\n"
+    )
+    tail = (
+        "sub = pd.DataFrame({id_col: eval_df[id_col].values, target: np.asarray(preds).astype(int)})\n"
+        "sub.to_csv(os.path.join(wd, 'submission.csv'), index=False)\n"
+        "print('done')\n"
+    )
+    return head + body + tail
+
+
+# Diverse base models for the seed population (the "model space" the Draft operator
+# explores offline; a real LLM backend would explore architectures freely). sklearn
+# templates always lead so ``variant=0`` stays the RF baseline; open-domain templates
+# are appended for whichever frameworks are importable in this process.
+def _draft_pool() -> "list[tuple[str, Callable[[str, str], str]]]":
+    pool = [
+        ("sklearn_rf", lambda t, i: _sklearn_draft(t, i, "RandomForestClassifier(n_estimators=200, random_state=42)")),
+        ("sklearn_gbm", lambda t, i: _sklearn_draft(t, i, "GradientBoostingClassifier(n_estimators=200, random_state=42)")),
+        ("sklearn_rf_shallow", lambda t, i: _sklearn_draft(t, i, "RandomForestClassifier(n_estimators=100, max_depth=6, random_state=42)")),
+        ("sklearn_logreg", lambda t, i: _sklearn_draft(t, i, "LogisticRegression(max_iter=1000)")),
+    ]
+    avail = _probe_frameworks()
+    if "xgboost" in avail:
+        pool.append(("xgboost", _xgboost_draft))
+    if "lightgbm" in avail:
+        pool.append(("lightgbm", _lightgbm_draft))
+    if "torch" in avail:
+        pool.append(("torch_mlp", _torch_draft))
+    return pool
+
+
+def _draft_program(target: str, id_col: str, variant: int = 0) -> str:
+    pool = _draft_pool()
+    _, builder = pool[variant % len(pool)]
+    return builder(target, id_col)
+
+
+def draft_template_count() -> int:
+    """Number of distinct draft templates the offline backend can emit.
+
+    ``seed_program_population`` draws a diverse seed population off this count, so the
+    two stay in lock-step even as frameworks are added/removed from the environment.
+    """
+
+    return len(_draft_pool())
 
 
 def _improve_program(

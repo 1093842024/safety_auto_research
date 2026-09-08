@@ -342,14 +342,17 @@ def seed_program_population(
 ) -> list[Candidate]:
     """Generation 0 of program nodes: Draft produces ``size`` distinct solution programs."""
 
-    from ..openmle_integration.operators import draft_program
+    from ..openmle_integration.operators import draft_program, draft_template_count
 
     pop: list[Candidate] = []
     seen: set[str] = set()
     guard = 0
+    n_templates = max(1, draft_template_count())
     while len(pop) < size and guard < size * 20:
         guard += 1
-        variant = rng.randrange(4)  # explore the model space for a diverse seed pop
+        # Explore the model space (sklearn + any importable open-domain framework) for a
+        # diverse seed pop; the count is read from the backend so the two never drift.
+        variant = rng.randrange(n_templates)
         code = draft_program(
             backend, target=target, id_col=id_col, task_description=task_description,
             variant=variant, caller_stage="inner_program_evolution",

@@ -42,6 +42,11 @@ class RunType(str, Enum):
     # B 飞轮型：方案冻结，数据飞轮（badcase 回流 → 回放重训 → 回归门）。见
     # doc/auto_research_task_taxonomy.md §四/§七.1 与 badcase_retrain_executor.py。
     FLYWHEEL = "flywheel"
+    # A 探索型：Discovery Loop，从零到方案（数据集构建 + 文献检索 + 开放域多方案探索）。
+    # 见 doc/auto_research_task_taxonomy.md §五.A。``layer_01_literature_research`` 与
+    # ``layer_05_data_evaluation_cleaning`` 由 stub 升级为真实能力后，run_type=DISCOVERY
+    # 的工作流可直接串联它们。
+    DISCOVERY = "discovery"
 
 
 class WorkflowStatus(str, Enum):

@@ -5,7 +5,8 @@
         "standard_research",
         "badcase_retrain",
         "adversarial_hardening",
-        "flywheel"
+        "flywheel",
+        "discovery"
       ],
       "title": "RunType",
       "type": "string"

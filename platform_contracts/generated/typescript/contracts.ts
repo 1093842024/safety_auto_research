@@ -43,7 +43,7 @@ export const RiskTier = z.enum(['low', 'medium', 'high', 'critical'] as const);
 export type RiskTier = z.infer<typeof RiskTier>;
 
 
-export const RunType = z.enum(['standard_research', 'badcase_retrain', 'adversarial_hardening', 'flywheel'] as const);
+export const RunType = z.enum(['standard_research', 'badcase_retrain', 'adversarial_hardening', 'flywheel', 'discovery'] as const);
 export type RunType = z.infer<typeof RunType>;
 
 
