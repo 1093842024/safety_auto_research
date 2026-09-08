@@ -173,3 +173,33 @@ RunType.FLYWHEEL    # B 飞轮型
 - `test_capabilities.py::test_protocol_exposes_capabilities` 能力数 18→19。
 
 > 本方案待确认后再进入代码实现（遵循先 plan/confirm 后 implement 的流程）。—— 已于 2026-09-08 完成 Phase 1。
+
+---
+
+## 九、Phase 1.5 实现记录（2026-09-08）：FLYWHEEL 端点 + 前端可视化 + e2e demo
+
+### 落地内容
+
+| 组件 | 位置 | 说明 |
+|---|---|---|
+| `RunType.FLYWHEEL` | `platform_contracts/enums.py` + 4 处 generated（`WorkflowRun.json` / `contracts.ts`×2 / 前端副本） | 标记飞轮型 run；generated 文件经 `export_typescript`/`export_schemas` **重生成**（顺带修复了 `audit_followup`/`node_kind`/`followups` 等既有漂移） |
+| `BadcaseRetrainExecutor.collect_badcase` | `execution_plane/capabilities/badcase_retrain_executor.py` | 飞轮第 1 步「自动采集」：基线在 held-out 上的误判样本按**原始行**写回 badcase CSV（特征工程 round-trip 正确，titanic 的 Title 从 Name 重新提取） |
+| `POST/GET /workflow-runs/{id}/flywheel` | `control_plane/routers/flywheel.py` | POST 同步跑一轮（collect→retrain→回归门）返回 before/after + ACCEPT/REJECT；GET 回放迭代历史 |
+| 前端飞轮面板 | `frontend/src/views/FlywheelPanel.tsx` + `App.tsx` 侧栏「🔄 数据飞轮」 | 配置表单 + 本轮结果（坏例召回/回归指标/回归门裁决）+ 坏例覆盖率曲线 |
+| e2e demo | `scripts/run_flywheel_demo.py` | 真实 Titanic 一轮飞轮，打印 baseline→retrained 与 ACCEPT/REJECT |
+
+### 端到端验证（真实 Titanic，logreg）
+
+| badcase_ratio | 坏例召回 | 回归 accuracy | 裁决 |
+|---|---|---|---|
+| 0.10 | 0.000 → 0.222 | 0.832 → **0.836**（通过） | ✅ ACCEPT |
+| 0.15 | 0.000 → 0.378 | 0.832 → 0.813（退化） | ❌ REJECT |
+| 0.20 | 0.000 → 0.489 | 0.832 → 0.772（退化） | ❌ REJECT |
+
+回归门硬护栏被实证：badcase 配比过高会灾难性遗忘（原始集退化），飞轮正确拒绝新模型，只在 `ratio=0.10` 的甜点处接受。
+
+### 测试
+
+- `tests/test_flywheel.py`（4 例：collect round-trip / 端到端 / 历史回放 / 404）。
+- `test_control_plane_structure.py` 路由表 `EXPECTED_ROUTES` + `ROUTER_BUILDERS` 收录 flywheel 两条路由。
+- 受影响套件 62 passed + tsc 0 errors。

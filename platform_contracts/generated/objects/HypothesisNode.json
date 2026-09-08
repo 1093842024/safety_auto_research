@@ -39,6 +39,11 @@
       "title": "Node Id",
       "type": "string"
     },
+    "node_kind": {
+      "default": "config",
+      "title": "Node Kind",
+      "type": "string"
+    },
     "parent_id": {
       "anyOf": [
         {

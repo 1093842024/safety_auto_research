@@ -7,6 +7,7 @@ import { RunDashboard } from "./views/RunDashboard";
 import { BenchmarkCatalog } from "./views/BenchmarkCatalog";
 import { Leaderboard } from "./views/Leaderboard";
 import { CompareRuns } from "./views/CompareRuns";
+import { FlywheelPanel } from "./views/FlywheelPanel";
 
 const CAT_FALLBACK = "未分类";
 
@@ -48,7 +49,7 @@ function AppBody() {
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [taskMap, setTaskMap] = useState<Record<string, BenchmarkTask>>({});
   const [runId, setRunId] = useState<string>("");
-  const [view, setView] = useState<"welcome" | "new" | "run" | "catalog" | "leaderboard" | "compare">("welcome");
+  const [view, setView] = useState<"welcome" | "new" | "run" | "catalog" | "leaderboard" | "compare" | "flywheel">("welcome");
   const [error, setError] = useState<string>("");
   // Per-category collapse state for the research-records sidebar.
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -171,6 +172,10 @@ function AppBody() {
 
         <button className="btn block" onClick={() => setView("compare")}>
           📊 实验对比
+        </button>
+
+        <button className="btn block" onClick={() => setView("flywheel")}>
+          🔄 数据飞轮
         </button>
 
         <div className="sidebar-label">研究记录 ({runs.length})</div>
@@ -302,6 +307,8 @@ function AppBody() {
             }}
           />
         )}
+
+        {view === "flywheel" && <FlywheelPanel />}
 
         {view === "run" && runId && <RunDashboard runId={runId} />}
 

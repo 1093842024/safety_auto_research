@@ -4,7 +4,8 @@
       "enum": [
         "standard_research",
         "badcase_retrain",
-        "adversarial_hardening"
+        "adversarial_hardening",
+        "flywheel"
       ],
       "title": "RunType",
       "type": "string"

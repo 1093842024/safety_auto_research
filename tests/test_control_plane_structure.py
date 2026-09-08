@@ -27,6 +27,7 @@ from safety_auto_research.control_plane.store import Repository
 from safety_auto_research.control_plane.routers import build_benchmarks_router
 from safety_auto_research.control_plane.routers import build_evolution_router
 from safety_auto_research.control_plane.routers import build_experiments_router
+from safety_auto_research.control_plane.routers import build_flywheel_router
 from safety_auto_research.control_plane.routers import build_integrity_router
 from safety_auto_research.control_plane.routers import build_loops_router
 from safety_auto_research.control_plane.routers import build_observability_router
@@ -48,6 +49,7 @@ ROUTER_BUILDERS = (
     build_benchmarks_router,
     build_research_records_router,
     build_experiments_router,
+    build_flywheel_router,
     build_integrity_router,
 )
 
@@ -99,6 +101,7 @@ EXPECTED_ROUTES: dict[str, tuple[str, ...]] = {
     "/workflow-runs/{run_id}/dual-loop": ("POST",),
     "/workflow-runs/{run_id}/evaluate": ("POST",),
     "/workflow-runs/{run_id}/evolution": ("GET", "POST"),
+    "/workflow-runs/{run_id}/flywheel": ("GET", "POST"),
     "/workflow-runs/{run_id}/hypo-tree": ("GET",),
     "/workflow-runs/{run_id}/improvements": ("GET",),
     "/workflow-runs/{run_id}/integrity-check": ("POST",),

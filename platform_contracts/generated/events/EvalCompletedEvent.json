@@ -19,6 +19,7 @@
         "workflow_finished",
         "stage_cancelled",
         "audit_completed",
+        "audit_followup",
         "improvement_applied",
         "agent_step",
         "debug_result"

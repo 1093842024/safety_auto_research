@@ -1,0 +1,137 @@
+{
+  "$defs": {
+    "EventType": {
+      "enum": [
+        "program_created",
+        "workflow_requested",
+        "workflow_started",
+        "stage_queued",
+        "stage_started",
+        "artifact_published",
+        "gate_passed",
+        "gate_failed",
+        "eval_completed",
+        "attack_completed",
+        "decision_issued",
+        "lesson_promoted",
+        "approval_required",
+        "approval_resolved",
+        "workflow_finished",
+        "stage_cancelled",
+        "audit_completed",
+        "audit_followup",
+        "improvement_applied",
+        "agent_step",
+        "debug_result"
+      ],
+      "title": "EventType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A researcher follow-up (clarification / question) on a single audit constraint (F6).\n\nThe outer audit verdict (``AuditCompletedEvent``) is the *immutable* ground truth of the\ndual loop \u2014 the follow-up never mutates it. Instead it is a *supplementary* event that\nre-scores one constraint when a human supplies a clarification, or records an open question.\nv1 deliberately does NOT auto-feed the result back into ``IterationRouter`` (kept for later).",
+  "properties": {
+    "audit_id": {
+      "title": "Audit Id",
+      "type": "string"
+    },
+    "clarification": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Clarification"
+    },
+    "confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "constraint_id": {
+      "title": "Constraint Id",
+      "type": "string"
+    },
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "event_type": {
+      "$ref": "#/$defs/EventType",
+      "default": "audit_followup"
+    },
+    "new_score": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "New Score",
+      "type": "number"
+    },
+    "new_status": {
+      "title": "New Status",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "prior_status": {
+      "title": "Prior Status",
+      "type": "string"
+    },
+    "question": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Question"
+    },
+    "recommendation": {
+      "title": "Recommendation",
+      "type": "string"
+    },
+    "resolved": {
+      "default": false,
+      "title": "Resolved",
+      "type": "boolean"
+    },
+    "response": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Response"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "run_id",
+    "audit_id",
+    "constraint_id",
+    "prior_status",
+    "new_status",
+    "new_score",
+    "confidence",
+    "recommendation"
+  ],
+  "title": "AuditFollowupEvent",
+  "type": "object"
+}

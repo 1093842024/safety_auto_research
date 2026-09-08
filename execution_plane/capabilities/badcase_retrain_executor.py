@@ -277,3 +277,51 @@ class BadcaseRetrainExecutor(StageExecutor):
         if direction == "lower":
             return retrained <= baseline + tol
         return retrained >= baseline - tol
+
+    @staticmethod
+    def collect_badcase(
+        data_dir: str,
+        preset: str,
+        target: str | None = None,
+        model_name: str = "gbm",
+        drop_cols: list[str] | None = None,
+        fe: str = "basic",
+        heldout_frac: float = 0.3,
+        heldout_seed: int = 42,
+        out_path: str | None = None,
+    ) -> tuple[str, int]:
+        """Flywheel step 1 (collect): produce a badcase CSV from baseline mispredictions.
+
+        Trains the frozen baseline on the original data, scores the held-out split, and
+        writes the *original rows* (not feature-engineered) the baseline got wrong back out
+        as a labeled badcase CSV — the exact input ``execute`` expects. Returns
+        ``(badcase_csv_path, n_badcase)``. This is the "自动采集" half of the flywheel; the
+        auto-*labeling* half (confidence scheduling / LLM-judge) is a later refinement —
+        here the held-out ground truth already provides the labels.
+        """
+        import numpy as np
+        import pandas as pd
+        from sklearn.model_selection import train_test_split
+
+        drop_cols = drop_cols or []
+        target = target or PRESETS.get(preset, {}).get("target", "Survived")
+        train_path = os.path.join(data_dir, "train.csv")
+        if not os.path.exists(train_path):
+            raise FileNotFoundError(f"collect_badcase 需要 train.csv 位于 {train_path}")
+        df = pd.read_csv(train_path)
+        X, y = KaggleEvalExecutor._build_xy(df, target, preset, drop_cols, fe)
+        _strat = y if pd.Series(y).value_counts().min() >= 2 else None
+        X_fit, X_eval, y_fit, y_eval = train_test_split(
+            X, y, test_size=heldout_frac, random_state=heldout_seed, stratify=_strat
+        )
+        model = _make_pipeline(X_fit, model_name)
+        model.fit(X_fit, y_fit)
+        pred = model.predict(X_eval)
+        mask = pred != np.asarray(y_eval)
+        badcase_idx = X_eval.index[mask]
+        badcase = df.loc[badcase_idx]
+        if out_path is None:
+            out_path = os.path.join(data_dir, "badcase.csv")
+        badcase.to_csv(out_path, index=False)
+        return out_path, int(mask.sum())
+

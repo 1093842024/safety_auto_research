@@ -1148,3 +1148,12 @@ text 能力经真实 `SandboxResearchExecutor.execute` 在 docker 硬隔离下**
 ### D.6 B 飞轮型最小闭环落地（2026-09-08，非审查项，功能交付记录）
 
 承接 `doc/auto_research_task_taxonomy.md` §七.1（Phase 1 优先 B 飞轮型）。交付 `BadcaseRetrainExecutor`（`execution_plane/capabilities/badcase_retrain_executor.py`）作为 `badcase_retrain` 能力（extra 非 infra，`registry.py`），实现单次飞轮迭代：读已标注 badcase CSV → 冻结架构自适应配比回放重训（`badcase_ratio` 默认 0.3/上限 0.9）→ 冻结原始评测集回归门（`regression_tol` 默认 0.0 不退化硬护栏）。`passed = regression_passed AND badcase_improved`，发 `EvalCompletedEvent` 带 baseline/retrained 指标。复用 `KaggleEvalExecutor._build_xy`+`PRESETS`（冻结方案可比）与 `derive_gate_op` 方向约定。`RunType` 复用已存在的 `BADCASE_RETRAIN`（未新增 `FLYWHEEL` 别名，避免碰 generated 文件）。测试 6 例全绿 + `test_capabilities.py` 能力数 18→19；受影响套件 `test_badcase_retrain`/`test_capabilities`/`test_execution_plane`/`test_agent_protocol`/`test_agent_mode` 合计 49 passed。
+
+### D.7 B 飞轮型 Phase 1.5（2026-09-08，非审查项，功能交付记录）
+
+- 新增 `RunType.FLYWHEEL`（`enums.py`）+ generated 文件经 `export_typescript`/`export_schemas` **重生成**：顺带修复既有漂移（EventType 缺 `audit_followup`、`AuditReport.followups`、`HypothesisNode.node_kind`、缺 `AuditFollowupEvent.json`）。前端 `contracts.ts` 由 `gen:contracts` 流程同步（`cp` generated → frontend）。
+- `collect_badcase`（executor 静态方法）：基线 held-out 误判按**原始行**写回 badcase CSV，特征工程 round-trip 正确。
+- `POST/GET /workflow-runs/{id}/flywheel`（`control_plane/routers/flywheel.py`，经 `api.py` 注册）：POST 同步一轮返回 ACCEPT/REJECT；GET 回放历史。
+- 前端 `FlywheelPanel.tsx`（侧栏「🔄 数据飞轮」）+ client.ts `createWorkflowRun`/`runFlywheel`/`getFlywheelIterations`。
+- `scripts/run_flywheel_demo.py` e2e demo：真实 Titanic 一轮飞轮，实证回归门（`ratio=0.10` ACCEPT / `0.15,0.20` REJECT——灾难性遗忘被硬护栏拦住）。
+- 测试 `test_flywheel.py` 4 例 + `test_control_plane_structure.py` 路由表更新；受影响套件 62 passed + tsc 0 errors。

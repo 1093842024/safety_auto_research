@@ -752,3 +752,69 @@ export const resolveApproval = (runId: string, resolution: "approved" | "rejecte
     resolution,
     resolved_by: "frontend_user",
   });
+
+// ---------------------------------------------------------------------------
+// B Flywheel (Phase 1.5): one-iteration badcase retrain + regression gate.
+// POST runs a single iteration synchronously; GET replays the persisted history.
+// ---------------------------------------------------------------------------
+
+/** Configuration for one flywheel iteration (mirrors ``FlywheelRequest``). */
+export interface FlywheelConfig {
+  preset?: string;
+  target?: string | null;
+  model?: string;
+  fe?: "basic" | "rich" | string;
+  drop_cols?: string[];
+  data_dir?: string | null;
+  badcase_path?: string | null;
+  badcase_ratio?: number;
+  regression_tol?: number;
+  eval_metric?: string;
+  heldout_frac?: number;
+  heldout_seed?: number;
+}
+
+/** Result of one flywheel iteration (POST /workflow-runs/{id}/flywheel). */
+export interface FlywheelResult {
+  run_id: string;
+  stage_run_id: string;
+  gate_result: string;
+  badcase_collected: boolean;
+  badcase_path?: string | null;
+  regression_passed: boolean;
+  badcase_improved: boolean;
+  verdict: "ACCEPT" | "REJECT";
+  detail: string;
+  metrics: Record<string, number>;
+}
+
+/** One persisted flywheel iteration (GET /workflow-runs/{id}/flywheel). */
+export interface FlywheelIteration {
+  event_id: string;
+  stage_run_id: string | null;
+  eval_suite_id: string;
+  passed: boolean;
+  gate_passed: boolean;
+  occurred_at?: string;
+  metrics: Record<string, number>;
+}
+
+/** Create a workflow run (used to spin up a FLYWHEEL run before iterating). */
+export const createWorkflowRun = (config: {
+  program_id?: string;
+  run_type: string;
+  entry_stage?: string;
+  target_id?: string;
+  objective_snapshot?: Record<string, unknown>;
+}) =>
+  apiPost<{ run_id: string }>("/workflow-runs", config as Record<string, unknown>);
+
+export const runFlywheel = (runId: string, config: FlywheelConfig = {}) =>
+  apiPost<FlywheelResult>(
+    `/workflow-runs/${encodeURIComponent(runId)}/flywheel`,
+    config as Record<string, unknown>,
+  );
+
+export const getFlywheelIterations = (runId: string) =>
+  apiGet<FlywheelIteration[]>(`/workflow-runs/${encodeURIComponent(runId)}/flywheel`);
+

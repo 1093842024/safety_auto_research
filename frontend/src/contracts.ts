@@ -15,7 +15,7 @@ export const DecisionType = z.enum(['continue', 'revisit', 'exit_success', 'exit
 export type DecisionType = z.infer<typeof DecisionType>;
 
 
-export const EventType = z.enum(['program_created', 'workflow_requested', 'workflow_started', 'stage_queued', 'stage_started', 'artifact_published', 'gate_passed', 'gate_failed', 'eval_completed', 'attack_completed', 'decision_issued', 'lesson_promoted', 'approval_required', 'approval_resolved', 'workflow_finished', 'stage_cancelled', 'audit_completed', 'improvement_applied', 'agent_step', 'debug_result'] as const);
+export const EventType = z.enum(['program_created', 'workflow_requested', 'workflow_started', 'stage_queued', 'stage_started', 'artifact_published', 'gate_passed', 'gate_failed', 'eval_completed', 'attack_completed', 'decision_issued', 'lesson_promoted', 'approval_required', 'approval_resolved', 'workflow_finished', 'stage_cancelled', 'audit_completed', 'audit_followup', 'improvement_applied', 'agent_step', 'debug_result'] as const);
 export type EventType = z.infer<typeof EventType>;
 
 
@@ -43,7 +43,7 @@ export const RiskTier = z.enum(['low', 'medium', 'high', 'critical'] as const);
 export type RiskTier = z.infer<typeof RiskTier>;
 
 
-export const RunType = z.enum(['standard_research', 'badcase_retrain', 'adversarial_hardening'] as const);
+export const RunType = z.enum(['standard_research', 'badcase_retrain', 'adversarial_hardening', 'flywheel'] as const);
 export type RunType = z.infer<typeof RunType>;
 
 
@@ -222,6 +222,7 @@ export const AuditReportSchema = z.object({
   audit_confidence: z.number().min(0.0).max(1.0),
   recommendation: z.string(),
   report_ref: z.string(),
+  followups: z.array(z.record(z.string(), z.any())).optional(),
 });
 export type AuditReport = z.infer<typeof AuditReportSchema>;
 
@@ -248,6 +249,7 @@ export const HypothesisNodeSchema = z.object({
   score: z.number().min(0.0).max(1.0).optional(),
   status: z.string().optional(),
   branch: z.string().optional(),
+  node_kind: z.string().optional(),
   run_id: z.string().optional(),
 });
 export type HypothesisNode = z.infer<typeof HypothesisNodeSchema>;
@@ -408,6 +410,25 @@ export const AuditCompletedEventSchema = z.object({
   report_ref: z.string(),
 });
 export type AuditCompletedEvent = z.infer<typeof AuditCompletedEventSchema>;
+
+export const AuditFollowupEventSchema = z.object({
+  event_id: z.string().optional(),
+  event_type: EventType.optional(),
+  run_id: z.string(),
+  occurred_at: z.string().optional(),
+  audit_id: z.string(),
+  constraint_id: z.string(),
+  question: z.string().optional(),
+  clarification: z.string().optional(),
+  prior_status: z.string(),
+  new_status: z.string(),
+  new_score: z.number().min(0.0).max(1.0),
+  response: z.string().optional(),
+  confidence: z.number().min(0.0).max(1.0),
+  recommendation: z.string(),
+  resolved: z.boolean().optional(),
+});
+export type AuditFollowupEvent = z.infer<typeof AuditFollowupEventSchema>;
 
 export const AgentStepEventSchema = z.object({
   event_id: z.string().optional(),

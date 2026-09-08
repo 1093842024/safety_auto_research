@@ -39,6 +39,9 @@ class RunType(str, Enum):
     STANDARD_RESEARCH = "standard_research"
     BADCASE_RETRAIN = "badcase_retrain"
     ADVERSARIAL_HARDENING = "adversarial_hardening"
+    # B 飞轮型：方案冻结，数据飞轮（badcase 回流 → 回放重训 → 回归门）。见
+    # doc/auto_research_task_taxonomy.md §四/§七.1 与 badcase_retrain_executor.py。
+    FLYWHEEL = "flywheel"
 
 
 class WorkflowStatus(str, Enum):

@@ -300,3 +300,26 @@ class CapabilityRunRequest(BaseModel):
     """Run an infrastructure-layer capability (the agent-facing ``run_capability`` tool)."""
 
     params: dict[str, Any] = Field(default_factory=dict)
+
+
+class FlywheelRequest(BaseModel):
+    """Body for one B 飞轮型 iteration (collect badcase → replay retrain → regression gate).
+
+    Drives the ``badcase_retrain`` capability via ``POST /workflow-runs/{run_id}/flywheel``.
+    When ``badcase_path`` is omitted, the endpoint auto-collects badcase from the baseline
+    model's held-out mispredictions (``BadcaseRetrainExecutor.collect_badcase``). Every field
+    has a sane default so the endpoint is callable with an empty body (bundled titanic preset).
+    """
+
+    preset: str = "titanic"
+    target: str | None = None
+    model: str = "gbm"
+    fe: str = "basic"
+    drop_cols: list[str] = Field(default_factory=list)
+    data_dir: str | None = None
+    badcase_path: str | None = None
+    badcase_ratio: float = Field(default=0.3, ge=0.05, le=0.9)
+    regression_tol: float = Field(default=0.0, ge=0.0)
+    eval_metric: str = "accuracy"
+    heldout_frac: float = Field(default=0.3, ge=0.1, le=0.5)
+    heldout_seed: int = 42

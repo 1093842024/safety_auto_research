@@ -10,6 +10,7 @@ from .benchmarks import build_benchmarks_router
 from .research_records import build_research_records_router
 from .experiments import build_experiments_router
 from .integrity import build_integrity_router
+from .flywheel import build_flywheel_router
 
 __all__ = [
     "build_workflow_runs_router",
@@ -20,4 +21,5 @@ __all__ = [
     "build_research_records_router",
     "build_experiments_router",
     "build_integrity_router",
+    "build_flywheel_router",
 ]

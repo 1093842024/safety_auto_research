@@ -6,6 +6,7 @@
     "ArtifactPublishedEvent": "events/ArtifactPublishedEvent.json",
     "AttackCompletedEvent": "events/AttackCompletedEvent.json",
     "AuditCompletedEvent": "events/AuditCompletedEvent.json",
+    "AuditFollowupEvent": "events/AuditFollowupEvent.json",
     "BasePlatformEvent": "events/BasePlatformEvent.json",
     "DebugEvent": "events/DebugEvent.json",
     "DecisionRecordedEvent": "events/DecisionRecordedEvent.json",
