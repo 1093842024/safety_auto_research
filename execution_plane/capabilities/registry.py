@@ -11,6 +11,7 @@ from __future__ import annotations
 from .base import InfraCapability
 from .executors import StubCapabilityExecutor
 from .kaggle_eval_executor import KaggleEvalExecutor
+from .badcase_retrain_executor import BadcaseRetrainExecutor
 from .audit_executor import AuditExecutor
 from .self_evolution_executor import SelfEvolutionExecutor
 from .sandbox_executor import SandboxResearchExecutor
@@ -120,6 +121,17 @@ _CAPABILITIES: list[tuple[str, str, str, str, str, str, object | None]] = [
         "发出真实 EvalCompletedEvent（用于端到端 agent 驱动的实证研究）",
         "eval_report",
         KaggleEvalExecutor(),
+    ),
+    (
+        "badcase_retrain",
+        "badcase_retrain",
+        "Badcase 飞轮重训",
+        "飞轮闭环迭代：坏例回放重训 + 回归门",
+        "B 飞轮型最小闭环：读取已标注 badcase CSV，冻结架构下用自适应 badcase:original 配比"
+        "回放重训，并在冻结的原始评测集上做回归门（不退化护栏）。badcase 召回提升为收益、"
+        "回归不退化是硬约束，二者同时满足才接受新模型（发出真实 EvalCompletedEvent）。",
+        "eval_report",
+        BadcaseRetrainExecutor(),
     ),
     (
         "layer_11_external_audit",
@@ -242,7 +254,7 @@ def default_capability_registry() -> CapabilityRegistry:
     # Capabilities that are *extra* (demo / dual-loop) rather than one of the ten
     # R&D infrastructure layers — excluded from the infra-layer catalog but still
     # discoverable by an agent via list_all_capabilities().
-    _NON_INFRA = {"kaggle_eval", "layer_11_external_audit", "kaggle_eval_sandbox", "run_research_sandbox", "text_cls_sandbox", "image_cls_sandbox", "audio_cls_sandbox", "embedding_sandbox"}
+    _NON_INFRA = {"kaggle_eval", "badcase_retrain", "layer_11_external_audit", "kaggle_eval_sandbox", "run_research_sandbox", "text_cls_sandbox", "image_cls_sandbox", "audio_cls_sandbox", "embedding_sandbox"}
     for cid, lcode, lname, title, desc, atype, ex in _CAPABILITIES:
         is_infra = cid not in _NON_INFRA
         reg.register(

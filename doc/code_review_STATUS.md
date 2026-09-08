@@ -1144,3 +1144,7 @@ text 能力经真实 `SandboxResearchExecutor.execute` 在 docker 硬隔离下**
   - N7③：**核实后不改**——`data_size_bytes` 字段保留给未来前端消费（N3 修复后语义更诚实），死字段无害。
 - 回归：受影响套件 185 passed（29 subtests），0 failed。
 - 本轮仅改 `benchmark_tasks/__init__.py`、`integrity_suite/{svg_audit,adversarial_review}.py`、`control_plane/routers/benchmarks.py`、`scripts/sandbox_examples/run_embedding_sandbox.py` + 三个测试文件 + 本文档。
+
+### D.6 B 飞轮型最小闭环落地（2026-09-08，非审查项，功能交付记录）
+
+承接 `doc/auto_research_task_taxonomy.md` §七.1（Phase 1 优先 B 飞轮型）。交付 `BadcaseRetrainExecutor`（`execution_plane/capabilities/badcase_retrain_executor.py`）作为 `badcase_retrain` 能力（extra 非 infra，`registry.py`），实现单次飞轮迭代：读已标注 badcase CSV → 冻结架构自适应配比回放重训（`badcase_ratio` 默认 0.3/上限 0.9）→ 冻结原始评测集回归门（`regression_tol` 默认 0.0 不退化硬护栏）。`passed = regression_passed AND badcase_improved`，发 `EvalCompletedEvent` 带 baseline/retrained 指标。复用 `KaggleEvalExecutor._build_xy`+`PRESETS`（冻结方案可比）与 `derive_gate_op` 方向约定。`RunType` 复用已存在的 `BADCASE_RETRAIN`（未新增 `FLYWHEEL` 别名，避免碰 generated 文件）。测试 6 例全绿 + `test_capabilities.py` 能力数 18→19；受影响套件 `test_badcase_retrain`/`test_capabilities`/`test_execution_plane`/`test_agent_protocol`/`test_agent_mode` 合计 49 passed。
