@@ -1087,3 +1087,52 @@ text 能力经真实 `SandboxResearchExecutor.execute` 在 docker 硬隔离下**
 - `experiments/oss_validation/results.json`（结构化结果）
 - `experiments/oss_validation/tmeoa_client.py`（GPT-4o 替代客户端）
 - 各任务 workspace：`safety_router/`、`sab/task_92_h_importances/`、`sab/task_05_dkpes/`、`arbor/algotune_knn/`（均含 solve.py/solution.py + run_eval/eval + result.json）
+
+---
+
+## 附录 D. 全项目代码审查 2026-09-08（integrity_suite 未提交功能 + 不变量回归）
+
+**基线**：`a0246a9`（HEAD）之后的未提交改动 —— `integrity_suite/`（6 文件 ~2,235 行，新）+ `control_plane/routers/integrity.py`（231 行，新）+ `api.py`/`routers/__init__.py`/`test_control_plane_structure.py` 接线（+19 行）+ 3 个新测试文件（~1,199 行）。
+**方法**：主代理逐行读全部新源码 + 3 个并行探索代理（bench 提交补审 / 不变量回归 / 测试质量）+ 关键发现实证 probe + 全量回归分批跑。**本轮只审查不修复**，发现项待用户确认后按 P1/P2 分批处理。
+**回归测试**：25 个模块分批全绿 0 failed（integrity+structure 106 passed 含 17 subtests；批一 dual_loop/capabilities/evolution/fix_regression×2/review_supplementary/benchmark×2/openmle_phase_bc 123 passed；批二 api_endpoints/control_plane×2/execution_plane/agent_protocol/audit_followup/mea_framework 44/openmle_phase_a·d/platform_contracts/playbook/program_evolution_endpoint/research_records 145 passed）。
+
+### D.1 不变量回归核查（7/7 PASS，file:line 已核实）
+| 不变量 | 结论 | 证据 |
+|---|---|---|
+| R9 沙箱 attestation 唯一来源 | ✅ | `sandbox_executor.py:376-384,474`（marker 之外恒 unknown）；`claimed_isolation` 仅诊断；`build_agent_sandbox.sh:89-93` exit 78 先于 payload；soft 分支 unset marker |
+| R1 cancel_event 注册 | ✅ | 7 个 run 端点均在 spawn 前注册并传入（`routers/loops.py:54→90,133→179`、`evolution.py:54→93,144→224`、`workflow_runs.py:351→379`、`benchmarks.py:528→551`、`deps.py:354→377`） |
+| R3 `_drive` 收尾在 finally | ✅ | 7 处 `_drive` AST 校验均 finally（`loops.py:105-115,188-195` 等） |
+| R12 方向一致性 | ✅ | `service.py:50-70` 唯一 selector；capture/compare 共用；无新增重复方向逻辑 |
+| 上下文隔离 | ✅ | `workflow_runs.py:330-332` HTTP 面守卫仍在；`audit_executor.py:111-130` layer_11 仅读 curated |
+| release_run_slot 收敛 | ✅ | `deps.py:72-87` 全仓唯一 `progress_bus.close()` 调用点 |
+| 冻结路由表 | ✅ | routers 声明 54 path / 59 (path,method) 与 `EXPECTED_ROUTES` 完全一致；integrity 两条路由已按「sanctioned addition」程序收录 |
+
+### D.2 新发现（待修复，按严重度）
+
+| # | 严重度 | 位置 | 问题 | 建议 |
+|---|---|---|---|---|
+| N1 | 🟠 High | `integrity_suite/gate_runner.py:424-428` | `gate_svg` 的 `subprocess.run` **无 timeout**。svg_audit 的 `geometry()` 文本两两碰撞为 O(n²)（`svg_audit.py:536-541`）、`walk()` 递归遍历——大图/病态 SVG 可使同步 HTTP 端点 `/workflow-runs/{id}/integrity-check` 的请求线程无限阻塞。平台既有惯例为子进程必带超时（interpreter 600s） | `timeout=60` + `except subprocess.TimeoutExpired` → `_failed`（保持 fail-closed） |
+| N2 | 🟠 High | `integrity_suite/gate_runner.py:425` | `svg_audit_args` **任意旗标透传**：gate 先传 `--json rep_path` 再 `*extra`，argparse last-wins 使调用方可注入第二个 `--json <任意路径>` **覆盖报告写入目标**（已实证：`/tmp/probe_target.txt` 被写入完整审计 JSON）。经 POST 端点（需 `INTEGRITY_GATES=1`）即获得「受限内容任意文件写」原语，报告内容部分受控（SVG 错误明细进入 JSON）。`--selftest` 亦透传（后果仅 fail-closed，无害） | 白名单旗标（`--min-font-px/--pad/--pad-em/--font-family/--max-marker/--min-cleanliness/--tol/--port-gap`），显式拒绝 `--json/--selftest` |
+| N3 | 🟡 Medium | `benchmark_tasks/__init__.py:395-447` | `_availability` 置灰策略**按名字前缀硬编码**，docstring 声称的「数据超 1GiB 即置灰」分支不存在：`data_size_bytes` 从不参与判定，`data_local` 任务无条件 enabled。未来新增 curated 大数据任务会绕过策略（延续 C-3 设计的补丁式收口，非回归） | 增加真实阈值分支 `data_size_bytes > 1<<30`；`suite.*` 的 6_900_000_000 字面量改用 `t.data_size_bytes` |
+| N4 | 🟡 Medium | 测试缺口（3 个新测试文件） | ①4 个 gate 中 3 个（novelty/metric_direction/claim_support）的「machinery 不可用→fail 不 skip」路径无测试；②HTTP 层从未带 `figures/svg_audit_args/workdir` 走 svg gate（N1/N2 恰在此盲区）；③`stage="deep"` 未过 HTTP；④终态边界仅 CANCELLED 测过（其余 4 个终态与 WAITING_APPROVAL→409 未断言）；⑤空请求体测试只断言 200 未断言 all-waived 语义 | 补 5 类用例；svg gate 的 HTTP 级测试应覆盖 timeout/参数注入（与 N1/N2 修复配套） |
+| N5 | 💡 Low | `integrity_suite/svg_audit.py:417-418` | `walk()` 递归：>1000 层嵌套 SVG 触发 RecursionError → 子进程崩溃 → gate 以「auditor produced no report」失败（fail-closed 成立但误报信息晦涩）；无输入文件大小上限（Expat≥2.4 已防 billion-laughs，ElementTree 不解析外部实体，风险有限） | 循环化或深度上限 + 报错可读化；可选输入大小上限 |
+| N6 | 💡 Low | `integrity_suite/adversarial_review.py:110-117`；`number_trace.py:67-79` | ①`clean` 为空时改进类 claim 静默放行（`min_len=0` 不触发）；②`_traced_in` 的 `max(rel_tol, rel_tol*abs(v))` 给出 0.02 绝对容差底——近零数值（如 0.0）可宽松匹配 ≤0.02 的任意值 | ①clean 为空且 claim 含数字时降级为 warning 类发现或并入 number_trace 的 waived 说明；②容差改 `rel_tol*max(1,abs(v))` 语义 |
+| N7 | 💡 Low | 6b7d95c 补审遗留 | ①embedding runner `--eval-metric` 不映射 topk（`run_embedding_sandbox.py:183-204`，`recall_at_1` 仍按 top-10 算）；②`registry.py:414` embedding_dim 默认 768 vs 路由回退 64 不一致；③`data_size_bytes` 为死字段（前端仅消费 enabled/reason） | 低优先级随下次 bench 批次处理 |
+
+### D.3 已验证正确（本轮正面结论）
+- **integrity 路由设计**：opt-in（503 off by default，`routers/integrity.py:157-165`）；terminal-only 409（`:206-213`，`_TERMINAL_STATUSES` 五态核实）；curated-only 边界保持（claims 仅来自调用方，不抓内循环叙事）；红门=200+`ok:false` 语义正确（`:190-198`）。
+- **gate_runner 调度器**：fail-closed 纪律完整（machinery 缺失→fail、waive 仅限输入真缺失、`run_stage` 首败即停）；复用平台自身校验器（`novelty_filter`/`_select_objective`/`evaluate_constraint`）零逻辑复制；`rejected_ids` 依赖的 `novelty_filter` 置 `status="rejected_novelty"` 已核实；R12 类方向回归的守门（gate_metric_direction 的 min/max 极值核对 + accuracy-like 豁免镜像）设计正确。
+- **接线**：`api.py` `_ROUTER_BUILDERS`（8 项）== `routers/__init__.py` 导出 == 测试 `ROUTER_BUILDERS`，均含 `build_integrity_router`；api.py 79 行 < 160 上限。
+- **测试质量**：endpoint 测试用真 `create_app`（非手搭 router）；`_EnvMixin` 正确保存/恢复 `INTEGRITY_GATES` 无泄漏；只读性（状态/事件/榜单零突变、幂等 3 连调）验证到位；`stage="all"` 完备性有守卫。
+- **6b7d95c 补审**：4 分类模态方向处理（`op="le" if direction=="lower"`，sandbox_executor 5 处）正确；前后端 enabled/reason/size 三键契约一致；可训练优化标志未误用到非分类类型；image 扁平 ImageFolder 修复有回归测试。
+
+### D.4 文档惯例提醒
+`doc/code_review_2026-08-13.md` 原位于 doc/ 根目录——已按本文件维护规则 `git mv` 至 `doc/archive/`（与 07-30/08-04 先例一致），要点已由 C-4 附录承载。
+
+### D.5 处置状态
+- N1/N2/N4：✅ **已修复（2026-09-08）**。
+  - N1：`gate_runner.gate_svg` 子进程加 `timeout`（默认 60s，`ctx["svg_audit_timeout"]` 可调），`TimeoutExpired` → `_failed`。
+  - N2：新增 `_sanitize_svg_audit_args` 闭合白名单（8 个 tuning 旗标），拒绝 `--json`/`--selftest`/位置参数/旗标形值，注入在 spawn 前被拦（已实证 + 单测/HTTP 双覆盖）。
+  - N4：补 5 类测试（gate 级 timeout/白名单/machinery-unavailable×3 + HTTP 级 svg 端到端/注入拒绝/deep/终态边界/空体语义）。integrity 套件 121 passed（含 29 subtests）。
+- N3/N5/N6/N7：低优先级，待下轮 P2 批次。
+- 本轮审查-only 阶段未改动代码；修复阶段仅改 `integrity_suite/gate_runner.py`、`control_plane/routers/integrity.py`（字段说明）+ 两个测试文件 + 本文档。

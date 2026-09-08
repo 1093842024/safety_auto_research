@@ -27,6 +27,7 @@ from .deps import build_deps
 from .routers import build_benchmarks_router
 from .routers import build_evolution_router
 from .routers import build_experiments_router
+from .routers import build_integrity_router
 from .routers import build_loops_router
 from .routers import build_observability_router
 from .routers import build_research_records_router
@@ -44,6 +45,11 @@ _ROUTER_BUILDERS = (
     build_benchmarks_router,
     build_research_records_router,
     build_experiments_router,
+    # Opt-in integrity gates (spark-to-paper integration). Registered last and
+    # always: the ``INTEGRITY_GATES`` env switch gates the endpoints' *behaviour*,
+    # not their registration, so the OpenAPI surface never depends on the
+    # environment. Disabled by default -> the default control plane is unchanged.
+    build_integrity_router,
 )
 
 

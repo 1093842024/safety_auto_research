@@ -27,6 +27,7 @@ from safety_auto_research.control_plane.store import Repository
 from safety_auto_research.control_plane.routers import build_benchmarks_router
 from safety_auto_research.control_plane.routers import build_evolution_router
 from safety_auto_research.control_plane.routers import build_experiments_router
+from safety_auto_research.control_plane.routers import build_integrity_router
 from safety_auto_research.control_plane.routers import build_loops_router
 from safety_auto_research.control_plane.routers import build_observability_router
 from safety_auto_research.control_plane.routers import build_research_records_router
@@ -47,9 +48,17 @@ ROUTER_BUILDERS = (
     build_benchmarks_router,
     build_research_records_router,
     build_experiments_router,
+    build_integrity_router,
 )
 
 # Frozen HTTP surface, captured from the pre-refactor monolith.
+#
+# Deliberate additions since that capture (this is the sanctioned way to grow the
+# surface — see the module docstring):
+#   * /integrity/gates + /workflow-runs/{run_id}/integrity-check — the opt-in
+#     integrity-gate suite. Registered unconditionally and gated at request time
+#     by the INTEGRITY_GATES env switch, precisely so that this frozen surface
+#     stays deterministic instead of depending on the launching shell.
 EXPECTED_ROUTES: dict[str, tuple[str, ...]] = {
     "/agent/protocol": ("GET",),
     "/benchmark-suites": ("GET",),
@@ -66,6 +75,7 @@ EXPECTED_ROUTES: dict[str, tuple[str, ...]] = {
     "/decisions/{decision_id}": ("GET",),
     "/events": ("GET",),
     "/experiences": ("GET",),
+    "/integrity/gates": ("GET",),
     "/playbook": ("GET",),
     "/research-records": ("GET",),
     "/research-records/compare": ("GET",),
@@ -91,6 +101,7 @@ EXPECTED_ROUTES: dict[str, tuple[str, ...]] = {
     "/workflow-runs/{run_id}/evolution": ("GET", "POST"),
     "/workflow-runs/{run_id}/hypo-tree": ("GET",),
     "/workflow-runs/{run_id}/improvements": ("GET",),
+    "/workflow-runs/{run_id}/integrity-check": ("POST",),
     "/workflow-runs/{run_id}/lessons": ("GET",),
     "/workflow-runs/{run_id}/mea": ("POST",),
     "/workflow-runs/{run_id}/mea/state": ("GET",),
