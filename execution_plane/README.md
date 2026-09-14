@@ -36,7 +36,16 @@ execution_plane/
 ├── capabilities/               # 基础设施层能力注册表（agent 可调工具）
 │   ├── base.py                 #   InfraCapability 数据类 + 目录条目
 │   ├── executors.py            #   StubCapabilityExecutor（确定性占位，产出真实 artifact）
-│   └── registry.py             #   CapabilityRegistry + default_capability_registry()（10 层）
+│   ├── registry.py             #   CapabilityRegistry + default_capability_registry()（10 层）
+│   ├── literature_research_executor.py  # 层① 真实 arXiv/GitHub 检索（Phase 2 起，非桩）
+│   ├── kaggle_eval_executor.py #   真实 Kaggle 评测（CV + held-out）
+│   ├── audit_executor.py       #   layer_11 外审计（消费 rubric criteria）
+│   ├── rubric_executor.py      #   layer_12 评分标准环节（2026-09-09 新增）
+│   ├── sandbox_executor.py     #   Docker 沙箱内执行研究命令
+│   ├── auto_label_executor.py  #   LLM 自动标注（B 飞轮第 2 步）
+│   ├── badcase_retrain_executor.py  # 坏例回放重训 + 回归门
+│   ├── self_evolution_executor.py   # 层⑨ 自迭代进化
+│   └── data_pipeline_executor.py    # 层⑤ 数据清洗/去重/PII
 ├── registry.py                 # AdapterRegistry + default_registry()
 ├── orchestrator.py             # ClosedLoopOrchestrator：dispatch + 决策 + 闭环（agent / scripted 双模式）
 ├── agent/
@@ -132,14 +141,55 @@ execution_plane/
 `InfraCapability`（id / 层码 / 描述 / 参数 schema / 绑定的 executor）。agent 通过 agent 工具面
 新增的 **`run_capability(run_id, capability_id, params)`** 调用任意层：
 
-- ③ 评估与基准 / ⑧ 结果分析与经验 / ⑩ 数据生成对抗 绑定真实 executor；
-- ① ② ④ ⑤ ⑥ ⑦ ⑨ 目前绑定 `StubCapabilityExecutor`（确定性占位，仍产出真实 artifact + 指标，
-  保持可审计）；待各层真实 skill/agent 接入后替换为真实 executor 即可，契约不变。
+- **真实 executor**（截至 2026-09-09）：① 文献检索（arXiv/GitHub，缺 `query` 时从研究目标派生，
+  见下）、③ 评估与基准、⑤ 数据评估清洗、⑧ 结果分析与经验、⑨ 自迭代进化、⑩ 数据生成对抗，
+  外加 `kaggle_eval` / `badcase_retrain` / `auto_label` / 四个沙箱能力 / `layer_11` / `layer_12`；
+- **仍为 `StubCapabilityExecutor`**：② ④ ⑥ ⑦（确定性占位，仍产出真实 artifact + 指标，保持可审计）；
+  待各层真实 skill/agent 接入后替换即可，契约不变。
+  > ⚠️ 维护红线：把某层从桩换成真实 executor 时，**必须同步更新本清单、调用方的假设注释与
+  > 相关测试**。2026-09-09 修过一个真实教训 —— ① 早已换成真实 arXiv executor，但
+  > `control_plane/task_state.py` 的注释仍写「layer_01 是 StubCapabilityExecutor」，掩护了
+  > 「契约只传 `subtask_type`、不传研究目标」这一失效前提，使 MEA 的文献步骤长期不可用。
+- **保留能力（内循环不可调用）**：`layer_11_external_audit`、`layer_09_self_iterative_evolution`、
+  **`layer_12_rubric_induction`** —— 三者同属外层/元层，进入 `OUTER_LOOP_RESERVED_CAPS`，
+  agent 工具面与 HTTP 端点**双层拦截**。理由：内循环是有目标的优化 agent，若允许它自审计或
+  **自定评分标准**，就会出现比自确认更严重的「自己给自己放宽标准」。
 - `run_capability` 内部 = 创建该层 `StageRun` → 转 `running` → 执行 executor → 转终态 → 发事件，
   **走与 `dispatch_stage` 完全相同的受控、校验、审计路径**，所以 agent 自由编排也不脱离护栏。
 - 能力目录由 `GET /agent/protocol` 的 `capabilities` 字段实时返回，agent 可在运行时发现能调用什么。
 - 开放目标：`ClosedLoopOrchestrator.dispatch_open_goal(run_id, goal, candidates)` 把目标交给
   agent，由它自行决定依次调用哪些 `run_capability`；平台只负责用容器 `StageRun` 包住这一轮。
+
+## 评分标准环节（`layer_12_rubric_induction`，2026-09-09 新增）
+
+在**内循环开始之前**确立「这次研究按什么标准判定」，并把同一份标准交给内循环当**只读执行契约**、
+交给 `layer_11` 当**审计判据**。设计详见 [`doc/design_notes.md`](../doc/design_notes.md) §4。
+
+```
+run_dual_loop / run_evolutionary_loop
+  └─ [iteration 0 之前] layer_12 ──► ExecutableRubric（frozen + integrity_hash）
+        ├─► inner_params["rubric_context"]   内循环只读
+        └─► audit_input["rubric"] ──► layer_11 逐条判定 + 硬性一票否决
+```
+
+**双模式**：任务未提供可用标准 → `synthesize` 生成；已提供 → `review` 三维审查（准确性/完整性/科学性）后规范化。
+
+**判定优先程序化**：criterion 携带 `check` 规格（`metric_present` / `metric_threshold` /
+`metric_improves` / `real_eval` / `metric_gap` / `config_min` / `judge`），平台可实跑任务生成的
+7 条中 6 条由代码判定，不依赖语义猜测。
+
+**两条不可违背的判定规则**（代价换来的，务必保留）：
+
+1. 不可判定的 criterion（`blocked_reason` 或 `missing`）→ `evaluable=False`，**权重归 0**，
+   但仍如实报告为未达标。否则会把「任务定义缺少声明」误归因成「研究没做好」。
+2. `primary_metric` 或任一 high-priority criterion 处于 `conflict` → **一票否决**，无论标量多高。
+   否则新增的易通过条目会把硬失败**平均掉**。
+
+**前置环节自身的守卫**：rubric 前置会消耗一次能力调用，因此**必须先过 cancel + budget 检查**，
+否则预算对它无效。
+
+**开关**：`rubric_stage`（默认 `True`，关闭即完全回到改动前行为）、`rubric_visible_to_inner`
+（默认 `True`，关闭可盲跑做 A/B 对比）、`RUBRIC_LLM=1`（可选 LLM 补充条目，append-only 且失败降级）。
 
 ## 控制面接线
 
@@ -206,9 +256,10 @@ execution_plane/
   验证、实验设计、写码、跑实验、跑评测。agent 需实现 `agent/PROTOCOL.md` 描述的线协议（含新增的
   `run_capability` 工具）。平台职责收敛为：状态、记忆、工具（SDK 六方法 + `run_capability`）、
   护栏（HITL + 状态机校验）。
-- **把各层桩替换为真实 adapter**：① ② ④ ⑤ ⑥ ⑦ ⑨ 目前是 `StubCapabilityExecutor`，接入真实
-  skill/agent/数据集/评测后，在 `capabilities/registry.py` 把对应层绑定到真实 `StageExecutor`
-  即可，契约与事件流无需改动。
+- **把剩余桩替换为真实 adapter**：② ④ ⑥ ⑦ 目前仍是 `StubCapabilityExecutor`（① ③ ⑤ ⑧ ⑨ ⑩ 已是真实
+  executor），接入真实 skill/agent/数据集/评测后，在 `capabilities/registry.py` 把对应层绑定到真实
+  `StageExecutor` 即可，契约与事件流无需改动。**替换时务必同步更新本文档的能力清单、
+  `control_plane/task_state.py` 的调用方假设注释与相关测试**（见「Capabilities」节红线）。
 - 在 `AttackExecutor` 检测到 critical ASR 时自动触发 HITL 断点（`request_approval`）。
   在 agent 模式下它同样是交给 agent 的一个 `StageTaskSpec`。
 - `request_approval` 目前仅在 SDK 暴露；可在 `RemoteAgentHarness` 决策出 critical ASR 时触发 HITL 断点。

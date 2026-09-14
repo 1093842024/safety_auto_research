@@ -158,6 +158,10 @@ class ClosedLoopOrchestrator:
         # C5 fix: per-run capability-call counter, incremented inside run_capability
         # itself so EVERY real call counts (orchestrator-driven AND agent-tool-driven).
         self._cap_call_counts: dict[str, int] = {}
+        # Per-run frozen executable rubric (layer_12). Recorded here so EVERY loop-exit
+        # path surfaces the grading contract in its summary without threading an extra
+        # argument through a dozen return statements.
+        self._run_rubrics: dict[str, dict[str, Any]] = {}
 
     def _cap_count(self, run_id: str) -> int:
         return self._cap_call_counts.get(run_id, 0)
@@ -597,6 +601,8 @@ class ClosedLoopOrchestrator:
         cancel_event: Any | None = None,
         progress_callback: Any | None = None,
         budget: dict[str, Any] | None = None,
+        rubric_stage: bool = True,
+        rubric_visible_to_inner: bool = True,
     ) -> dict[str, Any]:
         """DUAL-LOOP driver: inner research -> external audit -> (refine/restart) -> repeat.
 
@@ -614,6 +620,23 @@ class ClosedLoopOrchestrator:
 
         Every step is a real ``StageRun`` + event, so the whole loop is auditable and the
         ``validate_route`` guardrail still applies to every decision.
+
+        RUBRIC PRELUDE (``rubric_stage=True``, default): before iteration 0 the control
+        plane runs ``layer_12_rubric_induction`` ONCE to obtain the run's *executable
+        scoring rubric* — synthesized when the task declared no usable evaluation
+        standard, or a reviewed+normalized version of the standard it did declare. The
+        rubric is then FROZEN and used for the rest of the run:
+
+          * ``layer_11`` grades every iteration against its criteria (programmatically
+            wherever a machine check exists), so the audit is task-specific instead of
+            four hardcoded constraints;
+          * the inner loop receives it as a READ-ONLY execution contract when
+            ``rubric_visible_to_inner`` is set (AutoSciRub's key mechanism), and can
+            never regenerate or relax it (``layer_12`` is an outer-loop reserved
+            capability).
+
+        Because the rubric is derived from the task DEFINITION and produced before any
+        result exists, grading against it cannot be post-hoc standard fitting.
         """
 
         run = self.svc.get_workflow_run(run_id)
@@ -726,6 +749,51 @@ class ClosedLoopOrchestrator:
 
         outer = 0
         inner_acc = 0.0  # 缺陷9 fix: bound at function scope so it is never UnboundLocalError
+
+        # ---- RUBRIC PRELUDE (layer_12): establish the run's grading contract ONCE ----
+        # Runs before iteration 0 so the standard provably predates every result it
+        # grades. Best-effort by design: a rubric failure must not abort a research run
+        # (the audit then falls back to its built-in constraints, i.e. prior behaviour).
+        #
+        # The prelude is itself a real capability call, so it MUST respect cancellation
+        # and the budget — otherwise a run launched with an already-exhausted budget
+        # would still spend a call here before the loop's first budget check.
+        rubric: dict[str, Any] | None = None
+        rubric_contract = ""
+        if rubric_stage and not (cancel_event is not None and cancel_event.is_set()) \
+                and _budget_exceeded() is None:
+            try:
+                rb_stage, rb_result, rubric = self.induce_rubric(
+                    run_id,
+                    {
+                        "objective": base_goal,
+                        # The gate / fold count actually in force for this run, so the
+                        # corresponding criteria are checkable rather than blocked.
+                        "effective_config": {
+                            k: inner_params.get(k) for k in ("threshold", "cv_folds")
+                        },
+                    },
+                )
+                steps.append(self._step("rubric", rb_stage, rb_result, None))
+                rv = (rubric or {}).get("review") or {}
+                _emit(
+                    "rubric_done",
+                    rubric_id=(rubric or {}).get("rubric_id"),
+                    source=(rubric or {}).get("source"),
+                    criteria_count=len((rubric or {}).get("criteria", []) or []),
+                    review_overall=rv.get("overall"),
+                    review_verdict=rv.get("verdict"),
+                    standard_provided=rv.get("standard_provided"),
+                )
+                if rubric_visible_to_inner:
+                    rubric_contract = self._rubric_inner_context(rubric)
+            except Exception as _rb_err:
+                logging.warning(
+                    "rubric induction failed (non-fatal, audit falls back to built-in "
+                    "constraints): %s", _rb_err,
+                )
+                rubric = None
+
         while outer < max_outer_iters:
             # ---- CANCELLATION CHECK: user-requested abort ----
             if cancel_event is not None and cancel_event.is_set():
@@ -742,13 +810,25 @@ class ClosedLoopOrchestrator:
                 _expire_pending_strategies()
                 return self._summary(run_id, steps, "exited_budget", detail=over)
 
-            # ---- PLAYBOOK + EXPERIENCE INJECTION (inner loop only; audit stays curated) ----
+            # ---- RUBRIC CONTRACT INJECTION (inner loop, READ-ONLY) ----
+            # The inner loop is told how it will be graded, which markedly improves what
+            # it produces. It receives a rendered snapshot only: the rubric object is
+            # never handed over mutable, and layer_12 is unreachable from the inner loop,
+            # so the agent cannot rewrite its own standard.
             dispatch_goal = goal
+            if rubric_contract:
+                inner_params["rubric_context"] = rubric_contract
+                dispatch_goal = f"{dispatch_goal}\n\n{rubric_contract}"
+
+            # ---- PLAYBOOK + EXPERIENCE INJECTION (inner loop only; audit stays curated) ----
             if self.state_store is not None:
                 pb_text = self.state_store.playbook.render(pb_scope, k=6)
                 if pb_text:
                     inner_params["playbook_context"] = pb_text
-                    dispatch_goal = f"{goal}\n\n[PLAYBOOK — 跨 run 经验，仅供参考]\n{pb_text}"
+                    # NOTE: append to ``dispatch_goal`` (not ``goal``) — rebuilding from
+                    # ``goal`` here would silently drop anything appended earlier in this
+                    # iteration (e.g. the rubric execution contract).
+                    dispatch_goal = f"{dispatch_goal}\n\n[PLAYBOOK — 跨 run 经验，仅供参考]\n{pb_text}"
                 # Experience lifecycle (Phase 2): auto-replay top decayed-confidence
                 # lessons into the inner loop — previously write-only, now read back.
                 exp_entries = self.state_store.experience_bank.query(stage=inner_capability, k=3)
@@ -896,6 +976,18 @@ class ClosedLoopOrchestrator:
                 "result_real_eval": bool(result_ref and "kaggle" in str(result_ref)),
                 "prior_audits": list(prior_audits),
                 "constraints": audit_params.get("constraints", []),
+                # The frozen executable rubric is legitimate OUTER-loop context: it was
+                # derived from the task definition (not from this result) before the loop
+                # started, so it carries zero inner-loop narrative. It is what makes the
+                # audit task-specific instead of four generic hardcoded constraints.
+                "rubric": rubric,
+                # Curated config facts a criterion may need to check (e.g. cv_folds for
+                # the repeated-measurement criterion). Config knobs only — no narrative.
+                "result_config": {
+                    k: inner_params.get(k)
+                    for k in ("cv_folds", "threshold", "model", "fe")
+                    if inner_params.get(k) is not None
+                },
             }
             audit_stage, audit_result = self.run_capability(
                 run_id,
@@ -1145,6 +1237,7 @@ class ClosedLoopOrchestrator:
         seed: int = 42,
         progress_callback: Any | None = None,
         cancel_event: Any | None = None,
+        rubric_stage: bool = True,
     ) -> dict[str, Any]:
         """PARALLEL EVOLUTIONARY SEARCH (Phase 3) over the inner-loop config space.
 
@@ -1301,6 +1394,28 @@ class ClosedLoopOrchestrator:
         for c in population:
             archive.add(c)
 
+        # ---- RUBRIC PRELUDE (layer_12): same grading contract as the dual loop ----
+        # Induced once before generation 0, so every generation champion faces the SAME
+        # frozen, task-specific standard (a per-generation rubric would let the search
+        # drift the goalposts). Best-effort: failure degrades to the built-in constraints.
+        # Budget/cancel-aware for the same reason as the dual loop's prelude.
+        evo_rubric: dict[str, Any] | None = None
+        if rubric_stage and not (cancel_event is not None and cancel_event.is_set()) \
+                and _budget_exceeded() is None:
+            try:
+                rb_stage, rb_result, evo_rubric = self.induce_rubric(
+                    run_id, {"objective": base_goal}
+                )
+                steps.append(self._step("rubric", rb_stage, rb_result, None))
+                _emit("rubric_done",
+                      rubric_id=(evo_rubric or {}).get("rubric_id"),
+                      source=(evo_rubric or {}).get("source"),
+                      criteria_count=len((evo_rubric or {}).get("criteria", []) or []))
+            except Exception as _rb_err:
+                logging.warning("rubric induction failed in evolutionary loop "
+                                "(non-fatal): %s", _rb_err)
+                evo_rubric = None
+
         champion = None
         for gen in range(generations):
             # M10 fix: user cancellation + budget checks (generation top AND inside
@@ -1397,6 +1512,13 @@ class ClosedLoopOrchestrator:
                 "result_real_eval": True,
                 "prior_audits": list(prior_audits),
                 "constraints": audit_params.get("constraints", []),
+                "rubric": evo_rubric,
+                "result_config": {
+                    k: (champion.params.get(k) if champion.params.get(k) is not None
+                        else base_params.get(k))
+                    for k in ("cv_folds", "threshold", "model", "fe")
+                    if (champion.params.get(k) is not None or base_params.get(k) is not None)
+                },
             }
             audit_stage, audit_result = self.run_capability(
                 run_id,
@@ -1895,6 +2017,69 @@ class ClosedLoopOrchestrator:
             raise NotFoundError("layer_09_self_iterative_evolution has no real executor bound")
         return self.run_capability(run_id, "layer_09_self_iterative_evolution", params or {})
 
+    # --------------------------------------------------- rubric (evaluation contract)
+    def induce_rubric(
+        self,
+        run_id: str,
+        params: dict[str, Any] | None = None,
+    ) -> tuple[Any, Any, Any]:
+        """Run ``layer_12_rubric_induction`` once and return ``(stage, result, rubric)``.
+
+        This is a CONTROL-PLANE call by construction: ``layer_12`` is in
+        ``OUTER_LOOP_RESERVED_CAPS``, so the inner-loop agent can never reach it. The
+        returned rubric is frozen — callers pass it around read-only.
+        """
+
+        stage, result = self.run_capability(run_id, "layer_12_rubric_induction", params or {})
+        rubric = (getattr(result, "payload", None) or {}).get("rubric")
+        if not rubric:
+            # Defensive: an ``agent``-fulfilled or adapted result may carry no payload.
+            # Rebuild deterministically from the same task spec (identical ids + hash).
+            from ..rubric import RubricEngine
+            from .capabilities.rubric_executor import build_task_spec
+
+            run = self.svc.get_workflow_run(run_id)
+            spec = build_task_spec(params or {}, run.objective_snapshot or {})
+            if not spec.task_id:
+                spec.task_id = run.target_id or run_id
+            rubric = RubricEngine().induce(spec).model_dump(mode="json")
+        self._run_rubrics[run_id] = rubric
+        return stage, result, rubric
+
+    def get_run_rubric(self, run_id: str) -> dict[str, Any] | None:
+        """The frozen rubric this run is graded against (``None`` before induction)."""
+
+        return self._run_rubrics.get(run_id)
+
+    @staticmethod
+    def _rubric_inner_context(rubric: dict[str, Any] | None) -> str:
+        """Render the frozen rubric as a READ-ONLY execution contract for the inner loop.
+
+        This is AutoSciRub's core mechanism: telling the executing agent *how it will be
+        graded* before it starts markedly improves execution quality. What it must NOT
+        be able to do is change that contract — hence a rendered text snapshot here and
+        ``layer_12`` on the reserved-capability list.
+        """
+
+        if not rubric:
+            return ""
+        lines = [
+            f"[评分标准 — 只读执行契约 rubric_id={rubric.get('rubric_id')} "
+            f"（{rubric.get('source')}，冻结，本次研究将按此判定；不可修改）]",
+        ]
+        for g in rubric.get("goals", []) or []:
+            lines.append(f"目标 {g.get('goal_id')}: {g.get('requirement')}")
+        for c in rubric.get("criteria", []) or []:
+            mark = "[受阻] " if c.get("blocked_reason") else ""
+            lines.append(
+                f"- {c.get('criterion_id')} [{c.get('priority')}/{c.get('dimension')}] "
+                f"{mark}{c.get('requirement')} => 通过条件: {c.get('satisfaction_condition')}"
+            )
+        avoid = rubric.get("claims_to_avoid") or []
+        if avoid:
+            lines.append("禁止的断言: " + "；".join(str(a) for a in avoid[:6]))
+        return "\n".join(lines)
+
     def expire_pending_strategies(self, run_id: str) -> None:
         """Public hook (I3 fix): expire pending meta-loop proposals when a run's loop
         ended abnormally (exception / abort outside ``run_dual_loop``'s own returns),
@@ -1921,7 +2106,7 @@ class ClosedLoopOrchestrator:
         }
 
     def _summary(self, run_id: str, steps: list[dict[str, Any]], status: str, detail: str | None = None) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "run_id": run_id,
             "status": status,
             "status_detail": detail,
@@ -1930,3 +2115,22 @@ class ClosedLoopOrchestrator:
             "events": [e["event_type"] for e in self.svc.list_events(run_id)],
             "decisions": [d.decision_type.value for d in self.svc.list_decisions(run_id)],
         }
+        rubric = self._run_rubrics.get(run_id)
+        if rubric:
+            # Every exit path (accept / refine-exhausted / budget / cancel / abort)
+            # reports the grading contract the run was judged against.
+            out["rubric"] = rubric
+            review = rubric.get("review") or {}
+            out["rubric_summary"] = {
+                "rubric_id": rubric.get("rubric_id"),
+                "source": rubric.get("source"),
+                "generator": rubric.get("generator"),
+                "criteria_count": len(rubric.get("criteria", []) or []),
+                "standard_provided": review.get("standard_provided"),
+                "review_overall": review.get("overall"),
+                "review_verdict": review.get("verdict"),
+                "review_accuracy": review.get("accuracy"),
+                "review_completeness": review.get("completeness"),
+                "review_scientificity": review.get("scientificity"),
+            }
+        return out

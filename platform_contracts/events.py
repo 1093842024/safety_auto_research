@@ -227,6 +227,36 @@ class AuditCompletedEvent(BasePlatformEvent):
         return self
 
 
+class RubricSynthesizedEvent(BasePlatformEvent):
+    """A task-specific executable rubric was induced / an existing standard reviewed.
+
+    Emitted once per run by ``layer_12_rubric_induction`` BEFORE the research loop
+    starts, so the run record proves *which* grading contract the run was judged
+    against (and that the contract predates the results it grades — no post-hoc
+    standard fitting). ``integrity_hash`` pins the frozen rubric content.
+    """
+
+    event_type: EventType = Field(default=EventType.RUBRIC_SYNTHESIZED)
+    rubric_id: str
+    task_id: str
+    stage_run_id: str | None = None
+    source: str  # "synthesized" | "reviewed"
+    generator: str = "rule_engine"
+    criteria_count: int = Field(ge=0, default=0)
+    standard_provided: bool = True
+    review_overall: float = Field(ge=0.0, le=1.0, default=0.0)
+    review_verdict: str = "acceptable"
+    blocking_findings: int = Field(ge=0, default=0)
+    integrity_hash: str = ""
+    report_ref: str
+
+    @model_validator(mode="after")
+    def _validate_event_type(self) -> "RubricSynthesizedEvent":
+        if self.event_type != EventType.RUBRIC_SYNTHESIZED:
+            raise ValueError("rubric event_type must be rubric_synthesized")
+        return self
+
+
 class AuditFollowupEvent(BasePlatformEvent):
     """A researcher follow-up (clarification / question) on a single audit constraint (F6).
 
@@ -345,6 +375,7 @@ ALL_EVENT_MODELS: tuple[type[ContractModel], ...] = (
     LessonPromotedEvent,
     AuditCompletedEvent,
     AuditFollowupEvent,
+    RubricSynthesizedEvent,
     AgentStepEvent,
     DebugEvent,
     ImprovementAppliedEvent,

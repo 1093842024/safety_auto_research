@@ -1,7 +1,7 @@
 # doc/ 设计文档索引
 
 > 本目录是 `safety_auto_research` 的设计/分析文档总索引。**按类别 + 状态**组织，便于快速判断"哪份是当前权威、哪份已归档"。
-> 最后整理：2026-08-07（文档树重构：审查系列合并为活文档、旧快照归档、删除重复文件）。
+> 最后整理：2026-09-09（新增 §4 评分标准环节设计；审查活文档追加附录 E）。
 
 ---
 
@@ -24,13 +24,13 @@
 
 | 文件 | 状态 | 说明 |
 |---|---|---|
-| [`code_review_STATUS.md`](code_review_STATUS.md) | 🟢 活文档 | **全量代码审查与修复状态（唯一权威）**。含 08-05 全量审查 + 附录 A（暂缓项 L1–L7 裁决落地）+ 附录 B（08-06 修复核实 + F1–F6）。后续审查只更新此文件 |
+| [`code_review_STATUS.md`](code_review_STATUS.md) | 🟢 活文档 | **全量代码审查与修复状态（唯一权威）**。含 08-05 全量审查 + 附录 A（暂缓项 L1–L7 裁决落地）+ 附录 B（08-06 修复核实 + F1–F6）+ 附录 C/C-2~C-4（08-11 轮 R1–R30 + Benchmark 完备性 + OSS 验证）+ 附录 D（09-08 轮 integrity_suite + B 飞轮型 Phase 1/1.5/1.6）+ **附录 E（09-09 评分标准环节交付 + layer_01 缺陷修复）**。后续审查只更新此文件 |
 
 ## 三、架构与设计（参考，部分已落地）
 
 | 文件 | 状态 | 说明 |
 |---|---|---|
-| [`design_notes.md`](design_notes.md) | 🟢 活文档 | **功能设计单一权威**：控制平面拆分+DI（§1，A1/A3/F1）、审计追问协议（§2，F6）、无 Docker agent 隔离（§3，F2/F3）。新设计在此追加分节，不再新建独立 design_*.md |
+| [`design_notes.md`](design_notes.md) | 🟢 活文档 | **功能设计单一权威**：控制平面拆分+DI（§1，A1/A3/F1）、审计追问协议（§2，F6）、无 Docker agent 隔离（§3，F2/F3）、**任务专属可执行评分标准（§4，`layer_12_rubric_induction`，2026-09-09）**。新设计在此追加分节，不再新建独立 design_*.md |
 | [`unified_safety_rd_platform_architecture_spec.md`](unified_safety_rd_platform_architecture_spec.md) | 🟡 Draft v1 | 目标架构 spec；写于 MEA/OpenRSI 落地前，文内已标"与现实差距" |
 | [`dual_loop_upgrade_plan.md`](dual_loop_upgrade_plan.md) | 🟡 设计参考 | AREX 双循环升级方案，部分已落地 |
 | [`harness_gap_analysis_and_upgrade_plan.md`](harness_gap_analysis_and_upgrade_plan.md) | ✅ 已落地 | Weng Harness 差距分析，三期全部落地 |

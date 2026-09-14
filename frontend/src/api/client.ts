@@ -130,7 +130,25 @@ export interface AuditEvent {
   recommendation?: string;
   unresolved_claims: string[];
   rejected_candidates: string[];
-  constraints: Array<{ id: string; description: string; status: string; score?: number; note?: string }>;
+  /** Built-in constraints PLUS one entry per rubric criterion (``id="rubric:<Cn>"``).
+   *  The rubric entries carry the extra `criterion_id` / `dimension` / `priority` /
+   *  `evaluated_by` fields so the console can show *which* criterion failed and how it
+   *  was judged (programmatically vs by an LLM judge). */
+  constraints: Array<{
+    id: string;
+    description: string;
+    status: string;
+    score?: number;
+    note?: string;
+    criterion_id?: string;
+    dimension?: string;
+    priority?: string;
+    satisfaction_condition?: string;
+    check_kind?: string;
+    evaluated_by?: string;
+    blocked_reason?: string;
+    weight?: number;
+  }>;
 }
 
 /** A researcher follow-up (clarification / question) on a single audit constraint (F6). */
@@ -433,10 +451,220 @@ export interface ResearchRecord {
   created_at: string;
 }
 
+// ---------------------------------------------------------------------------
+// Rubric stage (layer_12): task-specific executable scoring rubric + review of
+// a declared evaluation standard along 准确性 / 完整性 / 科学性.
+// ---------------------------------------------------------------------------
+
+/** One defect found while auditing a declared evaluation standard. */
+export interface RubricFinding {
+  finding_id: string;
+  /** "accuracy" | "completeness" | "scientificity" */
+  dimension: string;
+  /** "critical" | "important" | "minor" */
+  severity: string;
+  message: string;
+  suggestion?: string;
+  field?: string;
+}
+
+/** Three-dimensional audit of a task's declared evaluation standard. */
+export interface RubricReview {
+  review_id: string;
+  task_id: string;
+  /** false => nothing usable was declared, so a rubric is auto-generated instead. */
+  standard_provided: boolean;
+  accuracy: number;
+  completeness: number;
+  scientificity: number;
+  overall: number;
+  /** "sound" | "acceptable" | "needs_work" | "unusable" */
+  verdict: string;
+  findings: RubricFinding[];
+  suggested_fixes: Record<string, any>;
+  summary: string;
+}
+
+/** One executable criterion of a task-specific rubric. */
+export interface RubricCriterion {
+  criterion_id: string;
+  goal_ids?: string[];
+  requirement: string;
+  /** "correctness" | "generalization" | "rigor" | "integrity" | "reporting" */
+  dimension: string;
+  /** "high" | "medium" | "low" */
+  priority: string;
+  satisfaction_condition: string;
+  metrics?: string[];
+  required_analysis?: string[];
+  comparisons?: string[];
+  weight?: number;
+  check?: Record<string, any>;
+  /** Non-empty => the requirement was retained but cannot be measured here. */
+  blocked_reason?: string;
+}
+
+/** An atomic scientific goal derived from the task instruction. */
+export interface RubricGoal {
+  goal_id: string;
+  title: string;
+  requirement: string;
+  instruction_evidence?: string[];
+}
+
+/** The frozen executable rubric a run is graded against. */
+export interface ExecutableRubric {
+  rubric_id: string;
+  task_id: string;
+  /** "synthesized" (auto-generated) | "reviewed" (declared standard, audited) */
+  source: string;
+  objective?: string;
+  goals: RubricGoal[];
+  criteria: RubricCriterion[];
+  claims_to_avoid: string[];
+  provided_standard?: Record<string, any>;
+  review?: RubricReview | null;
+  /** "rule_engine" | "llm" | "llm+rule_engine" */
+  generator?: string;
+  frozen?: boolean;
+  integrity_hash?: string;
+  /** Only on the run-level endpoint: does the rebuild match the recorded run hash? */
+  hash_matches_run?: boolean;
+}
+
+/** Compact preview of the rubric a registration form would produce. */
+export interface RubricPreview {
+  rubric_id: string;
+  source: string;
+  criteria_count: number;
+  machine_checkable_count: number;
+  criteria: Array<
+    Pick<RubricCriterion, "criterion_id" | "requirement" | "dimension" | "priority" | "satisfaction_condition"> & {
+      check_kind: string;
+      blocked_reason?: string;
+    }
+  >;
+  claims_to_avoid: string[];
+}
+
+/** Registration-time rubric stage output (review + what would be generated). */
+export interface RubricStageResult {
+  review: RubricReview | null;
+  rubric_preview: RubricPreview | null;
+}
+
+/** One criterion verdict recorded on an audit (extends the audit constraint shape). */
+export interface RubricCriterionVerdict {
+  id: string;
+  criterion_id: string;
+  description: string;
+  /** "verified" | "partial" | "conflict" | "missing" */
+  status: string;
+  score: number;
+  note?: string;
+  dimension?: string;
+  priority?: string;
+  satisfaction_condition?: string;
+  check_kind?: string;
+  /** "programmatic:<kind>" | "judge" — how the verdict was reached. */
+  evaluated_by?: string;
+  blocked_reason?: string;
+  weight?: number;
+}
+
+/** Per-iteration criterion roll-up for a run. */
+export interface RubricIteration {
+  iteration: number;
+  audit_id: string;
+  confidence: number;
+  gate_passed: boolean;
+  passed: number;
+  failed: number;
+  criteria: RubricCriterionVerdict[];
+}
+
+/** GET /workflow-runs/{id}/rubric */
+export interface RunRubric {
+  run_id: string;
+  rubric: ExecutableRubric | null;
+  event: Record<string, any> | null;
+  iterations: RubricIteration[];
+}
+
+/** Audit a declared evaluation standard + preview the induced rubric (no persistence). */
+export const reviewTaskStandard = (taskType: string, values: Record<string, any>) =>
+  apiPost<RubricStageResult>("/benchmark-tasks/review-standard", {
+    task_type: taskType,
+    values,
+  });
+
+/** The executable rubric for a catalog task (identical to what a run is graded against). */
+export const getTaskRubric = (taskId: string) =>
+  apiGet<ExecutableRubric>(`/benchmark-tasks/${encodeURIComponent(taskId)}/rubric`);
+
+/** The frozen rubric a run is graded against + per-iteration criterion verdicts. */
+export const getRunRubric = (runId: string) =>
+  apiGet<RunRubric>(`/workflow-runs/${encodeURIComponent(runId)}/rubric`);
+
+export const RUBRIC_VERDICT_LABEL: Record<string, string> = {
+  sound: "健全",
+  acceptable: "可接受",
+  needs_work: "需完善",
+  unusable: "不可用",
+};
+
+export const RUBRIC_VERDICT_CLASS: Record<string, string> = {
+  sound: "ok",
+  acceptable: "ok",
+  needs_work: "warn",
+  unusable: "bad",
+};
+
+export const RUBRIC_SEVERITY_LABEL: Record<string, string> = {
+  critical: "严重",
+  important: "重要",
+  minor: "轻微",
+};
+
+export const RUBRIC_SEVERITY_CLASS: Record<string, string> = {
+  critical: "bad",
+  important: "warn",
+  minor: "accent",
+};
+
+export const RUBRIC_DIMENSION_LABEL: Record<string, string> = {
+  accuracy: "准确性",
+  completeness: "完整性",
+  scientificity: "科学性",
+  correctness: "正确性",
+  generalization: "泛化性",
+  rigor: "严谨性",
+  integrity: "真实性",
+  reporting: "汇报质量",
+};
+
+export const RUBRIC_STATUS_LABEL: Record<string, string> = {
+  verified: "通过",
+  partial: "部分满足",
+  conflict: "未通过",
+  missing: "缺证据",
+};
+
+export const RUBRIC_STATUS_CLASS: Record<string, string> = {
+  verified: "ok",
+  partial: "warn",
+  conflict: "bad",
+  missing: "bad",
+};
+
 /** Live validation result for a task-type registration form (does not persist). */
 export interface ValidateResult {
   valid: boolean;
   errors: string[];
+  /** Rubric stage: audit of the declared evaluation standard (advisory, never blocks). */
+  review?: RubricReview | null;
+  /** Rubric stage: the executable rubric this task definition would produce. */
+  rubric_preview?: RubricPreview | null;
 }
 
 export const getResearchRecords = (taskId?: string) =>

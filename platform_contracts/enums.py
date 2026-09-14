@@ -90,6 +90,9 @@ class ArtifactType(str, Enum):
     IMPROVEMENT_REPORT = "improvement_report"
     HYPOTHESIS_TREE = "hypothesis_tree"
     EXPERIENCE_BANK = "experience_bank"
+    # Task-specific executable scoring rubric (layer_12_rubric_induction). Produced
+    # ONCE per run, frozen, and consumed by the outer audit as its constraint set.
+    RUBRIC = "rubric"
 
 
 class Visibility(str, Enum):
@@ -144,3 +147,6 @@ class EventType(str, Enum):
     IMPROVEMENT_APPLIED = "improvement_applied"
     AGENT_STEP = "agent_step"
     DEBUG_RESULT = "debug_result"
+    # A task-specific executable rubric was induced (or an existing standard reviewed)
+    # by layer_12 before the research loop started.
+    RUBRIC_SYNTHESIZED = "rubric_synthesized"

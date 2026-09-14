@@ -50,6 +50,82 @@ def build_observability_router(deps: ControlPlaneDeps) -> APIRouter:
         except Exception as exc:
             raise _translate(exc)
 
+    # ----- Rubric stage observability: the run's frozen grading contract -----
+    @router.get(
+        "/workflow-runs/{run_id}/rubric",
+        summary="The executable scoring rubric this run is graded against (layer_12), "
+                "plus its standard review and per-criterion verdicts from the audits",
+    )
+    def get_run_rubric(run_id: str) -> dict:
+        """Reconstruct the run's grading contract from its durable event log.
+
+        Reads the ``rubric_synthesized`` event (what standard was established, when, and
+        with which integrity hash) and joins it with the rubric criteria recorded on each
+        ``audit_completed`` event, so the console can show *which* criteria were unmet in
+        each iteration instead of only the aggregate confidence.
+
+        Returns ``{"rubric": null}`` when the run predates / disabled the rubric stage —
+        a run without a rubric is a valid legacy run, not an error.
+        """
+
+        try:
+            run = svc.get_workflow_run(run_id)
+        except Exception as exc:
+            raise _translate(exc)
+
+        events = svc.list_events(run_id)
+        synth = next(
+            (e for e in events if e.get("event_type") == "rubric_synthesized"), None
+        )
+        # Per-iteration criterion verdicts, in audit order.
+        iterations: list[dict] = []
+        for idx, e in enumerate(
+            [ev for ev in events if ev.get("event_type") == "audit_completed"]
+        ):
+            crit = [
+                c for c in (e.get("constraints") or []) if c.get("criterion_id")
+            ]
+            if not crit:
+                continue
+            iterations.append({
+                "iteration": idx,
+                "audit_id": e.get("audit_id"),
+                "confidence": e.get("confidence"),
+                "gate_passed": e.get("gate_passed"),
+                "passed": sum(1 for c in crit if c.get("status") == "verified"),
+                "failed": sum(1 for c in crit if c.get("status") != "verified"),
+                "criteria": crit,
+            })
+
+        rubric: dict | None = None
+        if synth is not None:
+            # The full frozen rubric is deterministic in the task definition, so it can be
+            # rebuilt exactly (same ids + integrity_hash) without a side store.
+            try:
+                from ...execution_plane.capabilities.rubric_executor import build_task_spec
+                from ...rubric import RubricEngine
+
+                spec = build_task_spec({}, run.objective_snapshot or {})
+                if not spec.task_id:
+                    spec.task_id = run.target_id or run_id
+                rebuilt = RubricEngine(use_llm=False).induce(spec)
+                rubric = rebuilt.model_dump(mode="json")
+                # Honesty guard: if the recorded hash differs (e.g. the run used the LLM
+                # pass, or the task definition changed since), say so instead of passing
+                # the rebuild off as the authoritative contract.
+                rubric["hash_matches_run"] = (
+                    rebuilt.integrity_hash == synth.get("integrity_hash")
+                )
+            except Exception:
+                rubric = None
+
+        return {
+            "run_id": run_id,
+            "rubric": rubric,
+            "event": synth,
+            "iterations": iterations,
+        }
+
     # ----- Dual-loop observability: audit follow-up events (F6 protocol) -----
     @router.get(
         "/workflow-runs/{run_id}/audits/{audit_id}/followups",

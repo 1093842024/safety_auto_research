@@ -64,6 +64,13 @@ class PlatformContractsTest(unittest.TestCase):
                 "ImprovementProposal",
                 "HypothesisNode",
                 "ExperienceEntry",
+                # Rubric stage (layer_12): the run's executable grading contract and the
+                # three-dimensional review of a task's declared evaluation standard.
+                "RubricGoal",
+                "RubricCriterion",
+                "RubricFinding",
+                "RubricReview",
+                "ExecutableRubric",
             },
         )
         self.assertEqual(set(schemas["events"]), {
@@ -79,6 +86,7 @@ class PlatformContractsTest(unittest.TestCase):
             "LessonPromotedEvent",
             "AuditCompletedEvent",
             "AuditFollowupEvent",
+            "RubricSynthesizedEvent",
             "ImprovementAppliedEvent",
             "AgentStepEvent",
             "DebugEvent",

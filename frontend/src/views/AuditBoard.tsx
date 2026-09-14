@@ -2,10 +2,15 @@ import React, { useEffect, useState } from "react";
 import {
   getAudit,
   getAuditFollowups,
+  getRunRubric,
   followupAudit,
   AuditEvent,
   AuditFollowup,
+  RUBRIC_DIMENSION_LABEL,
+  RUBRIC_STATUS_LABEL,
+  RunRubric,
 } from "../api/client";
+import { RubricContractCard, RubricReviewCard } from "../components/RubricPanel";
 
 const STATUS_PILL: Record<string, string> = {
   verified: "ok",
@@ -13,6 +18,9 @@ const STATUS_PILL: Record<string, string> = {
   conflict: "bad",
   missing: "bad",
 };
+
+const PRIORITY_LABEL: Record<string, string> = { high: "硬性", medium: "一般", low: "参考" };
+const PRIORITY_CLASS: Record<string, string> = { high: "bad", medium: "warn", low: "accent" };
 
 /**
  * R29 fix: every audit card renders its constraints, follow-ups, unresolved
@@ -34,6 +42,23 @@ export function AuditBoard({ runId }: { runId: string }) {
   const [formError, setFormError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState("");
   const [visible, setVisible] = useState(AUDIT_PAGE_SIZE);
+  // The run's frozen grading contract (layer_12). Loaded once: it cannot change
+  // mid-run by construction, so there is nothing to poll.
+  const [runRubric, setRunRubric] = useState<RunRubric | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    getRunRubric(runId)
+      .then((r) => {
+        if (alive) setRunRubric(r);
+      })
+      .catch(() => {
+        /* a run without a rubric is a valid legacy run, not an error */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [runId]);
 
   useEffect(() => {
     let alive = true;
@@ -112,11 +137,25 @@ export function AuditBoard({ runId }: { runId: string }) {
     }
   };
 
+  // The grading contract is worth showing even before the first audit exists — it is
+  // established BEFORE the inner loop runs, which is the whole point of the stage.
+  const rubricHeader = runRubric?.rubric ? (
+    <>
+      <RubricContractCard rubric={runRubric.rubric} />
+      <RubricReviewCard review={runRubric.rubric.review} compact />
+    </>
+  ) : null;
+
   if (!audits.length) {
-    return loadError ? (
-      <div className="card error">{loadError}</div>
-    ) : (
-      <div className="card muted">尚无外部审计事件。</div>
+    return (
+      <>
+        {rubricHeader}
+        {loadError ? (
+          <div className="card error">{loadError}</div>
+        ) : (
+          <div className="card muted">尚无外部审计事件。</div>
+        )}
+      </>
     );
   }
 
@@ -127,6 +166,7 @@ export function AuditBoard({ runId }: { runId: string }) {
 
   return (
     <>
+      {rubricHeader}
       {loadError && <div className="card error">{loadError}</div>}
       {remaining > 0 && (
         <div className="card muted" style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -179,7 +219,30 @@ export function AuditBoard({ runId }: { runId: string }) {
               </span>
             </div>
 
-            <h3 style={{ marginTop: 10 }}>约束级检查</h3>
+            <h3 style={{ marginTop: 10 }}>
+              约束级检查
+              {(() => {
+                const rc = a.constraints.filter((c) => c.criterion_id);
+                if (!rc.length) return null;
+                const failed = rc.filter((c) => c.status !== "verified");
+                const veto = failed.filter((c) => c.priority === "high" && c.status === "conflict");
+                return (
+                  <>
+                    <span
+                      className={`pill ${failed.length === 0 ? "ok" : "warn"}`}
+                      style={{ marginLeft: 8, fontWeight: 400 }}
+                    >
+                      评分标准 {rc.length - failed.length}/{rc.length} 通过
+                    </span>
+                    {veto.length > 0 && (
+                      <span className="pill bad" style={{ marginLeft: 6, fontWeight: 400 }}>
+                        硬性条目未通过 {veto.length} 条 · 一票否决
+                      </span>
+                    )}
+                  </>
+                );
+              })()}
+            </h3>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr className="muted" style={{ textAlign: "left", fontSize: 12 }}>
@@ -198,12 +261,50 @@ export function AuditBoard({ runId }: { runId: string }) {
                   return (
                     <React.Fragment key={c.id}>
                       <tr style={{ borderTop: "1px solid var(--border)" }}>
-                        <td>{c.description}</td>
                         <td>
-                          <span className={`pill ${STATUS_PILL[c.status] || "accent"}`}>{c.status}</span>
+                          {c.criterion_id && (
+                            <>
+                              <span className="mono muted" style={{ fontSize: 11 }}>
+                                {c.criterion_id}
+                              </span>{" "}
+                              <span className={`pill ${PRIORITY_CLASS[c.priority || "medium"] || "accent"}`}>
+                                {PRIORITY_LABEL[c.priority || "medium"] || c.priority}
+                              </span>{" "}
+                              {c.dimension && (
+                                <span className="muted" style={{ fontSize: 11 }}>
+                                  {RUBRIC_DIMENSION_LABEL[c.dimension] || c.dimension}
+                                </span>
+                              )}{" "}
+                            </>
+                          )}
+                          {c.description}
+                          {c.satisfaction_condition && (
+                            <div className="muted" style={{ fontSize: 11 }}>
+                              通过条件：{c.satisfaction_condition}
+                            </div>
+                          )}
+                          {c.blocked_reason && (
+                            <div className="muted" style={{ fontSize: 11 }}>
+                              ⚠ 受阻：{c.blocked_reason}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <span className={`pill ${STATUS_PILL[c.status] || "accent"}`}>
+                            {RUBRIC_STATUS_LABEL[c.status] || c.status}
+                          </span>
                         </td>
                         <td className="mono">{c.score ?? "—"}</td>
-                        <td className="muted">{c.note || ""}</td>
+                        <td className="muted">
+                          {c.note || ""}
+                          {c.evaluated_by && (
+                            <div className="muted" style={{ fontSize: 11 }}>
+                              {c.evaluated_by.startsWith("programmatic")
+                                ? `程序化判定（${c.evaluated_by.replace("programmatic:", "")}）`
+                                : "judge 判定"}
+                            </div>
+                          )}
+                        </td>
                         <td style={{ textAlign: "right" }}>
                           <button
                             className="btn tiny"

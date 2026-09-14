@@ -46,10 +46,14 @@ class RunCapabilityTest(unittest.TestCase):
         self.run_id = _make_run(self.orch.svc)
 
     def test_stub_capability_creates_artifact(self) -> None:
+        # NOTE: must target a layer that is genuinely still a ``StubCapabilityExecutor``.
+        # ``layer_01_literature_research`` used to be one but was replaced by the real
+        # LiteratureResearchExecutor in Phase 2 (it performs an arXiv search and needs a
+        # query), so it no longer exercises the stub contract.
         stage, result = self.orch.run_capability(
-            self.run_id, "layer_01_literature_research", {"label": "seed_papers"}
+            self.run_id, "layer_02_idea_generation_evaluation", {"label": "seed_ideas"}
         )
-        self.assertEqual(stage.stage_code, "01_literature_research")
+        self.assertEqual(stage.stage_code, "02_idea_generation_evaluation")
         self.assertTrue(result.output_refs)  # a real artifact was published
         self.assertIsNone(result.event)  # stub emits no decision-triggering event
         events = self.orch.svc.list_events(self.run_id)
@@ -426,16 +430,18 @@ class ProtocolEndpointTest(unittest.TestCase):
         data = resp.json()
         self.assertIn("capabilities", data)
         # 10 infrastructure layers + the extra real kaggle_eval + layer_11_external_audit
-        # + the three F3 sandbox capabilities (kaggle_eval_sandbox / run_research_sandbox /
-        # text_cls_sandbox) + the three 2026-08-11 classifier sandbox capabilities
-        # (image_cls_sandbox / audio_cls_sandbox / embedding_sandbox) + the B-flywheel
-        # badcase_retrain capability + the auto_label capability = 20.
-        self.assertEqual(len(data["capabilities"]), 20)
+        # + layer_12_rubric_induction (evaluation-standard stage) + the three F3 sandbox
+        # capabilities (kaggle_eval_sandbox / run_research_sandbox / text_cls_sandbox)
+        # + the three 2026-08-11 classifier sandbox capabilities (image_cls_sandbox /
+        # audio_cls_sandbox / embedding_sandbox) + the B-flywheel badcase_retrain
+        # capability + the auto_label capability = 21.
+        self.assertEqual(len(data["capabilities"]), 21)
         cap_ids = [c["capability_id"] for c in data["capabilities"]]
         self.assertIn("kaggle_eval", cap_ids)
         self.assertIn("badcase_retrain", cap_ids)
         self.assertIn("auto_label", cap_ids)
         self.assertIn("layer_11_external_audit", cap_ids)
+        self.assertIn("layer_12_rubric_induction", cap_ids)
         self.assertIn("kaggle_eval_sandbox", cap_ids)
         self.assertIn("run_research_sandbox", cap_ids)
         self.assertIn("text_cls_sandbox", cap_ids)

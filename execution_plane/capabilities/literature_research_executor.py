@@ -3,8 +3,13 @@
 Replaces the long-standing ``StubCapabilityExecutor`` for the
 ``layer_01_literature_research`` layer. Behaviour:
 
-* ``params["query"]`` (required) — free-text query. arXiv's API interprets it the
-  same way as the website search (title / abstract / author tokens).
+* ``params["query"]`` — free-text query. arXiv's API interprets it the same way as
+  the website search (title / abstract / author tokens). When absent, it is DERIVED
+  from the research goal actually in scope (``params["goal"]`` / ``["objective"]`` /
+  ``["open_goal"]``, then the run's ``objective_snapshot``) — see :func:`derive_query`.
+  This is what lets an orchestrated caller (the MEA loop, an agent) invoke the layer
+  without restating the topic it is already working on. Still fail-closed: when no
+  research goal is reachable at all, the stage FAILS instead of searching for junk.
 * ``params["max_results"]`` (default 20) — cap on returned papers.
 * ``params["sources"]`` (default ``["arxiv"]``) — sub-list of ``arxiv`` /
   ``github``. GitHub requires ``GITHUB_TOKEN`` (falls back to ``arxiv`` only
@@ -33,6 +38,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -61,6 +67,78 @@ _DEFAULT_CACHE_DIR = os.path.join(
     "literature",
 )
 _TIMEOUT = 20.0
+
+# Orchestrator-injected blocks that are NOT part of the research topic. A goal string
+# travelling through the loop accumulates playbook text, replayed experience, refine
+# directives and prior-audit trends; feeding any of it to arXiv produces noise, so the
+# derived query is cut at the first marker.
+_SCAFFOLD_MARKERS = (
+    "[PLAYBOOK",
+    "[EXPERIENCE",
+    "[REFINE]",
+    "[AVOID]",
+    "[INNER-LOOP INSTRUCTIONS]",
+    "[prior outer-loop audits",
+    "[RUBRIC",
+)
+# The MEA decomposition appends a scaffold line ("子任务 literature_search") to every
+# subtask goal. It names the pipeline step, not the research topic.
+_SUBTASK_LINE = re.compile(r"^\s*(子任务|subtask)\s*[:：]?\s*\S+\s*$", re.IGNORECASE)
+# arXiv's free-text search degrades badly on very long strings.
+_MAX_QUERY_CHARS = 200
+
+# Fields (in priority order) that may legitimately stand in for an explicit query.
+# ``name`` / ``dataset_desc`` are deliberately EXCLUDED: a display label or a data
+# description is not a research topic, and silently searching on one would replace a
+# caller's mistake with a plausible-looking but wrong literature set.
+_QUERY_PARAM_KEYS = ("goal", "objective", "open_goal")
+_QUERY_SNAPSHOT_KEYS = ("goal", "objective")
+
+
+def derive_query(text: str, max_chars: int = _MAX_QUERY_CHARS) -> str:
+    """Reduce a research-goal string to a usable free-text search query.
+
+    Strips orchestrator scaffolding (playbook / experience / refine / audit blocks and
+    MEA subtask marker lines), collapses whitespace and truncates. Returns ``""`` when
+    nothing topical survives, so callers can keep failing closed.
+    """
+
+    s = str(text or "")
+    for marker in _SCAFFOLD_MARKERS:
+        idx = s.find(marker)
+        if idx >= 0:
+            s = s[:idx]
+    lines = [ln for ln in s.splitlines() if not _SUBTASK_LINE.match(ln)]
+    q = " ".join(" ".join(lines).split())
+    if len(q) > max_chars:
+        # Cut on a word boundary when there is one, so the query stays readable.
+        cut = q[:max_chars]
+        sp = cut.rfind(" ")
+        q = cut[:sp] if sp > max_chars // 2 else cut
+    return q.strip()
+
+
+def resolve_query(params: dict[str, Any], objective_snapshot: dict[str, Any] | None) -> tuple[str, str]:
+    """Resolve the effective search query. Returns ``(query, provenance)``.
+
+    ``provenance`` is ``"explicit"`` when the caller passed ``query``, otherwise
+    ``"derived:<source>"`` — recorded in the artifact + detail so a reader can always
+    tell whether the search topic was stated or inferred. ``("", "")`` means no research
+    goal was reachable (the caller must fail closed).
+    """
+
+    explicit = str(params.get("query") or "").strip()
+    if explicit:
+        return explicit, "explicit"
+    for key in _QUERY_PARAM_KEYS:
+        cand = derive_query(params.get(key, ""))
+        if cand:
+            return cand, f"derived:params.{key}"
+    for key in _QUERY_SNAPSHOT_KEYS:
+        cand = derive_query((objective_snapshot or {}).get(key, ""))
+        if cand:
+            return cand, f"derived:objective_snapshot.{key}"
+    return "", ""
 
 
 @dataclass
@@ -284,14 +362,27 @@ class LiteratureResearchExecutor(StageExecutor):
         sdk: PlatformSDK,
         params: dict[str, Any],
     ) -> ExecResult:
-        query = (params.get("query") or "").strip()
+        # An orchestrated caller (MEA subtask, agent) is already working on a research
+        # goal and should not have to restate it; fall back to that goal, but only to a
+        # field that genuinely IS the research topic (see ``_QUERY_PARAM_KEYS``).
+        snapshot: dict[str, Any] = {}
+        if not str(params.get("query") or "").strip():
+            try:
+                run = sdk.load_object(f"run:{stage_run.run_id}")
+                snapshot = getattr(run, "objective_snapshot", None) or {}
+            except Exception as exc:  # run lookup must never crash the stage
+                logging.warning("literature_search could not read the run objective: %s", exc)
+        query, provenance = resolve_query(params, snapshot)
         if not query:
             return ExecResult(
                 final_status=StageStatus.FAILED,
                 gate_result=GateResult.FAILED,
                 event=None,
                 output_refs=[],
-                detail="literature_research 需要 params['query']（非空）",
+                detail=(
+                    "literature_research 需要 params['query']（非空）；"
+                    "也未能从 params['goal'/'objective'/'open_goal'] 或 run 的研究目标推导出检索词"
+                ),
             )
 
         max_results = int(params.get("max_results") or 20)
@@ -355,6 +446,9 @@ class LiteratureResearchExecutor(StageExecutor):
             metadata={
                 "suite": "literature_research",
                 "query": query,
+                # Whether the topic was stated by the caller or inferred from the goal —
+                # a reader of the paper set must be able to tell.
+                "query_provenance": provenance,
                 "sources": sources,
                 "since": since,
                 "source_tag": source_tag,
@@ -371,8 +465,11 @@ class LiteratureResearchExecutor(StageExecutor):
             gate_result=GateResult.PASSED if n_hits > 0 else GateResult.WAIVED,
             event=event,
             output_refs=[artifact.artifact_id],
-            detail=f"literature_search [{source_tag}] q={query!r} → {n_hits}/{max_results} hits",
+            detail=(
+                f"literature_search [{source_tag}] q={query!r} ({provenance}) "
+                f"→ {n_hits}/{max_results} hits"
+            ),
         )
 
 
-__all__ = ["LiteratureResearchExecutor", "Paper"]
+__all__ = ["LiteratureResearchExecutor", "Paper", "derive_query", "resolve_query"]

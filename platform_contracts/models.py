@@ -22,6 +22,7 @@ from .events import BasePlatformEvent
 from .events import DecisionRecordedEvent
 from .events import EvalCompletedEvent
 from .events import LessonPromotedEvent
+from .events import RubricSynthesizedEvent
 from .events import StageStatusChangedEvent
 from .events import WorkflowStatusChangedEvent
 from .export import export_contract_schema_files
@@ -32,10 +33,15 @@ from .objects import AttackCampaign
 from .objects import DatasetRelease
 from .objects import DecisionRecord
 from .objects import EvalSuite
+from .objects import ExecutableRubric
 from .objects import LessonCard
 from .objects import ModelVersion
 from .objects import PolicyPack
 from .objects import ResearchProgram
+from .objects import RubricCriterion
+from .objects import RubricFinding
+from .objects import RubricGoal
+from .objects import RubricReview
 from .objects import SafetyTarget
 from .objects import StageRun
 from .objects import WorkflowRun
@@ -62,6 +68,7 @@ __all__ = [
     "EvalCompletedEvent",
     "EvalSuite",
     "EventType",
+    "ExecutableRubric",
     "GateResult",
     "LessonCard",
     "LessonPromotedEvent",
@@ -73,6 +80,11 @@ __all__ = [
     "RegistryStatus",
     "ResearchProgram",
     "RiskTier",
+    "RubricCriterion",
+    "RubricFinding",
+    "RubricGoal",
+    "RubricReview",
+    "RubricSynthesizedEvent",
     "RunType",
     "SafetyTarget",
     "StageRun",

@@ -75,11 +75,15 @@ EXPECTED_ROUTES: dict[str, tuple[str, ...]] = {
     "/benchmark-suites/{suite_id}/tasks": ("GET",),
     "/benchmark-tasks": ("GET",),
     "/benchmark-tasks/register": ("POST",),
+    # Rubric stage: audit a declared evaluation standard + preview the rubric it yields.
+    "/benchmark-tasks/review-standard": ("POST",),
     "/benchmark-tasks/task-types": ("GET",),
     "/benchmark-tasks/upload-dataset": ("POST",),
     "/benchmark-tasks/validate": ("POST",),
     "/benchmark-tasks/{task_id}": ("DELETE",),
     "/benchmark-tasks/{task_id}/launch": ("POST",),
+    # The executable rubric a run of this task would be graded against.
+    "/benchmark-tasks/{task_id}/rubric": ("GET",),
     "/decisions/{decision_id}": ("GET",),
     "/events": ("GET",),
     "/experiences": ("GET",),
@@ -120,6 +124,8 @@ EXPECTED_ROUTES: dict[str, tuple[str, ...]] = {
     "/workflow-runs/{run_id}/request-approval": ("POST",),
     "/workflow-runs/{run_id}/resolve-approval": ("POST",),
     "/workflow-runs/{run_id}/resolve-collaboration": ("POST",),
+    # The frozen rubric this run is graded against + per-iteration criterion verdicts.
+    "/workflow-runs/{run_id}/rubric": ("GET",),
     "/workflow-runs/{run_id}/run-experiment": ("POST",),
     "/workflow-runs/{run_id}/stages": ("GET", "POST"),
     "/workflow-runs/{run_id}/start": ("POST",),

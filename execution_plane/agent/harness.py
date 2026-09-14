@@ -77,6 +77,12 @@ AGENT_TOOL_NAMES: list[str] = [
 OUTER_LOOP_RESERVED_CAPS: frozenset[str] = frozenset({
     "layer_11_external_audit", "external_audit", "audit",
     "layer_09_self_iterative_evolution", "self_iterative_evolution", "self_evolution",
+    # layer_12 induces / reviews the rubric the run is GRADED against. If an inner-loop
+    # agent could invoke it, it could regenerate its own grading standard (or relax a
+    # threshold) and then trivially "pass" — a strictly worse self-confirmation hole than
+    # self-auditing. The rubric is produced once by the control plane, frozen, and handed
+    # to the inner loop READ-ONLY as an execution contract.
+    "layer_12_rubric_induction", "rubric_induction", "rubric",
 })
 
 

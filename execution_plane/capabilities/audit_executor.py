@@ -25,6 +25,7 @@ from ...platform_contracts.enums import GateResult
 from ...platform_contracts.enums import StageStatus
 from ...platform_contracts.events import AuditCompletedEvent
 from ...platform_contracts.objects import AuditReport
+from ...platform_contracts.objects import ExecutableRubric
 from ...platform_contracts.objects import StageRun
 from ..base import ExecResult
 from ..base import StageExecutor
@@ -60,6 +61,28 @@ def _status_from_score(score: float) -> str:
     if score >= 0.4:
         return "partial"
     return "missing"
+
+
+def _resolve_rubric(params: dict[str, Any], audit_input: dict[str, Any]) -> ExecutableRubric | None:
+    """Load the run's frozen executable rubric from the curated audit input.
+
+    Accepts either an already-constructed :class:`ExecutableRubric` or its serialized
+    dict, from ``params["rubric"]`` or ``audit_input["rubric"]``. A malformed rubric is
+    ignored (the audit falls back to its built-in constraints) rather than crashing the
+    outer loop — the audit must always produce a verdict.
+    """
+
+    raw = params.get("rubric") or (audit_input or {}).get("rubric")
+    if raw is None:
+        return None
+    if isinstance(raw, ExecutableRubric):
+        return raw
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return ExecutableRubric.model_validate(raw)
+    except Exception:  # noqa: BLE001 - a bad rubric must not break the audit
+        return None
 
 
 def evaluate_constraint(
@@ -226,7 +249,36 @@ class AuditExecutor(StageExecutor):
             "note": f"judge(score)={claim_support}",
         })
 
-        # (4) any caller-supplied extra constraints (e.g. from the research objective)
+        # (4) TASK-SPECIFIC EXECUTABLE RUBRIC (layer_12) — the run's grading contract.
+        # The rubric was induced from the task DEFINITION before any result existed and
+        # then frozen, so grading against it cannot be post-hoc standard fitting. Each
+        # criterion is evaluated PROGRAMMATICALLY against the curated metrics wherever a
+        # ``check`` spec exists; only criteria that genuinely have no machine check fall
+        # back to the claim judge (and say so via ``evaluated_by``).
+        rubric = _resolve_rubric(params, audit_input)
+        rubric_summary: dict[str, Any] = {}
+        if rubric is not None and rubric.criteria:
+            from ...rubric.checks import evaluate_criteria as _eval_criteria
+            from ...rubric.checks import summarize as _summarize_criteria
+
+            rubric_ctx = {
+                "metrics": dict(last_metrics or {}),
+                "report_ref": report_ref,
+                "real_eval": real_eval,
+                "artifact_types": list(
+                    (audit_input or {}).get("artifact_types", []) or []
+                ),
+                "config": dict((audit_input or {}).get("result_config", {}) or {}),
+            }
+            rubric_constraints = _eval_criteria(
+                rubric.criteria, rubric_ctx, judge=judge, answer=answer
+            )
+            constraints.extend(rubric_constraints)
+            rubric_summary = _summarize_criteria(rubric_constraints)
+            rubric_summary["rubric_id"] = rubric.rubric_id
+            rubric_summary["source"] = rubric.source
+
+        # (5) any caller-supplied extra constraints (e.g. from the research objective)
         extra_constraints = list(params.get("constraints", []) or [])
         if audit_input:
             extra_constraints += list(audit_input.get("constraints", []) or [])
@@ -241,9 +293,30 @@ class AuditExecutor(StageExecutor):
                 "note": f"judge(score)={cs}",
             })
 
-        # ---- aggregate confidence s (eval constraint weighted x2) ----
-        weights = [2.0 if c["id"] == "primary_metric" else 1.0 for c in constraints]
-        total_w = sum(weights)
+        # ---- aggregate confidence s ----
+        # The built-in ``primary_metric`` constraint keeps its x2 weight; rubric criteria
+        # carry their own priority-scaled weight so a "high"-priority criterion (e.g. the
+        # generalization-gap check) actually moves the verdict.
+        #
+        # Rubric criteria that could NOT be decided on evidence (``evaluable=False``: the
+        # requirement is blocked by a task-definition gap, or the needed metric was never
+        # reported) get weight 0. They remain listed as unmet in the criterion-level
+        # report, but they must not depress the *research's* score — that gap belongs to
+        # the task definition and is already reported by the rubric review and layer_12's
+        # gate. Net effect: adding a rubric can only tighten a verdict when a real check
+        # actually fails, never merely because data is absent.
+        def _weight(c: dict[str, Any]) -> float:
+            if c.get("id") == "primary_metric":
+                return 2.0
+            if c.get("criterion_id"):
+                if not c.get("evaluable", True):
+                    return 0.0
+                scale = {"high": 2.0, "medium": 1.0, "low": 0.5}
+                return float(c.get("weight", 1.0)) * scale.get(str(c.get("priority")), 1.0)
+            return 1.0
+
+        weights = [_weight(c) for c in constraints]
+        total_w = sum(weights) or 1.0
         confidence = round(sum(c["score"] * w for c, w in zip(constraints, weights)) / total_w, 4)
 
         unresolved = [c["description"] for c in constraints if c["status"] != "verified"]
@@ -262,8 +335,29 @@ class AuditExecutor(StageExecutor):
             if streak >= 3:
                 recoverable = False
 
+        # ---- HARD-FAILURE VETO: a decisive failed check blocks Accept ----
+        # A single aggregate confidence can average a hard failure away: adding more
+        # easy-to-pass constraints *dilutes* the one that actually matters (an 0.18
+        # CV→held-out gap, or a primary metric below its gate). The rubric exists
+        # precisely to report *which* criterion is unmet, so any decisive check that RAN
+        # and FAILED (``conflict``) vetoes Accept regardless of the scalar:
+        #
+        #   * the built-in ``primary_metric`` constraint (the run's own gate), and
+        #   * any HIGH-priority rubric criterion.
+        #
+        # ``missing`` / ``partial`` are NOT vetoes — an undecidable criterion must not
+        # deadlock the loop (see checks.py rule 2); it is reported, not punished.
+        rubric_veto = [
+            c for c in constraints
+            if c.get("status") == "conflict"
+            and (
+                c.get("id") == "primary_metric"
+                or (c.get("criterion_id") and c.get("priority") == "high")
+            )
+        ]
+
         # ---- Accept / Refine / Restart (AREX decision law) ----
-        if confidence >= threshold:
+        if confidence >= threshold and not rubric_veto:
             recommendation = "accept"
             gate_passed = True
         elif not recoverable:
@@ -272,6 +366,13 @@ class AuditExecutor(StageExecutor):
         else:
             recommendation = "refine"
             gate_passed = False
+        if rubric_veto:
+            veto_note = "硬性判定条目未通过: " + "; ".join(
+                f"{c.get('criterion_id') or c.get('id')}({c.get('dimension') or 'gate'})"
+                for c in rubric_veto[:4]
+            )
+            # Surface the veto as an unresolved claim so refine folds it into the goal.
+            unresolved = [veto_note] + [u for u in unresolved if u != veto_note]
 
         audit_id = f"audit-{stage_run.stage_run_id}"
         report_ref = f"audit-report://{stage_run.stage_run_id}"
@@ -310,10 +411,32 @@ class AuditExecutor(StageExecutor):
                 "lineage_parent_ids": stage_run.input_refs,
             },
             schema_version="1.0.0",
-            metadata={"recommendation": recommendation, "confidence": confidence},
+            metadata={
+                "recommendation": recommendation,
+                "confidence": confidence,
+                # Criterion-level verdict (AutoSciRub verification-report style): which
+                # criteria passed / failed, not just the scalar.
+                "rubric_summary": rubric_summary,
+            },
         )
         sdk.record_metric(stage_run.run_id, "audit.confidence", confidence, tags={"recommendation": recommendation})
+        if rubric_summary:
+            sdk.record_metric(
+                stage_run.run_id, "rubric.criteria_passed",
+                float(rubric_summary.get("passed", 0)),
+                tags={"rubric_id": str(rubric_summary.get("rubric_id", "")),
+                      "failed": str(rubric_summary.get("failed", 0))},
+            )
 
+        rubric_bit = ""
+        if rubric_summary:
+            rubric_bit = (
+                f" | rubric {rubric_summary.get('passed')}/"
+                f"{rubric_summary.get('passed', 0) + rubric_summary.get('failed', 0)} 通过"
+                f"（未通过: {','.join(rubric_summary.get('unmet_criterion_ids', [])) or '无'}）"
+            )
+        if rubric_veto:
+            rubric_bit += f" | VETO: {len(rubric_veto)} 条硬性条目未通过"
         return ExecResult(
             final_status=StageStatus.SUCCEEDED,
             gate_result=GateResult.PASSED if gate_passed else GateResult.FAILED,
@@ -321,6 +444,6 @@ class AuditExecutor(StageExecutor):
             output_refs=[artifact.artifact_id],
             detail=(
                 f"external audit: confidence={confidence} -> {recommendation.upper()} "
-                f"(unresolved={len(unresolved)}, recoverable={recoverable})"
+                f"(unresolved={len(unresolved)}, recoverable={recoverable}){rubric_bit}"
             ),
         )

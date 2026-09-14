@@ -9,9 +9,9 @@
 - `enums.py`
   - 平台级枚举定义，包括对象状态、事件类型、决策类型、可见性与风险等级
 - `objects.py`
-  - 12 个核心对象模型
+  - 21 个核心对象模型
 - `events.py`
-  - 统一事件模型
+  - 统一事件模型（16 个）
 - `transitions.py`
   - `WorkflowRun`、`StageRun`、`DecisionRecord` 的状态流转 contract 与校验函数
 - `export.py`
@@ -25,7 +25,9 @@
 
 ### 核心对象
 
-当前已定义以下 12 个对象：
+当前已定义以下 **21 个**对象（12 个初版 + 4 个双循环累积态 + 5 个评分标准环节）：
+
+**初版核心（1–12）**
 
 1. `ResearchProgram`
 2. `SafetyTarget`
@@ -40,23 +42,50 @@
 11. `LessonCard`
 12. `PolicyPack`
 
+**双循环 / 累积态（13–16）**
+
+13. `AuditReport` —— 外审计结论（constraints / unresolved_claims / confidence / recoverable）
+14. `ImprovementProposal` —— 元循环改进提案（可证伪预测 + 回滚）
+15. `HypothesisNode` —— 假设树节点（含 `node_kind` 区分 config/program 粒度）
+16. `ExperienceEntry` —— 跨 run 经验卡（confidence 随 staleness 衰减）
+
+**评分标准环节（17–21，2026-09-09 新增，详见 `../doc/design_notes.md` §4）**
+
+17. `RubricGoal` —— 从任务指令派生的原子科研目标（携带 `instruction_evidence` 可追溯）
+18. `RubricCriterion` —— 可执行判定条目：`requirement` / `dimension` / `priority` /
+    `satisfaction_condition` / `check`（程序化判定规格）/ `blocked_reason`
+19. `RubricFinding` —— 标准审查发现的缺陷（`dimension` / `severity` / `suggestion`）
+20. `RubricReview` —— 三维审查结论：准确性 0.45 / 完整性 0.30 / 科学性 0.25 加权
+21. `ExecutableRubric` —— 冻结的评分契约（`source` / `criteria` / `claims_to_avoid` / `integrity_hash`）
+
+> `ArtifactType` 已扩至 14 种，含 `rubric`（评分标准）与 `paper_set`（文献集）。
+
 ### 统一事件
 
-当前已实现 10 个事件模型（与架构 spec §9.2 的最小事件集合对齐）：
+当前已实现 **16 个**事件模型（与架构 spec §9.2 的最小事件集合对齐）：
 
 1. `BasePlatformEvent` —— 所有事件的公共基类（`event_id` / `event_type` / `run_id` / `occurred_at`，后两者带默认值）
 2. `WorkflowStatusChangedEvent` —— 工作流状态变更（requested/started/finished + approval 信号）
 3. `StageStatusChangedEvent` —— 阶段状态变更（queued/started/gate_passed/gate_failed/cancelled + approval 信号）
 4. `DecisionRecordedEvent` —— 控制面决策下发
 5. `ArtifactPublishedEvent` —— 统一产物发布
-6. `ApprovalRequiredEvent` —— 打开 HITL 审批门，携带策略/角色/风险等级上下文（**新增**）
-7. `ApprovalResolvedEvent` —— 审批被解决（approved / rejected）（**新增**）
-8. `EvalCompletedEvent` —— 评测/基准套件完成，携带指标与门控结果（**新增**）
-9. `AttackCompletedEvent` —— 红队/对抗活动完成，携带 ASR 与防遗忘信号（retention/forgetting rate）（**新增**）
-10. `LessonPromotedEvent` —— 经验卡从临时观察升级为平台对象（**新增**）
+6. `ApprovalRequiredEvent` —— 打开 HITL 审批门，携带策略/角色/风险等级上下文
+7. `ApprovalResolvedEvent` —— 审批被解决（approved / rejected）
+8. `EvalCompletedEvent` —— 评测/基准套件完成，携带指标与门控结果
+9. `AttackCompletedEvent` —— 红队/对抗活动完成，携带 ASR 与防遗忘信号（retention/forgetting rate）
+10. `LessonPromotedEvent` —— 经验卡从临时观察升级为平台对象
+11. `AuditCompletedEvent` —— 外审计完成，驱动 Accept / Refine / Restart
+12. `AuditFollowupEvent` —— 对单条审计约束的定向追问与重评（F6 协议）
+13. `ImprovementAppliedEvent` —— 元循环改进已应用（可回滚）
+14. `AgentStepEvent` —— agent 执行流水单步（工具调用 / 终态）
+15. `DebugEvent` —— 调试用事件（隔离单个 stage）
+16. `RubricSynthesizedEvent` —— **评分标准已确立**（2026-09-09 新增）：携带 `rubric_id` /
+    `source`（synthesized|reviewed）/ `criteria_count` / `review` / `integrity_hash`；
+    **其索引必定早于该 run 的首个 `eval_completed`**（标准先于结果，有测试固化）
 
-> `EventType` 枚举现已覆盖 spec §9.2 的全部 15 个事件（另补 `stage_cancelled` 以闭合阶段状态机）。
+> `EventType` 枚举共 22 个值。
 > `ApprovalRequired` / `ApprovalResolved` 以“专用领域事件 + 工作流/阶段状态变更事件”双写形式存在：前者携带 HITL 业务负载，后者是生命周期信号。
+> 契约变更须同步重生成：`python -m safety_auto_research.platform_contracts.export_schemas` 与 `export_typescript`（前端经 `npm run gen:contracts` 同步 `contracts.ts`）。
 
 ### 状态流转 contract
 
@@ -146,8 +175,8 @@ API 端点：`POST /workflow-runs/{run_id}/dispatch`、`POST /workflow-runs/{run
 
 验证内容包括：
 
-1. 12 个核心对象最小实例化
-2. 事件模型实例化
+1. 21 个核心对象最小实例化（对象清单以**集合相等**断言冻结，新增/删除对象必须同步本文件与测试）
+2. 事件模型实例化（事件清单同样以集合相等冻结）
 3. 状态流转校验
 4. JSON Schema 导出结构
 5. JSON Schema 文件落盘

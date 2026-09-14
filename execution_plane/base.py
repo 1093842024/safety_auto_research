@@ -28,6 +28,11 @@ class ExecResult:
     event: BasePlatformEvent | None = None
     output_refs: list[str] = field(default_factory=list)
     detail: str = ""
+    # Optional structured output the orchestrator needs in-process and that does not fit
+    # the event/artifact contracts (e.g. layer_12's frozen ExecutableRubric, which must
+    # be handed to the inner loop and to layer_11 within the same run). Defaults to an
+    # empty dict so every existing executor and caller is unaffected.
+    payload: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

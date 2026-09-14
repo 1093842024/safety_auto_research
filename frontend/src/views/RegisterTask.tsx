@@ -2,12 +2,16 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   BenchmarkTask,
   FieldSpec,
+  RubricPreview,
+  RubricReview,
   TaskTypeSpec,
   getTaskTypes,
   registerBenchmarkTask,
+  reviewTaskStandard,
   uploadDataset,
   validateTask,
 } from "../api/client";
+import { RubricReviewCard } from "../components/RubricPanel";
 
 const GROUP_LABELS: Record<string, string> = {
   basic: "基本信息",
@@ -185,6 +189,12 @@ export function RegisterTask({
   const [validateErrors, setValidateErrors] = useState<string[]>([]);
   const [validating, setValidating] = useState(false);
   const [hasValidated, setHasValidated] = useState(false);
+  // Rubric stage (advisory): three-dimensional audit of the declared evaluation
+  // standard + a preview of the executable rubric the run will be graded against.
+  // Deliberately separate from ``validateErrors``: a form can be perfectly valid and
+  // still declare a scientifically weak standard, so this never blocks registration.
+  const [rubricReview, setRubricReview] = useState<RubricReview | null>(null);
+  const [rubricPreview, setRubricPreview] = useState<RubricPreview | null>(null);
 
   useEffect(() => {
     getTaskTypes()
@@ -202,6 +212,8 @@ export function RegisterTask({
     setError("");
     setValidateErrors([]);
     setHasValidated(false);
+    setRubricReview(null);
+    setRubricPreview(null);
     const init: Record<string, any> = {
       eval_metric: s.default_metric.eval_metric,
       direction: s.default_metric.direction,
@@ -239,6 +251,10 @@ export function RegisterTask({
         const res = await validateTask(spec.type_id, values);
         setValidateErrors(res.valid ? [] : res.errors);
         setHasValidated(true);
+        // /validate also returns the rubric stage output; prefer it so the two
+        // verdicts always come from the same request.
+        if (res.review !== undefined) setRubricReview(res.review ?? null);
+        if (res.rubric_preview !== undefined) setRubricPreview(res.rubric_preview ?? null);
       } catch (e: any) {
         // Network/backend hiccup shouldn't block the form; surface softly.
         setValidateErrors([]);
@@ -249,6 +265,41 @@ export function RegisterTask({
     }, 400);
     return () => clearTimeout(handle);
   }, [spec, values, missingRequired.length]);
+
+  // Rubric stage review — runs INDEPENDENTLY of form completeness, because the
+  // evaluation standard is defined by eval_metric/direction/baseline/target alone.
+  // The researcher therefore sees standard defects while still filling in the data
+  // fields, instead of only after the whole form is valid.
+  const stdKey = JSON.stringify([
+    values.eval_metric,
+    values.direction,
+    values.baseline,
+    values.target_value,
+    values.threshold,
+    values.cv_folds,
+    values.description,
+  ]);
+  useEffect(() => {
+    if (!spec) return;
+    if (missingRequired.length === 0) return; // the /validate call above covers it
+    if (!values.eval_metric) return;
+    let cancelled = false;
+    const handle = setTimeout(async () => {
+      try {
+        const res = await reviewTaskStandard(spec.type_id, values);
+        if (cancelled) return;
+        setRubricReview(res.review ?? null);
+        setRubricPreview(res.rubric_preview ?? null);
+      } catch {
+        /* advisory only — never surface as a form error */
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spec, stdKey, missingRequired.length]);
 
   const submit = async () => {
     if (!spec) return;
@@ -371,6 +422,12 @@ export function RegisterTask({
               ✓ 已通过数据集格式与评测指标校验
             </p>
           )}
+
+          {/* Rubric stage: is the DECLARED EVALUATION STANDARD accurate / complete /
+              scientific — and if none was declared, what will be generated instead.
+              Advisory: it never blocks the submit button (a weak standard is
+              strengthened automatically at run time by layer_12). */}
+          <RubricReviewCard review={rubricReview} preview={rubricPreview} compact />
 
           <div className="row" style={{ marginTop: 16, justifyContent: "flex-end", gap: 10 }}>
             <button className="btn" onClick={onCancel}>

@@ -167,7 +167,51 @@ def build_benchmarks_router(deps: ControlPlaneDeps) -> APIRouter:
             record = registry.register_custom_task(req.task_type, req.values)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-        return registry.custom_task_to_benchmark_dict(record)
+        out = registry.custom_task_to_benchmark_dict(record)
+        # Rubric stage (registration-time): report how good the declared evaluation
+        # standard is — and, when none was declared, what rubric will be generated.
+        # Advisory only: a weak standard does not block registration (the run-time
+        # layer_12 stage will synthesize a stronger rubric anyway), but the researcher
+        # sees the defects immediately instead of discovering them after a wasted run.
+        out["rubric_review"] = registry.review_registration_standard(
+            req.task_type, {**req.values, "task_id": record["task_id"]}
+        )
+        return out
+
+    @router.post(
+        "/benchmark-tasks/review-standard",
+        summary="Review a task's declared evaluation standard (accuracy / completeness / "
+                "scientificity) and preview the executable rubric — no persistence",
+    )
+    def review_task_standard(body: ValidateTaskRequest) -> dict:
+        """Rubric stage, dry-run: audit the standard + preview the induced rubric.
+
+        Same engine the runtime ``layer_12_rubric_induction`` stage uses, so what the
+        researcher previews here is exactly what the run will be graded against.
+        """
+
+        from ...benchmark_tasks import registry
+
+        return registry.review_registration_standard(body.task_type, body.values)
+
+    @router.get(
+        "/benchmark-tasks/{task_id}/rubric",
+        summary="The executable scoring rubric for a catalog task (induced on demand, "
+                "identical to what a run of this task will be graded against)",
+    )
+    def get_task_rubric(task_id: str, use_llm: bool = False) -> dict:
+        from ...rubric import RubricEngine
+        from ...rubric import TaskSpec
+
+        task = get_task(task_id)
+        if task is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"benchmark task {task_id} not found",
+            )
+        spec = TaskSpec.from_benchmark_dict(to_dict(task))
+        rubric = RubricEngine(use_llm=use_llm).induce(spec)
+        return rubric.model_dump(mode="json")
 
     @router.delete(
         "/benchmark-tasks/{task_id}",
@@ -601,7 +645,17 @@ def build_benchmarks_router(deps: ControlPlaneDeps) -> APIRouter:
         from ...benchmark_tasks import registry
 
         errors = registry.validate_registration(body.task_type, body.values)
-        return {"valid": not errors, "errors": errors}
+        # Two independent verdicts, deliberately kept separate:
+        #   * ``valid``/``errors``  — is the FORM well-formed? (blocks registration)
+        #   * ``rubric_review``     — is the declared EVALUATION STANDARD accurate,
+        #     complete and scientific? (advisory; drives the console's review card)
+        # A form can be perfectly valid and still declare a scientifically weak standard,
+        # which is exactly the gap this stage closes.
+        return {
+            "valid": not errors,
+            "errors": errors,
+            **registry.review_registration_standard(body.task_type, body.values),
+        }
 
     # ------------------------------------------------------------------ #
     # Research records: leaderboard / per-task history / reproduce        #

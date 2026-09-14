@@ -3,7 +3,7 @@
 > 本文件是 `safety_auto_research` 各功能设计的**单一权威**文档。按特性分节，每节标注状态。
 > **维护约定**：新设计直接在此文件追加/更新分节，**不再为单个特性新建独立 design_*.md**
 > （避免文档膨胀，类比 `code_review_STATUS.md`）。旧独立设计文档已并入本文件并删除。
-> 最后整理：2026-08-07。
+> 最后整理：2026-09-09（新增 §4 评分标准环节）。
 
 ---
 
@@ -143,3 +143,116 @@ SSE 实时推送**早已完整落地**——`progress_bus.py` 跨线程 `Progres
 - ✅ 已做：① 把 16 个 agent-mode 任务接成容器内真跑（表格类经 `kaggle_eval` 沙箱、非原生经 `research_cmd`、文本分类经 `text_cls_sandbox`，无脚本则诚实失败）；② 前端 launch 流程加隔离提示 UI（🐳 徽标 + step-2 横幅），透传后端 `sandbox_isolation` 4 级信号；③ F2 `text_classification` 真跑（真实 SST2 数据 + 沙箱隔离证明 + 真实 `EvalCompletedEvent`）。
 - 更新 backlog：F3 标 ✅ 已修（本地 Docker 硬隔离 + run_capability 已推广 + 前端隔离提示 UI）；F2 标「部分解（kaggle 类 + text_classification 已真跑；其余模态受 torch/GPU/数据可得性限制）」。
 - 远程 Docker 接入方式确定后补充 §3 决策 3 的实现方案。
+
+---
+
+## §4 任务专属可执行评分标准（Rubric Stage / `layer_12_rubric_induction`）
+
+**状态**：✅ 已落地并端到端验证（2026-09-09）。方法源自 **AutoSciRub**（zjunlp，*Learning to Evaluate Before Improving*，ResearchClawBench 33.2 Pass@1），本平台做了两处针对「优化 agent 会自利」的改造（见「与 AutoSciRub 的差异」）。
+
+### 问题
+
+平台此前**没有任务专属的评分标准**，研究「做到什么算成功」由两个与任务本身无关的东西决定：
+
+| # | 缺口 | 位置 |
+|---|---|---|
+| 1 | 任务级「评估标准」只是一个**单指标五元组**（`eval_metric`/`direction`/`baseline`/`reference`/`gates`）+ 自由文本 `eval_method` | `benchmark_tasks/__init__.py:35-48` |
+| 2 | 注册期「审查」只是**白名单匹配**：能拦「f1 配 lower」，拦不住「指标与研究目标不匹配 / 无泛化检验 / 无对照 / 阈值不科学」 | `benchmark_tasks/registry.py:461-573` |
+| 3 | 外审计 `layer_11` 只有 **4 条硬编码约束**，`primary_metric`/`eval_is_real`/`heldout_consistency`/`claims_supported` 对所有任务一视同仁 | `execution_plane/capabilities/audit_executor.py:158-227` |
+| 4 | 🚨 **关键**：`constraints` 扩展点是**死的**——executor 读取它（`:229-242`），但全仓**无人填充**：`routers/benchmarks.py` 只传 `threshold`、`experiments.py` 显式写 `[]` | 见上 |
+
+后果：一个「要求同时保住三个召回门限」的任务和一个「只求 top1 准确率」的任务，被同一套 4 条约束评判；而注册表单完全合法却声明了弱标准的情况，平台毫无察觉。
+
+### 决策
+
+新增 **`layer_12_rubric_induction`**（第 12 个能力，non-infra，不计入 10 个基础设施层），承担两件事：
+
+- **未提供可用标准** → 生成（synthesize）正确、有效、科学的标准；
+- **已提供标准** → 审查（review）其**准确性 / 完整性 / 科学性**并规范化为同一份可执行契约。
+
+新增包 `safety_auto_research/rubric/`：
+
+| 模块 | 职责 |
+|---|---|
+| `spec.py` | `TaskSpec`：目录任务 / 注册表单 / 运行快照三种输入的统一归一化视图 |
+| `review.py` | 三维审查（准确性 0.45 / 完整性 0.30 / 科学性 0.25 加权），纯确定性 |
+| `synthesize.py` | 目标骨架 → 可行性 → criterion 合成，确定性、每条带 `check` 规格 |
+| `checks.py` | 7 类程序化判定器 + 逐条汇总 |
+| `engine.py` | `RubricEngine.review/induce`，LLM 可选、append-only、失败静默降级 |
+
+### 运行时序（标准必须先于结果）
+
+```
+run_dual_loop / run_evolutionary_loop
+  └─ [iteration 0 之前] layer_12 ──► ExecutableRubric（frozen + integrity_hash）
+        ├─► inner_params["rubric_context"]  内循环只读执行契约
+        └─► audit_input["rubric"] ──► layer_11 逐条程序化判定 + 硬性一票否决
+```
+
+契约 `ExecutableRubric / RubricCriterion / RubricGoal / RubricReview / RubricFinding` + 事件 `RubricSynthesizedEvent` 进入 `platform_contracts/`，`ArtifactType` 增 `rubric`。
+
+### 审查规则（三维）
+
+| 维度 | 检查项 |
+|---|---|
+| **准确性** | 指标↔方向自洽（反向=Critical，并给可机器套用的修正）· 指标↔任务类型匹配 · 门限键可解析 · 门限 vs baseline（未超过=Critical）· 门限 vs reference（不可达=Important）· 取值域越界 |
+| **完整性** | 有通过门限 · 有基线 · **留出集泛化复核** · 对照/消融 · 统计稳定性（折数/种子）· 数据泄漏防护 · 评估可复现 |
+| **科学性** | 非单点指标（可 gaming）· 类不平衡敏感性 · **不以「得到期望结论」定义成功**（Critical）· 要求可核验证据 · 门限非平凡（>随机）且非满分 |
+
+### 生成的标准（平台可实跑任务 → 7 条，6 条程序化判定）
+
+| ID | 维度 | 强度 | 判定方式 |
+|---|---|---|---|
+| C1 | correctness | 硬性 | `metric_present` |
+| C2 | correctness | 硬性 | `metric_threshold` |
+| C3 | correctness | 硬性 | `metric_improves`（margin 0.005，非平凡改进） |
+| C4 | integrity | 硬性 | `real_eval`（禁止模拟冒充测量） |
+| C5 | generalization | 硬性 | `metric_gap`（CV↔留出集 ≤0.05，**反过拟合**） |
+| C6 | rigor | 一般 | `config_min`（≥3 折） |
+| C7 | reporting | 一般 | judge（结论↔证据一致；**阴性结论在方法正确时同样合格**） |
+
+约束型门限（如 `unsafe_recall>=0.66`）自动展开为 C8+；审查发现的 Critical 缺陷自动生成阻断型条目；当前环境无法测量的要求**保留并标注 `blocked_reason`**（不静默丢弃、也不静默通过）。
+
+### 隔离不变量（新增，均有测试固化）
+
+| 不变量 | 实现 |
+|---|---|
+| 内循环**不能**生成/修改标准 | `layer_12` 三个别名进 `OUTER_LOOP_RESERVED_CAPS`（agent 工具面 + HTTP 端点双层拦截） |
+| 算子不能跑在标准环节 | `INNER_LOOP_FORBIDDEN_CALLERS` += `layer_12` |
+| 标准**先于**结果确立 | 前置于 iteration 0；事件日志中 `rubric_synthesized` 索引 < `eval_completed` 索引（测试断言） |
+| 标准冻结 | `frozen=True` + `integrity_hash`；运行页对重建哈希不一致显式告警 |
+| LLM 只能加不能减 | 独立 `L*` id 空间、强制 `check={"kind":"judge"}`、priority 上限 medium |
+
+> 理由：本平台的内循环是**有目标的优化 agent**。若标准可由内循环产出，就出现了比「自审计」更严重的自确认——agent 可以给自己放宽评分标准。因此采用「控制面产出并冻结、内循环只读」。
+
+### 与 AutoSciRub 的差异（两处针对性改造）
+
+| AutoSciRub 原版 | 本平台 | 原因 |
+|---|---|---|
+| criterion 由 LLM 语义判定 | criterion 带 `check` 规格，**优先程序化判定** | 本平台有真实 metrics，能做真正「可执行」的判定而非语义猜测 |
+| 单 agent 自产出自用 | 控制面产出并冻结，内循环只读 | 见上「隔离不变量」 |
+
+保留其核心哲学：README.md:56-57 — *"reports which specific criteria are unmet and why, **instead of a single score**"*；以及 criterion-synthesis/SKILL.md:83 — *"Define satisfaction by correctness of the method and evidence, not agreement with a desired result."*
+
+### 两条核心设计教训（实施中付出代价才发现的，务必保留）
+
+1. **不可判定的 criterion 不得计入加权分**。任务定义缺声明（无 heldout、无 cv_folds）导致 criterion 无法测量时，若按 `missing` 计 0.0，扣的是**研究**的分 —— 所有 tracked-only 任务将永远无法通过。故引入 `evaluable` 标记：不可判定条目权重归 0（仍如实报告为未达标）。性质变为：**rubric 只在真实检查失败时收紧判定，绝不因缺数据收紧**。
+2. **必须有硬失败一票否决**。新增易通过条目会把硬失败**平均掉**（实测：弱模型从 REFINE 变成 ACCEPT）。故 `primary_metric` 或任一 high-priority criterion 处于 `conflict` 时禁止 accept，无论标量多高。
+
+### 接入点
+
+| 入口 | 位置 |
+|---|---|
+| 双循环前置 | `orchestrator.py`（`induce_rubric()` / `_rubric_inner_context()` / `get_run_rubric()`），`rubric_stage=True` 默认开 |
+| 进化搜索前置 | 同上，每代冠军面对**同一份**冻结标准（防逐代漂移） |
+| 注册期审查 | `benchmark_tasks/registry.py::review_registration_standard()` |
+| HTTP | `POST /benchmark-tasks/review-standard`、`GET /benchmark-tasks/{task_id}/rubric`、`GET /workflow-runs/{run_id}/rubric`；`/validate` 与 `/register` 响应增 `review` + `rubric_preview` |
+| 前端 | `components/RubricPanel.tsx`（审查卡 / 契约卡 / 逐条判定表）；`RegisterTask.tsx` 增「评分标准审查」卡；`AuditBoard.tsx` 增逐条判定视图 |
+
+`/validate` 刻意把两个结论分开：`valid`（表单是否合法，**阻断**注册）与 `review`（标准是否科学，**仅告知**）——表单完全合法却声明了弱标准，正是这个环节要暴露的情况。
+
+### 验证
+
+- `tests/test_rubric_stage.py` **41 例**全绿（合成/审查/程序化判定/隔离/审计集成/编排/注册期 7 组）。
+- 端到端：过拟合场景（CV 0.95 / 留出 0.60）被 C5 精确捕获并**一票否决** → REFINE。
+- 开关：`rubric_stage`（默认 True，关闭即完全回到改动前行为）、`rubric_visible_to_inner`（默认 True，关闭可盲跑做 A/B）、`RUBRIC_LLM=1`（可选 LLM 补充条目）。

@@ -3,7 +3,8 @@
 > ⚠️ **本文件是代码审查的权威活文档**。2026-08-07 文档树重构时，将原先分散的 `code_review_2026-08-05.md` + `review_deferred_L_items_2026-08-05.md` + `code_review_2026-08-06.md` 三份合并于此，并把更早的 `code_review_2026-07-30_round3.md`、`code_review_2026-08-04.md` 移入 `doc/archive/`。
 > **维护规则**：后续每一轮审查**只更新本文件**（追加/修订条目与修复状态），不再新建带日期的审查文件；若必须保留历史快照，移入 `doc/archive/`。这样可避免审查文档无限膨胀。
 
-**日期**：2026-08-05（末次全量审查）；附录 A/B 为 08-06 补充
+**日期**：2026-08-05（末次全量审查）；附录 A/B 为 08-06 补充；**附录 C（C-2~C-4）为 08-11、附录 D 为 09-08、附录 E 为 09-09**
+**附录索引**：A 暂缓项 L1/L2/L3/L5/L7 评审 · B 08-06 轮修复核实 + F1–F6 · C 08-11 轮全量审查（R1–R30）+ 修复落地 + Benchmark 完备性 + OSS 实验验证 · D 09-08 轮（integrity_suite）+ B 飞轮型 Phase 1/1.5/1.6 · **E 09-09 轮（评分标准环节 layer_12 交付 + layer_01 缺陷修复）**
 **范围**：`safety_auto_research/` 整个项目（后端 Python + 前端 React/TS/Vite）
 **方法**：结构普查 + 三个并行深度探索代理（后端架构 / 后端核心逻辑 / 前端）定位缺陷，再由主代理对全部 Critical/High 及关键 Medium 项**逐条回读源码核实**（file:line 已核对）。
 **说明**：本报告在 2026-08-04 审查（已修复 P1-1~4 + P2×12）基础上做新一轮全量审查。标注「✅已核实」的条目为主代理直接读源码确认；其余来自探索代理，结论与代码一致。
@@ -1202,3 +1203,87 @@ text 能力经真实 `SandboxResearchExecutor.execute` 在 docker 硬隔离下**
 - `poll_interval_sec < 1.0` 被 Pydantic `ge=1.0` 拒（422）。
 - badcase CSV 必须用真 titanic schema，否则 executor 在 `_build_xy` 失败不增 trigger_count。
 - 并行 Edit 同一文件多次 `replace_all=false` 可能丢失；最终文件只保留一部分（需重读再补 Edit）。
+
+---
+
+## 附录 E. 2026-09-09 轮：评分标准环节交付 + layer_01 缺陷修复
+
+**范围**：① 新增「任务专属可执行评分标准」环节（`rubric/` 包 + `layer_12_rubric_induction` 能力，设计见 `doc/design_notes.md` §4）；② 修复实施过程中暴露并溯源的 `layer_01` 文献检索缺陷。二者均非审查项，按 D.6–D.8 先例作为**功能与缺陷交付记录**。
+
+### E.1 评分标准环节（layer_12）功能交付
+
+**交付物**
+
+| 类型 | 内容 |
+|---|---|
+| 新增包 | `safety_auto_research/rubric/`（`spec`/`review`/`synthesize`/`checks`/`engine`，5 模块） |
+| 新增能力 | `execution_plane/capabilities/rubric_executor.py` → `layer_12_rubric_induction`（non-infra） |
+| 契约 | `ExecutableRubric`/`RubricCriterion`/`RubricGoal`/`RubricReview`/`RubricFinding` 5 对象 + `RubricSynthesizedEvent` + `ArtifactType.rubric` |
+| 编排 | `orchestrator.py`：`induce_rubric()` / `_rubric_inner_context()` / `get_run_rubric()`；dual-loop 与 evolutionary-loop 前置 |
+| 审计 | `audit_executor.py` 消费 rubric criteria，按 `evaluable` 加权 + 硬失败一票否决 |
+| API | `POST /benchmark-tasks/review-standard`、`GET /benchmark-tasks/{task_id}/rubric`、`GET /workflow-runs/{run_id}/rubric`；`/validate`、`/register` 响应增字段 |
+| 前端 | `components/RubricPanel.tsx`；`RegisterTask.tsx`、`AuditBoard.tsx` 接入 |
+| 测试 | `tests/test_rubric_stage.py` 41 例 |
+
+**量化**：能力 20→21；端点 path 61→63、method 68→71；契约对象 16→21、事件 15→16。
+
+### E.2 实施中发现并修复的 4 个真实缺陷（本环节自身）
+
+| # | 严重度 | 缺陷 | 修复 |
+|---|---|---|---|
+| 1 | 🚨 | **误归因**：任务定义缺声明导致 criterion 不可测量时按 `missing` 计 0.0，扣的是**研究**的分 —— 所有 tracked-only 任务将永远无法通过 | 引入 `evaluable` 标记，不可判定条目权重归 0（仍报告为未达标） |
+| 2 | 🚨 | **稀释**：新增易通过条目把硬失败平均掉（实测弱模型从 REFINE 变 ACCEPT） | 硬失败一票否决：`primary_metric` 或任一 high-priority criterion 处 `conflict` 时禁止 accept |
+| 3 | 🟠 | 预算失效：rubric 前置在预算检查**之前**跑掉一次能力调用 | 前置环节加 cancel + budget 守卫（dual-loop 与 evolutionary-loop 两处） |
+| 4 | 🟡 | `orchestrator.py` `dispatch_goal = f"{goal}..."` 从 `goal` 重建，**静默丢弃**本轮已追加的 playbook/experience/refine 内容 | 改为从 `dispatch_goal` 追加 |
+
+### E.3 layer_01 文献检索缺陷（3 个既有失败，已全修）
+
+**根因三层**（第三层才是根源）：
+
+| 层 | 问题 | 位置 |
+|---|---|---|
+| 1 | executor 硬性要求 `params["query"]`，缺失即 FAILED | `literature_research_executor.py:287` |
+| 2 | MEA 契约构造 params 时**只传 `subtask_type`**，`spec.goal` 里明明有研究目标却没传下去 → `layer_01` 从 MEA **完全不可达** | `control_plane/task_state.py:298` |
+| 3 | 🚨 **注释与事实脱节**：`SUBTASK_TO_CAPABILITY` 上方写着 *"Every target is offline-safe: layer_01/02/04/06 are StubCapabilityExecutor"*，但 Phase 2 已把 `layer_01` 换成真实 arXiv executor —— **换 executor 时未更新 MEA 侧假设** | `control_plane/task_state.py:41` |
+
+> 教训：**更新「某个能力是桩」这类前提时，必须同步更新依赖它的调用方注释与契约**。过时注释会掩护失效前提，使缺陷长期不被发现。
+
+**修复**
+
+- 新增 `derive_query()` / `resolve_query()` 纯函数：优先级 `explicit query` → `params.goal/objective/open_goal` → run `objective_snapshot.goal/objective`；剥离编排脚手架（`子任务 xxx` 行、`[PLAYBOOK`/`[EXPERIENCE`/`[REFINE]`/`[AVOID]`/`[INNER-LOOP INSTRUCTIONS]`/`[prior outer-loop audits`/`[RUBRIC` 块）；按词边界截断 200 字符；**仍 fail-closed**。
+- `name` / `dataset_desc` / `label` **刻意排除**为 query 来源 —— 展示标签或数据描述不是研究主题，用它检索会把「调用方的错误」换成「看似合理但错误的文献集」。
+- `provenance`（`explicit` / `derived:<来源>`）写入 artifact metadata 与 detail，读者可分辨主题是声明的还是推断的。
+- `_contract_for` 补传 `goal` + `objective`（`spec.params` 仍优先，显式覆盖不被冲掉）。
+- 修正 `task_state.py` 过时注释，逐 capability 写清离线行为。
+
+**测试侧修正与隔离**
+
+| 修改 | 理由 |
+|---|---|
+| `test_stub_capability_creates_artifact` 改用 `layer_02` | 该用例**选错了 capability**：`layer_01` 早已不是 stub，测不到 stub 契约。属修测试而非放宽产品 |
+| `TestMeaClosedLoopE2E` 加 `patch(urlopen)` + `patch(_DEFAULT_CACHE_DIR)` | 发现测试**真的联网**（28 KB arXiv 响应）并把结果写进仓库 `data/literature/`。已清除污染文件 |
+| `test_literature_research` 15 → 25 例 | 新增派生/剥离/截断/优先级/来源排除/契约传递/网络容错/fail-closed 回归 |
+
+### E.4 顺带修复的 2 个既有缺陷
+
+| 项 | 问题 | 修复 |
+|---|---|---|
+| `benchmark_tasks/registry.py` | **`logging` 未导入** —— 损坏存储恢复路径会在异常处理器内抛 `NameError`（本就只在异常分支触发，故从未暴露） | 补 `import logging` |
+| `rubric/review.py` | `"val" in text` 会匹配 `kaggle_eval`，导致**所有 kaggle 任务被误判为「已做泛化复核」** | 改为语义化关键词匹配；补测试固化 |
+
+### E.5 验证
+
+| 项 | 修复前 | 修复后 |
+|---|---|---|
+| 全量回归 | 555 passed / **3 failed** | **570 passed / 0 failed** |
+| MEA 测试耗时 | 2.40 s（联网） | **0.58 s**（离线隔离） |
+| 仓库 `data/literature/` 污染 | 1 个文件 | **0** |
+| 前端 | — | `tsc --noEmit` 0 error、`vite build` 通过 |
+
+**坑（勿再踩）**
+
+- 判定型功能新增条目时，必须同时回答「条目不可判定时算什么」—— 默认计 0.0 会把任务定义缺陷误归因给研究。
+- 加权聚合天然会被「大量易通过项」稀释，硬失败必须走一票否决而非参与平均。
+- 任何「前置环节」都要先过 cancel + budget 守卫，否则预算对它无效。
+- 断言「某能力是桩/离线安全」的注释必须与 `capabilities/registry.py` 的实际绑定同步。
+- 端到端测试若触及真实网络能力，必须 patch `urlopen` **和**缓存目录，否则会污染仓库。

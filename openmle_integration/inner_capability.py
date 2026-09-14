@@ -14,10 +14,14 @@ from __future__ import annotations
 # The four atomic MLE program-evolution operators (OpenMLE-Evo alignment).
 ATOMIC_OPERATORS = ("draft", "improve", "debug", "crossover")
 
-# Stages on which an operator must NEVER be invoked (they are outer-loop / meta-loop).
+# Stages on which an operator must NEVER be invoked (they are outer-loop / meta-loop /
+# evaluation-standard stages).
 INNER_LOOP_FORBIDDEN_CALLERS = {
     "layer_11_external_audit",
     "layer_09_self_iterative_evolution",
+    # layer_12 builds the rubric the run is graded against; it must stay free of any
+    # program-generation side effects, and no operator may run on that path.
+    "layer_12_rubric_induction",
 }
 # Kept for documentation / defense-in-depth; the allowlist below is the
 # authoritative gate (P2-2 fix: a whitelist instead of a blacklist so that a

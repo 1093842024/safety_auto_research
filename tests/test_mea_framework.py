@@ -17,7 +17,9 @@ import json
 import os
 import tempfile
 import unittest
+import urllib.error
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from safety_auto_research.control_plane.schemas import CreateWorkflowRunRequest
 from safety_auto_research.control_plane.service import ControlPlaneService
@@ -707,6 +709,34 @@ class TestMeaClosedLoopE2E(unittest.TestCase):
     real ``run_capability``: every executor step executes a REAL capability (stub or the
     offline EvalExecutor) inside a real StageRun. Quantifies the selective-routing savings.
     """
+
+    def setUp(self) -> None:
+        # The default plan's ``literature_search`` subtask maps to the REAL
+        # ``layer_01_literature_research`` executor (a stub until Phase 2), which queries
+        # arXiv. Left alone this suite would (a) depend on the network and (b) write the
+        # live response into the repo's ``data/literature/`` cache. Isolate both: no
+        # sockets, and a throwaway cache dir. The executor is network-tolerant, so the
+        # simulated outage degrades to 0 hits + SUCCEEDED/WAIVED and the loop still
+        # converges — which is exactly what these tests are about.
+        self._cache_dir = tempfile.mkdtemp(prefix="mea-lit-cache-")
+        self._patches = [
+            patch(
+                "safety_auto_research.execution_plane.capabilities"
+                ".literature_research_executor._DEFAULT_CACHE_DIR",
+                self._cache_dir,
+            ),
+            patch(
+                "urllib.request.urlopen",
+                side_effect=urllib.error.URLError("offline (test isolation)"),
+            ),
+        ]
+        for p in self._patches:
+            p.start()
+        self.addCleanup(self._stop_patches)
+
+    def _stop_patches(self) -> None:
+        for p in self._patches:
+            p.stop()
 
     def _build_orchestrator(self):
         svc = ControlPlaneService()

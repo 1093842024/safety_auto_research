@@ -5,7 +5,8 @@ Pins the contract:
 
 * ``LiteratureResearchExecutor`` is bound to the ``layer_01_literature_research``
   capability (replacing the long-standing stub).
-* Query is required; empty query → ``StageStatus.FAILED``.
+* A search topic is required: it comes from ``params["query"]``, else is DERIVED from
+  the research goal in scope; when neither exists → ``StageStatus.FAILED`` (fail-closed).
 * arXiv Atom XML is parsed correctly (title / authors / year / pdf_url).
 * Cached hits short-circuit network I/O on repeat queries.
 * GitHub source falls back silently when ``GITHUB_TOKEN`` is missing.
@@ -32,6 +33,8 @@ from safety_auto_research.execution_plane.capabilities.literature_research_execu
     _http_get,
     _parse_arxiv_entries,
     _q,
+    derive_query,
+    resolve_query,
 )
 from safety_auto_research.platform_contracts.enums import RunType
 
@@ -188,7 +191,13 @@ class ExecutorIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(cap)
         self.assertIsInstance(cap.executor, LiteratureResearchExecutor)
 
-    def test_executor_requires_query(self) -> None:
+    def test_executor_fails_closed_without_any_topic(self) -> None:
+        """No query AND no derivable research goal -> clean failure, never a junk search.
+
+        ``_start_run`` sets only ``objective_snapshot={"name": ...}``; a display label is
+        deliberately NOT a valid query source, so nothing is derivable here.
+        """
+
         run_id = self._start_run()
         # Manually drive via orchestrator; capability failure routes back as ExecResult.
         _, result = self.orch.run_capability(
@@ -196,6 +205,85 @@ class ExecutorIntegrationTest(unittest.TestCase):
         )
         # Should be a clean failure (no crash), detail mentions the missing query.
         self.assertIn("query", (result.detail or "").lower())
+        self.assertIsNone(result.event)
+
+    def test_query_derived_from_subtask_goal(self) -> None:
+        """An orchestrated caller (MEA/agent) passes the goal, not a restated query.
+
+        Regression: ``layer_01`` was unreachable from the MEA loop because the contract
+        forwarded only ``subtask_type``, so every literature step failed and the loop
+        could never converge.
+        """
+
+        run_id = self._start_run()
+        xml = _arxiv_atom_xml([
+            {"title": "Robustness survey", "authors": ["X"],
+             "published": "2024-01-01T00:00:00Z",
+             "url": "http://export.arxiv.org/abs/2401.00001v1"},
+        ])
+        cache_dir = os.path.join(self.tmpdir, "derived")
+        with patch("urllib.request.urlopen", return_value=_FakeResp(xml)):
+            _, result = self.orch.run_capability(
+                run_id,
+                "layer_01_literature_research",
+                {
+                    "subtask_type": "literature_search",
+                    "goal": "improve model robustness\n\n子任务 literature_search",
+                    "cache_dir": cache_dir,
+                },
+            )
+        self.assertIsNotNone(result.event)
+        self.assertEqual(result.event.metrics["hit_count"], 1.0)
+        # The scaffold line must NOT leak into the query, and provenance is recorded.
+        self.assertIn("improve model robustness", result.detail or "")
+        self.assertNotIn("子任务", result.detail or "")
+        self.assertIn("derived:params.goal", result.detail or "")
+
+    def test_query_derived_from_run_objective(self) -> None:
+        """Nothing in params, but the run states a goal -> that is the search topic."""
+
+        run = self.orch.svc.create_workflow_run(
+            CreateWorkflowRunRequest(
+                program_id="discovery", run_type=RunType.DISCOVERY,
+                entry_stage="literature_research", target_id="d2",
+                objective_snapshot={"goal": "jailbreak defense for LLMs"},
+            )
+        )
+        self.orch.svc.start_workflow_run(run.run_id)
+        cache_dir = os.path.join(self.tmpdir, "from-run")
+        with patch("urllib.request.urlopen", return_value=_FakeResp(_arxiv_atom_xml([]))):
+            _, result = self.orch.run_capability(
+                run.run_id, "layer_01_literature_research", {"cache_dir": cache_dir},
+            )
+        self.assertIn("jailbreak defense for LLMs", result.detail or "")
+        self.assertIn("derived:objective_snapshot.goal", result.detail or "")
+
+    def test_explicit_query_wins_over_derivable_goal(self) -> None:
+        run_id = self._start_run()
+        cache_dir = os.path.join(self.tmpdir, "explicit")
+        with patch("urllib.request.urlopen", return_value=_FakeResp(_arxiv_atom_xml([]))):
+            _, result = self.orch.run_capability(
+                run_id,
+                "layer_01_literature_research",
+                {"query": "narrow topic", "goal": "some broad goal", "cache_dir": cache_dir},
+            )
+        self.assertIn("narrow topic", result.detail or "")
+        self.assertIn("explicit", result.detail or "")
+        self.assertNotIn("some broad goal", result.detail or "")
+
+    def test_network_outage_is_not_a_hard_failure(self) -> None:
+        """A transport failure must degrade to 0 hits, not break the research loop."""
+
+        run_id = self._start_run()
+        cache_dir = os.path.join(self.tmpdir, "outage")
+        with patch("urllib.request.urlopen",
+                   side_effect=urllib.error.URLError("offline")):
+            _, result = self.orch.run_capability(
+                run_id, "layer_01_literature_research",
+                {"query": "anything", "cache_dir": cache_dir},
+            )
+        self.assertEqual(result.final_status.value, "succeeded")
+        self.assertEqual(result.event.metrics["hit_count"], 0.0)
 
     def test_arxiv_round_trip_via_mock(self) -> None:
         run_id = self._start_run()
@@ -279,6 +367,86 @@ class ExecutorIntegrationTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # Misc helpers
 # ---------------------------------------------------------------------------
+class DeriveQueryTest(unittest.TestCase):
+    """The query derivation must extract the TOPIC and drop orchestrator scaffolding."""
+
+    def test_strips_mea_subtask_scaffold_line(self) -> None:
+        self.assertEqual(
+            derive_query("improve model robustness\n\n子任务 literature_search"),
+            "improve model robustness",
+        )
+        self.assertEqual(derive_query("goal here\nsubtask: eval_metrics"), "goal here")
+
+    def test_cuts_injected_blocks(self) -> None:
+        for marker in (
+            "[PLAYBOOK — 跨 run 经验]\n- do X",
+            "[EXPERIENCE — 回放]\nstuff",
+            "[REFINE] address: a; b",
+            "[AVOID] previously rejected: z",
+            "[INNER-LOOP INSTRUCTIONS]\nbe careful",
+            "[RUBRIC — 评分标准]\nC1 ...",
+        ):
+            self.assertEqual(derive_query(f"classify titanic\n{marker}"), "classify titanic")
+
+    def test_scaffold_only_yields_nothing(self) -> None:
+        """Must return "" so the caller still fails closed instead of searching junk."""
+
+        self.assertEqual(derive_query("\n\n子任务 literature_search\n"), "")
+        self.assertEqual(derive_query(""), "")
+        self.assertEqual(derive_query("   \n  "), "")
+
+    def test_truncates_on_a_word_boundary(self) -> None:
+        q = derive_query(" ".join(["robustness"] * 60), max_chars=50)
+        self.assertLessEqual(len(q), 50)
+        self.assertFalse(q.endswith(" "))
+        self.assertNotIn("robustnes ", q)  # no mid-word cut left dangling
+
+    def test_resolve_query_precedence(self) -> None:
+        self.assertEqual(resolve_query({"query": " x "}, {"goal": "g"}), ("x", "explicit"))
+        self.assertEqual(resolve_query({"goal": "g"}, {"goal": "s"}),
+                         ("g", "derived:params.goal"))
+        self.assertEqual(resolve_query({}, {"goal": "s"}),
+                         ("s", "derived:objective_snapshot.goal"))
+
+    def test_label_and_dataset_desc_are_not_query_sources(self) -> None:
+        """A display label / data description is not a research topic: deriving from one
+        would silently replace a caller's mistake with a plausible but wrong search."""
+
+        self.assertEqual(resolve_query({}, {"name": "literature discovery test"}), ("", ""))
+        self.assertEqual(resolve_query({}, {"dataset_desc": "train.csv / test.csv"}), ("", ""))
+        self.assertEqual(resolve_query({"label": "seed_papers"}, {}), ("", ""))
+
+
+class MeaContractTest(unittest.TestCase):
+    """The MEA contract must carry the WHAT (goal), not just the subtask's name."""
+
+    def test_contract_params_carry_goal_and_objective(self) -> None:
+        from safety_auto_research.control_plane.task_state import TaskState
+
+        state = TaskState.from_objective("r1", "improve model robustness")
+        contract = state.next_subtask_contract()
+        self.assertIsNotNone(contract)
+        self.assertEqual(contract.capability_id, "layer_01_literature_research")
+        self.assertEqual(contract.params["objective"], "improve model robustness")
+        self.assertIn("improve model robustness", contract.params["goal"])
+        # ... and that goal must yield a usable query for layer_01.
+        q, prov = resolve_query(contract.params, None)
+        self.assertEqual(q, "improve model robustness")
+        self.assertEqual(prov, "derived:params.goal")
+
+    def test_explicit_subtask_params_are_not_clobbered(self) -> None:
+        from safety_auto_research.control_plane.task_state import SubtaskSpec, TaskState
+
+        state = TaskState.from_plan("r2", "obj", [
+            SubtaskSpec(subtask_type="literature_search",
+                        params={"goal": "pinned topic", "max_results": 3}),
+        ])
+        contract = state.next_subtask_contract()
+        self.assertEqual(contract.params["goal"], "pinned topic")
+        self.assertEqual(contract.params["max_results"], 3)
+        self.assertEqual(contract.params["subtask_type"], "literature_search")
+
+
 class HelperTest(unittest.TestCase):
     def test_q_encodes_special_chars(self) -> None:
         self.assertNotIn(" ", _q("a b"))

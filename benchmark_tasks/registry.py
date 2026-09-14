@@ -25,6 +25,10 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import json
+# NOTE: ``logging`` was used in ``_load_raw``'s corrupt-store branch without being
+# imported, so recovering from a corrupt custom-task store raised NameError inside the
+# error handler and lost the backup log line. Importing it here fixes that path too.
+import logging
 import os
 import re
 import threading
@@ -721,6 +725,61 @@ def validate_registration(task_type: str, values: dict[str, Any]) -> list[str]:
     # ---- 数据集格式按任务类型校验 ----
     _check_dataset_format(task_type, values, errors)
     return errors
+
+
+# --------------------------------------------------------------------------- #
+# Evaluation-standard review (rubric stage, registration-time entry point)     #
+# --------------------------------------------------------------------------- #
+
+def review_registration_standard(task_type: str, values: dict[str, Any]) -> dict[str, Any]:
+    """Audit the *evaluation standard* a registration form declares.
+
+    Complements :func:`validate_registration`, which only answers "is the form
+    well-formed". This answers the harder question the platform actually needs:
+    **is the declared scoring standard accurate, complete and scientific** — and, when
+    nothing usable was declared, what the auto-generated rubric will look like instead.
+
+    Returns a serializable dict (``review`` + ``rubric_preview``) so the console can
+    render it live. Never raises: a rubric-engine failure degrades to an empty review
+    rather than blocking task registration.
+    """
+
+    try:
+        from ..rubric import RubricEngine
+        from ..rubric import TaskSpec
+
+        spec = TaskSpec.from_registration(task_type, values)
+        # Registration-time preview is always the deterministic rule engine: it runs
+        # inline on form validation, so it must not do network I/O.
+        rubric = RubricEngine(use_llm=False).induce(spec)
+        review = rubric.review
+        return {
+            "review": review.model_dump(mode="json") if review else None,
+            "rubric_preview": {
+                "rubric_id": rubric.rubric_id,
+                "source": rubric.source,
+                "criteria_count": len(rubric.criteria),
+                "machine_checkable_count": sum(
+                    1 for c in rubric.criteria if (c.check or {}).get("kind") != "judge"
+                ),
+                "criteria": [
+                    {
+                        "criterion_id": c.criterion_id,
+                        "requirement": c.requirement,
+                        "dimension": c.dimension,
+                        "priority": c.priority,
+                        "satisfaction_condition": c.satisfaction_condition,
+                        "check_kind": (c.check or {}).get("kind", "judge"),
+                        "blocked_reason": c.blocked_reason,
+                    }
+                    for c in rubric.criteria
+                ],
+                "claims_to_avoid": list(rubric.claims_to_avoid),
+            },
+        }
+    except Exception:  # noqa: BLE001 - review is advisory; never block registration
+        logging.exception("rubric review failed for task_type=%s", task_type)
+        return {"review": None, "rubric_preview": None}
 
 
 # --------------------------------------------------------------------------- #

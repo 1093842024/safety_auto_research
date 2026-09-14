@@ -18,6 +18,7 @@ from .self_evolution_executor import SelfEvolutionExecutor
 from .sandbox_executor import SandboxResearchExecutor
 from .literature_research_executor import LiteratureResearchExecutor
 from .data_pipeline_executor import DataPipelineExecutor
+from .rubric_executor import RubricInductionExecutor
 from ..executors import AttackExecutor
 from ..executors import EvalExecutor
 from ..executors import LessonExecutor
@@ -158,6 +159,18 @@ _CAPABILITIES: list[tuple[str, str, str, str, str, str, object | None]] = [
         AuditExecutor(),
     ),
     (
+        "layer_12_rubric_induction",
+        "layer_12_rubric_induction",
+        "评分标准归纳（评估契约）",
+        "为任务生成 / 审查可执行评分标准",
+        "在研究开始前产出任务专属的「可执行评分标准」：未声明评估标准的任务自动生成"
+        "（正确、有效、科学、可机器判定）；已声明标准的任务按准确性/完整性/科学性三维审查并"
+        "规范化。产出冻结的 ExecutableRubric（带 integrity_hash），作为内循环的执行契约与 "
+        "layer_11 外审计的约束集。控制面专用能力：内循环 agent 不得调用，避免自定标准。",
+        "rubric",
+        RubricInductionExecutor(),
+    ),
+    (
         "kaggle_eval_sandbox",
         "kaggle_eval_sandbox",
         "Kaggle 真实评测（Docker 沙箱）",
@@ -268,7 +281,7 @@ def default_capability_registry() -> CapabilityRegistry:
     # Capabilities that are *extra* (demo / dual-loop) rather than one of the ten
     # R&D infrastructure layers — excluded from the infra-layer catalog but still
     # discoverable by an agent via list_all_capabilities().
-    _NON_INFRA = {"kaggle_eval", "badcase_retrain", "auto_label", "layer_11_external_audit", "kaggle_eval_sandbox", "run_research_sandbox", "text_cls_sandbox", "image_cls_sandbox", "audio_cls_sandbox", "embedding_sandbox"}
+    _NON_INFRA = {"kaggle_eval", "badcase_retrain", "auto_label", "layer_11_external_audit", "layer_12_rubric_induction", "kaggle_eval_sandbox", "run_research_sandbox", "text_cls_sandbox", "image_cls_sandbox", "audio_cls_sandbox", "embedding_sandbox"}
     for cid, lcode, lname, title, desc, atype, ex in _CAPABILITIES:
         is_infra = cid not in _NON_INFRA
         reg.register(

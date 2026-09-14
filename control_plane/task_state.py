@@ -36,11 +36,21 @@ DEFAULT_PLAN = [
 
 # subtask_type -> capability_id (P4: now wired to the REAL registered capabilities so
 # the MEA executor actually runs them end-to-end instead of raising NotFoundError).
-# Every target is offline-safe: layer_01/02/04/06 are StubCapabilityExecutor (write a
-# real artifact through the SDK), layer_03_eval is the deterministic EvalExecutor
-# (hashed-seed metric + emits EvalCompletedEvent). layer_08/09/10 bind real executors
-# that operate on in-repo state. kaggle_eval (network/HF data) is intentionally NOT
-# used by the default plan — swap it in only when HF data is available.
+#
+# Offline behaviour per target (kept accurate — an out-of-date claim here silently
+# breaks the loop):
+#   * layer_02 / layer_04 / layer_06  StubCapabilityExecutor — writes a real artifact
+#     through the SDK, no I/O.
+#   * layer_03_eval                   deterministic EvalExecutor (hashed-seed metric +
+#     EvalCompletedEvent), no I/O.
+#   * layer_08 / layer_09 / layer_10  real executors over in-repo state, no I/O.
+#   * layer_01_literature_research    REAL LiteratureResearchExecutor (was a stub until
+#     Phase 2). It queries arXiv, so it is network-*touching* but network-*tolerant*: a
+#     transport failure degrades to 0 hits + SUCCEEDED/WAIVED, never a hard failure, and
+#     repeat queries are served from ``data/literature/``. It also needs a search topic,
+#     which is why ``_contract_for`` forwards the subtask goal/objective (see below).
+# kaggle_eval (network/HF data) is intentionally NOT used by the default plan — swap it
+# in only when HF data is available.
 SUBTASK_TO_CAPABILITY: dict[str, str] = {
     "literature_search": "layer_01_literature_research",
     "hypothesis_gen": "layer_02_idea_generation_evaluation",
@@ -284,9 +294,10 @@ class TaskState(BaseModel):
         for r in self.records.values():
             if r.status == "completed" and r.evidence_refs:
                 prior.extend(r.evidence_refs)
+        goal = spec.goal or f"{self.objective}\n\n子任务 {spec.subtask_type}"
         return SubtaskContract(
             subtask_type=spec.subtask_type,
-            goal=spec.goal or f"{self.objective}\n\n子任务 {spec.subtask_type}",
+            goal=goal,
             acceptance_criteria=spec.acceptance_criteria or list(
                 _ACCEPTANCE.get(spec.subtask_type, ["子任务产出已记录"])
             ),
@@ -295,7 +306,17 @@ class TaskState(BaseModel):
                 "不得调用 layer_11 / layer_09 自评自身结果",
             ],
             prior_evidence_refs=prior[:10],
-            params={**spec.params, "subtask_type": spec.subtask_type},
+            # The contract's WHAT must reach the capability, not just its name: a
+            # capability that needs a topic (layer_01 literature search) or any future
+            # goal-driven executor is otherwise handed a bare ``subtask_type`` and cannot
+            # act. ``spec.params`` still wins, so an explicit per-subtask override is
+            # never clobbered by these defaults.
+            params={
+                "goal": goal,
+                "objective": self.objective,
+                **spec.params,
+                "subtask_type": spec.subtask_type,
+            },
             capability_id=SUBTASK_TO_CAPABILITY.get(spec.subtask_type),
             depends_on=list(spec.depends_on),
             record_key=key,

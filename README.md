@@ -34,6 +34,7 @@
          └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
+- **评分标准前置（`layer_12_rubric_induction`）**：内循环开始前，先由控制面确立**任务专属的可执行评分标准**并冻结（详见 §2.5）。未提供标准的任务**自动生成**，已提供标准的任务**自动审查**其准确性/完整性/科学性。同一份标准既作为内循环的**只读执行契约**，又作为外循环的**逐条判据**。
 - **内循环**：具体研究执行，可由脚本化 `kaggle_eval` executor 或自主 agent（`mode="agent"`）驱动。
 - **外循环**：`layer_11_external_audit` 对研究产出做约束审计（含 held-out 泛化一致性检查），给出 Accept / Refine / Restart 裁决；Refine 会真正改变内循环参数（否则重复同轨迹）；连续 REFINE 无进展的轨迹会被 RESTART 抛弃。
 - **元循环（层⑨）**：`layer_09_self_iterative_evolution` 在**可编辑面白名单**内提出具体参数补丁，携带**可证伪预测**；orchestrator 应用补丁到下一轮内循环并**事后验证**——兑现标 `verified`、回归超容差则**真回滚**参数并标 `rolled_back`。
@@ -50,14 +51,16 @@
 | **经验生命周期** | `store_tree.py::ExperienceBank` | 每轮自动蒸馏成功/失败经验；去重合并（uses/conf 强化）+ `conf×0.97^staleness` 衰减；dispatch 自动注入 top-3 |
 | **多维预算** | `orchestrator.py` | `budget={max_seconds, max_capability_calls, max_cost}` 任一超额硬停 `exited_budget`；计数在 `run_capability` 本体，agent 调用无法绕过 |
 | **并行进化搜索** | `control_plane/evolution.py` + `task_manager.py` | 种群式候选（适应度比例父代选择 ÷(1+后代数)、blake2b 稳定哈希新颖性拒绝 ≥0.92）；线程池并行评估（结果 JSON 落盘可断点恢复），候选写入 gen{g} 分支假设树，每代冠军过冻结审计 |
+| **任务专属评分标准** | `rubric/` + `layer_12_rubric_induction` | 内循环前**生成 / 审查**任务专属可执行标准并冻结；7 条 criterion 中 6 条**程序化判定**；外审计**逐条**判定而非单一总分；硬失败**一票否决**（详见 §2.5） |
 
 ### 2.3 分层模块
 
 | 层 | 目录 | 职责 |
 |----|------|------|
-| **平台契约层** | `platform_contracts/` | **16 对象模型 / 14 事件模型** / 14 枚举 + 状态机校验（`transitions.py`）+ JSON Schema / TypeScript 导出 |
-| **控制平面** | `control_plane/` | `ControlPlaneService`（状态机服务）+ `Repository`（持久化仓储）+ `task_state.py`（MEA 任务态）+ FastAPI 应用，暴露工作流 / 阶段 / 审批 / 决策 / 事件 / 双循环 / 进化 / MEA 端点 |
-| **执行平面** | `execution_plane/` | `StageExecutor`/`PlatformSDK`/`ClosedLoopOrchestrator`/`AgentHarness`/`capabilities/`；新增 `mea.py`（MEA 主控）+ `agents/`（RoleAgent 注册 / 适配器） |
+| **平台契约层** | `platform_contracts/` | **21 对象模型 / 16 事件模型** / 22 枚举 + 状态机校验（`transitions.py`）+ JSON Schema / TypeScript 导出 |
+| **控制平面** | `control_plane/` | `ControlPlaneService`（状态机服务）+ `Repository`（持久化仓储）+ `task_state.py`（MEA 任务态）+ FastAPI 应用（`api.py` 薄装配器 + `routers/` 10 个域路由），暴露工作流 / 阶段 / 审批 / 决策 / 事件 / 双循环 / 进化 / MEA / **评分标准** 端点 |
+| **执行平面** | `execution_plane/` | `StageExecutor`/`PlatformSDK`/`ClosedLoopOrchestrator`/`AgentHarness`/`capabilities/`（**21 个能力**）；新增 `mea.py`（MEA 主控）+ `agents/`（RoleAgent 注册 / 适配器） |
+| **评分标准层** | `rubric/` | `spec`（任务归一化）/ `review`（三维审查）/ `synthesize`（criterion 合成）/ `checks`（程序化判定器）/ `engine`（编排 + LLM 可选） |
 | **OpenRSI / OpenMLE 集成层** | `openmle_integration/` | OpenRSI 程序级岛模型集成（Phase A–D）：`contracts`(dojo 镜像) / `operators`(四算子) / `adapter` / `interpreter` / `inner_capability`(算子护栏) / `reward_bridge` / `local_train`；参考副本 `vendor/openmle_dojo/` |
 | **基础设施层** | `infrastructure/` | 十个研究环节的可复用资产（skill / agent / 数据集任务 / 评测），详见 `infrastructure/README.md` |
 | **前端** | `frontend/` | React 18 + Vite + TypeScript 研究人员控制面板（侧边栏分类画廊 + 新建向导 + run 仪表盘 + 进化岛视图） |
@@ -83,6 +86,44 @@
 - **三角色**：`Manager`（持持久 `TaskState`，产出有界子任务契约 `c_i`：goal+acceptance+boundary+prior-evidence，决策 `{execute,done,blocked,ask}`）/ `Executor`（唯一可改环境，fresh、budget-bounded context 只做当前子任务）/ `Auditor`（**只读**独立检查，产出 completion/integrity/state-update 三类 findings）。
 - **核心杠杆**：`Auditor` 必须与 `Executor` **异模型 / 异后端**（`RoleAgentRegistry.require_different_from` 硬约束），从架构层消除自确认。评测角色（R5）强制 `DeterministicAdapter`（无 LLM），审计角色（R6）强制异模型。
 - **落地**：`execution_plane/mea.py`（`run_mea_loop_core` + `MeaMetrics`）+ `orchestrator.run_mea_loop`（:321）+ `control_plane/task_state.py`（`StateRecord`/`TaskState`/`AuditVerdict`）+ `execution_plane/agents/{adapter,registry}.py` + `config/role_agents.yaml`（role→backend/model/budget）。`run_mea_endpoint`（api.py）已暴露但当前为同步阻塞、缺取消支持（见第 9 节缺陷 2）。
+
+---
+
+### 2.5 最新演进：任务专属可执行评分标准（`layer_12_rubric_induction`，2026-09-09）
+
+**要解决的问题**：此前研究「做到什么算成功」由两个**与任务本身无关**的东西决定——任务级只有一个单指标五元组（`eval_metric`/`direction`/`baseline`/`reference`/`gates`），而外审计 `layer_11` 只有 4 条**硬编码**约束（`primary_metric`/`eval_is_real`/`heldout_consistency`/`claims_supported`）对所有任务一视同仁。更关键的是，`audit_executor.py` 里预留的 `constraints` 扩展点**从未被任何调用方填充**——它是一个死插槽。于是「要求同时保住三个召回门限」的任务与「只求 top1 准确率」的任务被同一套标准评判。
+
+**方法来源**：AutoSciRub（zjunlp，*Learning to Evaluate Before Improving*，ResearchClawBench 33.2 Pass@1）。该仓库**无一行 LLM 代码**——整套 rubric 生成/校验以「SKILL.md 自然语言契约 + JSON 产物 schema」表达，由宿主 Agent 执行。本平台移植其三步核心（`phi_inst` 目标骨架 → `phi_syn` criterion 合成 → `Verify` 逐条验证），并做**两处针对性改造**：
+
+| AutoSciRub 原版 | 本平台 | 原因 |
+|---|---|---|
+| criterion 由 LLM 语义判定 | criterion 带 `check` 规格，**优先程序化判定**（6/7 条） | 本平台有真实 metrics，能做真正「可执行」的判定 |
+| 单 agent 自产出自用 | 控制面产出并**冻结**，内循环只读 | 内循环是有目标的优化 agent，若标准可自产就等于「自己给自己放宽标准」——比自审计更严重的自确认 |
+
+**双模式**：未提供可用标准 → **生成**；已提供 → **审查**（准确性 0.45 / 完整性 0.30 / 科学性 0.25 加权）后规范化为同一份契约。
+
+**生成的标准**（平台可实跑任务，7 条 / 6 条可程序化判定）：
+
+| ID | 维度 | 强度 | 判定方式 |
+|---|---|---|---|
+| C1 | correctness | 硬性 | `metric_present` |
+| C2 | correctness | 硬性 | `metric_threshold` |
+| C3 | correctness | 硬性 | `metric_improves`（margin 0.005，非平凡改进） |
+| C4 | integrity | 硬性 | `real_eval`（禁止模拟冒充测量） |
+| C5 | generalization | 硬性 | `metric_gap`（CV↔留出集 ≤0.05，**反过拟合**） |
+| C6 | rigor | 一般 | `config_min`（≥3 折） |
+| C7 | reporting | 一般 | judge（结论↔证据一致；**阴性结论在方法正确时同样合格**） |
+
+**核心价值：报告「哪一条没达到、为什么」而非只给一个总分**（AutoSciRub README:56-57）。当前环境无法测量的要求**保留并标注 `blocked_reason`**，不静默丢弃也不静默通过。
+
+**两条不可违背的判定规则**（实施中付出代价才发现，务必保留）：
+
+1. **不可判定的 criterion 权重归 0**（`evaluable=False`）。否则「任务定义缺少声明」会被误归因成「研究没做好」——所有 tracked-only 任务将永远无法通过。性质变为：rubric 只在真实检查失败时收紧判定，绝不因缺数据收紧。
+2. **硬失败一票否决**：`primary_metric` 或任一 high-priority criterion 处 `conflict` 时禁止 accept。否则新增的易通过条目会把硬失败**平均掉**（实测：弱模型从 REFINE 变成 ACCEPT）。
+
+**隔离**：`layer_12` 与 `layer_11`/`layer_09` 同属保留能力，进入 `OUTER_LOOP_RESERVED_CAPS`（agent 工具面 + HTTP 端点双层拦截）与 `INNER_LOOP_FORBIDDEN_CALLERS`。标准**先于**结果确立（事件日志中 `rubric_synthesized` 索引必早于首个 `eval_completed`，有测试固化），冻结后带 `integrity_hash`。
+
+> 完整设计见 [`doc/design_notes.md`](doc/design_notes.md) §4；交付与缺陷记录见 [`doc/code_review_STATUS.md`](doc/code_review_STATUS.md) 附录 E。
 
 ---
 
@@ -112,6 +153,12 @@ safety_auto_research/
 │   ├── decision/router.py        #   IterationRouter（参考策略 + 安全护栏）
 │   ├── mea.py                     #   MEA（Manage-Execute-Audit）主控：run_mea_loop_core + MeaMetrics
 │   └── agents/                    #   RoleAgentAdapter / RoleAgentRegistry（require_different_from 异模型硬约束）
+├── rubric/                        # 评分标准层（2026-09-09 新增）
+│   ├── spec.py                    #   TaskSpec：目录任务/注册表单/运行快照的统一归一化视图
+│   ├── review.py                  #   三维审查（准确性/完整性/科学性，纯确定性）
+│   ├── synthesize.py              #   目标骨架 → 可行性 → criterion 合成（含 check 规格）
+│   ├── checks.py                  #   7 类程序化判定器 + 逐条汇总
+│   └── engine.py                  #   RubricEngine（review/induce，LLM 可选且失败降级）
 ├── openmle_integration/           # OpenRSI / OpenMLE 集成层（程序级岛模型，Phase A–D）
 │   ├── contracts.py               #   零依赖镜像 dojo：Task/Interpreter/MetricValue/Node/Journal
 │   ├── operators.py               #   四原子算子 Draft/Improve/Debug/Crossover + 各 LLM 后端
@@ -144,6 +191,10 @@ safety_auto_research/
 - **Benchmark 任务目录**：从 9 个上游项目扫描出 18 个「明确数据集 + 评测」任务，覆盖 11 个类别，作为新建研究的起点。
 - **双循环审计与可观测**：每个 run 的假设树（hypo-tree）、外部审计结论（audit）、改进项（improvements）均可实时查看；「进化观察」子 Tab 展示 Playbook 条目、策略补丁生命周期与进化种群。
 - **研究榜单与一键复现**：每次研究自动沉淀记录，按指标方向取每任务最优 3 条高亮；支持「复现并启动」（按配置快照即刻重跑完整研究）。
+- **任务专属评分标准（2026-09-09）**：
+  - *注册期*：填写评分标准时即时审查「准确性 / 完整性 / 科学性」三维，列出缺陷与修正建议，并预览将生成的判定条目（**只告知、不阻断**——表单合法但标准弱正是要暴露的情况）。
+  - *运行期*：内循环开始前确立标准并冻结；审计台上逐条展示「通过 / 未通过 + 判定依据 + 通过条件」，未达标时指出**具体哪一条**而非只给总分。
+  - *可选 LLM*：设 `RUBRIC_LLM=1` 时用 LLM 补充条目（**只能追加、不能削弱**，强制 `judge` 判定、priority 上限 medium，故障静默降级回规则引擎）。
 - **SSE 实时进度**：`GET /workflow-runs/{id}/stream` 推送 inner_done / audit_done / generation_done / finished 事件，前端实时刷新。
 - **实验对比**：勾选最多 8 个 run 横向对比指标与配置。
 - **基准套件**：`benchmark_tasks/suites/` 内置 ScienceAgentBench（102 任务）与 MLE-bench（75 竞赛，含 Known-Issues 泄漏标注剔除）两套套件级清单与论文基线数据。
@@ -247,7 +298,8 @@ curl --noproxy '*' -o /dev/null -w "%{http_code}\n" http://localhost:5173/      
 
 ## 8. API 概览
 
-控制平面共暴露约 28 个端点，关键路径：
+控制平面共暴露 **63 条路径 / 71 个 method**（`GET /openapi.json` 为准；路由冻结表见
+`tests/test_control_plane_structure.py::EXPECTED_ROUTES`）。关键路径：
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -280,6 +332,10 @@ curl --noproxy '*' -o /dev/null -w "%{http_code}\n" http://localhost:5173/      
 | GET | `/benchmark-suites[/{id}][/tasks][/baselines]` | 基准套件（SAB / MLE-bench） |
 | GET | `/benchmark-tasks` | 任务目录 |
 | POST | `/benchmark-tasks/{task_id}/launch` | 按任务启动（含 inner_loop 配置） |
+| POST | `/benchmark-tasks/validate` | 表单校验 **+ 评分标准审查 + 标准预览**（不落库） |
+| POST | `/benchmark-tasks/review-standard` | 审查已声明评分标准并预览将生成的标准（不落库） |
+| GET | `/benchmark-tasks/{task_id}/rubric` | 目录任务的可执行评分标准 |
+| GET | `/workflow-runs/{run_id}/rubric` | 该 run 的冻结标准 + 每轮逐条判定结果 |
 
 ---
 
@@ -289,7 +345,12 @@ curl --noproxy '*' -o /dev/null -w "%{http_code}\n" http://localhost:5173/      
   - 外循环审计只读「策展输入」（objective + result_metrics + gate + real_eval + prior_audits + constraints），**不读**内循环事件日志（hypothesis/experience/lesson）。
   - 内循环 agent 禁止自审/自改：`layer_11_external_audit` 与 `layer_09_self_iterative_evolution` 在 harness 内为不可用工具，由控制平面直接调用。
   - 假设树/改进态按 `run_id` 隔离，跨 run 累积对象必须带 `run_id`。
-- **内循环护栏**：配置内循环工具时，自动剔除 `layer_11`（外循环审计）与 `layer_09`（自迭代进化）——内循环不得越权调用元/外循环能力。
+- **内循环护栏**：配置内循环工具时，自动剔除 `layer_11`（外循环审计）、`layer_09`（自迭代进化）与 **`layer_12`（评分标准生成）**——内循环不得越权调用元/外循环能力。
+- **评分标准不变量（2026-09-09）**：
+  - 标准由控制面在**内循环开始之前**生成并冻结，内循环**只读不可改**（否则优化 agent 可自定标准，是自确认的加强版）。
+  - 事件日志中 `rubric_synthesized` **必早于**该 run 的首个 `eval_completed`（有测试固化）。
+  - 不可判定的 criterion 权重归 0 但仍报告为未达标 —— 判定只反映研究质量，不反映任务定义的完备性。
+  - `primary_metric` 或任一 high-priority criterion 处于 `conflict` 时**一票否决** accept。
 - **算子护栏（OpenRSI）**：四原子算子（Draft/Improve/Debug/Crossover）每次调用必经 `assert_operator_inner_only`（白名单 `INNER_LOOP_ALLOWED_CALLERS`，fail-closed），杜绝算子越权调用外层能力或自审。
 - **MEA 自确认消除**：Auditor 角色强制与 Executor 异模型 / 异后端（`RoleAgentRegistry.require_different_from`），审计 findings 只读、不写环境。
 - **状态机枚举**：`WorkflowRun` / `StageRun` / `DecisionRecord` 的合法流转由 `platform_contracts/transitions.py` 校验；决策类型含 `continue` / `revisit` / `exit_success` / `exit_budget` / `exit_converged`，终态必须为合法枚举名（旧字符串如 `dual_loop_accepted` 已废弃）。
@@ -307,6 +368,15 @@ curl --noproxy '*' -o /dev/null -w "%{http_code}\n" http://localhost:5173/      
 | `HF_ENDPOINT` | `https://huggingface.co` | 真实竞赛数据下载（镜像对 gated 仓库返回 404，需直连 + `HF_TOKEN`） |
 | `LLM_JUDGE_URL` | 未设置 | 真实 LLM judge 端点（POST JSON → score/rationale/evidence_refs）；未设置时用确定性 heuristic |
 | `LLM_AUDIT_JUDGE` | 未设置 | 置 `1` 时外审计的 claim-support 评分走 `LLM_JUDGE_URL`（故障自动回退 heuristic） |
+| `RUBRIC_LLM` | 未设置 | 置 `1` 时评分标准生成启用 LLM 补充条目（**仅追加**，故障静默降级回规则引擎） |
+| `AGENT_SANDBOX` | 未设置 | 置 `1` 时 agent 模式把研究命令放进一次性 Docker 容器执行 |
+
+**评分标准环节开关**（`run_dual_loop` / `run_evolutionary_loop` 参数）：
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `rubric_stage` | `True` | 关闭则完全回到改动前行为（外审计只跑 4 条内置约束） |
+| `rubric_visible_to_inner` | `True` | 关闭则内循环盲跑，便于做「标准可见 vs 不可见」的 A/B 对比 |
 
 > `create_app` 自建 service 时才会启用落盘；测试中以注入式 `Repository()`/`ControlPlaneService()` 构造的 service 仍为纯内存态，确保单测不触碰文件。
 
@@ -320,7 +390,9 @@ cd /Users/glennge/work/github/AI_research
     safety_auto_research/tests/ -q
 ```
 
-当前基线 **255 passed, 0 failed**（2026-08-07 缺陷7 修复后；较 2026-08-06 的 252 新增 3 例 `test_program_evolution_endpoint`）。主要覆盖：`control_plane`、`dual_loop`（双循环隔离与终态 + `ContextSeparationTest`）、`playbook`、`phase2`（held-out/LLM judge/经验生命周期/预算）、`evolution`（种群/选择/双粒度新颖性/IslandModel/候选序列化）、`benchmark_registry`、`benchmark_suites`、`research_records`（榜单方向感知）、`capabilities`、`execution_plane`、`platform_contracts`；**新增** `openmle_phase_a`(5)/`openmle_phase_bc`(9)/`openmle_phase_d`(10)/`openmle_phase_d_ext`(8)（OpenRSI 四阶段）、`mea_framework`(44)（MEA 框架）、`p2_fixes`(13)/`review_supplementary`(12)/`fix_regression_2026_08_05`(18)（审查回归）、`program_evolution_endpoint`(3)（缺陷7 REST 接线）。前端 `npx tsc --noEmit` 0 errors。
+当前基线 **570 passed, 0 failed**（2026-09-09；较 2026-08-07 的 255 净增来自 B 飞轮型 Phase 1/1.5/1.6、`integrity_suite` 系列、`test_rubric_stage`(41) 与 `test_literature_research` 15→25 等）。
+
+主要覆盖：`control_plane`、`dual_loop`（双循环隔离与终态 + `ContextSeparationTest`）、`playbook`、`phase2`（held-out/LLM judge/经验生命周期/预算）、`evolution`（种群/选择/双粒度新颖性/IslandModel/候选序列化）、`benchmark_registry`、`benchmark_suites`、`research_records`（榜单方向感知）、`capabilities`、`execution_plane`、`platform_contracts`、`openmle_phase_a/bc/d/d_ext`（OpenRSI 四阶段）、`mea_framework`(44)、`p2_fixes`/`review_supplementary`/`fix_regression_2026_08_05`/`fix_regression_2026_08_11`（审查回归）、`program_evolution_endpoint`（缺陷7 REST 接线）、`integrity_*`(115)、`flywheel`/`flywheel_scheduler`/`llm`(B 飞轮)、**`rubric_stage`(41，2026-09-09 新增)**。前端 `tsc --noEmit` 0 errors、`vite build` 通过。
 
 > ⚠️ 全量套件一次性加载会因内存（pandas/pyarrow）触发 SIGKILL（exit 137），CI 须按模块分批运行；受管 venv 已加 `tests/conftest.py` 设 `future.infer_string=False` 规避 pandas 3.0 的 pyarrow segfault。
 
@@ -342,15 +414,16 @@ cd /Users/glennge/work/github/AI_research
 
 ## 13. 相关文档索引
 
-- `platform_contracts/README.md` — 统一契约层（对象/事件/状态机/Schema 导出）
-- `execution_plane/README.md` — 执行平面、双循环、AgentHarness、能力注册
+- `platform_contracts/README.md` — 统一契约层（**21 对象 / 16 事件** / 状态机 / Schema 导出）
+- `execution_plane/README.md` — 执行平面、双循环、AgentHarness、**21 个能力注册**、**评分标准环节**
 - `execution_plane/agent/PROTOCOL.md` — 接入外部 agent 的线协议契约
 - `infrastructure/README.md` — 十层研究基础设施资产总览
 - **设计文档总索引**：[`doc/README.md`](doc/README.md)（按「活动待办 / 代码审查 / 架构设计 / 研究调研 / 基准任务 / 历史归档」分类，含状态列）
+- [`doc/design_notes.md`](doc/design_notes.md) — **功能设计单一权威**（§1 控制面拆分 / §2 审计追问 / §3 agent 沙箱隔离 / **§4 任务专属可执行评分标准**）
 - `doc/unified_safety_rd_platform_architecture_spec.md` — 平台目标架构 spec（Draft v1）
 - `doc/benchmark_tasks.md` — **内置 18 个研究任务的逐任务详解**（定义/数据/模型/指标/基线/性能）
-- `doc/code_review_STATUS.md` — **全量代码审查与修复状态（权威活文档，后续审查只更新此文件）**
+- `doc/code_review_STATUS.md` — **全量代码审查与修复状态（权威活文档，后续审查只更新此文件）**；附录 E 为 2026-09-09 评分标准环节交付 + layer_01 缺陷修复记录
 
 ---
 
-*最后更新：2026-08-07 · 文档树重构（审查系列合并为 `doc/code_review_STATUS.md` 活文档、旧快照归档 `doc/archive/`、删除重复 `Deep_Dive_Direction2_3_RL_Extension.md`）。功能状态：OpenRSI/OpenMLE 四阶段集成 + MEA 控制循环落地 + 全项目代码审查（C1 / 缺陷1-11 / M1-M7 / L1-L7）已闭环，测试基线 252 passed。仍待闭环：缺陷7（程序进化无 REST 端点，已于 08-07 补后端+前端）、C1 沙箱层、L5（非整数标签，设计暂缓）。详见 `doc/code_review_STATUS.md`、`doc/mea_harness_upgrade_plan.md`、`doc/openrsi_openmle_integration_analysis.md`。*
+*最后更新：2026-09-09 · 新增 §2.5「任务专属可执行评分标准（`layer_12_rubric_induction`）」——未提供标准的任务自动生成、已提供标准的任务自动审查准确性/完整性/科学性，标准冻结后同时作为内循环的只读执行契约与外审计的逐条判据（设计见 `doc/design_notes.md` §4，交付与缺陷记录见 `doc/code_review_STATUS.md` 附录 E）。功能状态：OpenRSI/OpenMLE 四阶段集成 + MEA 控制循环 + B 飞轮型 Phase 1/1.5/1.6 + **评分标准环节** 已落地，测试基线 **570 passed / 0 failed**（前端 `tsc --noEmit` 0 errors、`vite build` 通过）。仍待闭环：C1 沙箱层（LLM 生成代码以宿主全权限执行）、L5（非整数标签，设计暂缓）、F2 数据瓶颈（仅 kaggle 类与 text_classification 已可在沙箱真跑）。详见 `doc/code_review_STATUS.md`（含附录 E 的「坑（勿再踩）」清单）、`doc/design_notes.md`。*

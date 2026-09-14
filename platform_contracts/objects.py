@@ -165,6 +165,136 @@ class AuditReport(ContractModel):
     followups: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class RubricCriterion(ContractModel):
+    """One *executable* criterion of a task-specific scoring rubric (layer_12).
+
+    Follows the AutoSciRub ``phi_syn`` criterion contract: a criterion names the
+    required analysis, the evidence artifacts it expects, and an observable
+    satisfaction condition — so verification can report *which* criterion is unmet
+    and *why*, instead of collapsing everything into one opaque score.
+
+    ``check`` is what makes the criterion **executable** on this platform: when it is
+    populated, the outer audit evaluates the criterion PROGRAMMATICALLY against the
+    inner loop's measured metrics / published artifacts, instead of asking an
+    LLM judge whether the claim "sounds" supported. Supported check kinds:
+
+    * ``metric_threshold``  — ``metric`` compared against ``value`` using ``op``
+      (``ge`` / ``gt`` / ``le`` / ``lt``).
+    * ``metric_present``    — ``metric`` must be reported at all (non-null, finite).
+    * ``metric_gap``        — ``abs(metric - baseline_metric) <= value`` (e.g. the
+      CV → held-out generalization gap).
+    * ``metric_improves``   — ``metric`` beats ``value`` in the objective's direction
+      by at least ``margin`` (non-trivial improvement over a baseline).
+    * ``artifact_exists``   — an artifact of ``artifact_type`` was published.
+    * ``judge``             — no programmatic check available; fall back to the
+      LLM/heuristic claim judge (explicitly marked as such, never silently).
+    """
+
+    criterion_id: str
+    goal_ids: list[str] = Field(default_factory=list)
+    requirement: str
+    dimension: str = "correctness"  # correctness | generalization | rigor | integrity | reporting
+    data_sources: list[str] = Field(default_factory=list)
+    required_analysis: list[str] = Field(default_factory=list)
+    metrics: list[str] = Field(default_factory=list)
+    comparisons: list[str] = Field(default_factory=list)
+    expected_artifacts: list[dict[str, Any]] = Field(default_factory=list)
+    satisfaction_condition: str
+    priority: str = "medium"  # high | medium | low
+    weight: float = Field(ge=0.0, default=1.0)
+    # Programmatic check spec (see class docstring). ``kind`` is required when set.
+    check: dict[str, Any] = Field(default_factory=dict)
+    # Traceability: where this criterion came from (instruction / literature / data).
+    provenance: dict[str, list[str]] = Field(default_factory=dict)
+    # Set when the criterion cannot be satisfied with the currently available inputs
+    # (the user's requirement is RETAINED as blocked rather than silently dropped).
+    blocked_reason: str = ""
+
+
+class RubricGoal(ContractModel):
+    """An atomic scientific goal derived from the task instruction (``phi_inst``)."""
+
+    goal_id: str
+    title: str
+    requirement: str
+    instruction_evidence: list[str] = Field(default_factory=list)
+
+
+class ExecutableRubric(ContractModel):
+    """A task-specific, executable scoring rubric — the evaluation contract of a run.
+
+    Produced once per run by ``layer_12_rubric_induction`` and then FROZEN: the inner
+    loop may read it (it is the execution contract) but can never regenerate or mutate
+    it, so an optimizing agent cannot relax its own grading standard.
+    """
+
+    rubric_id: str
+    task_id: str
+    schema_version: str = "1.0"
+    # "synthesized" — no usable standard was provided, the rubric was induced;
+    # "reviewed"    — a standard was provided and audited (then normalized/extended).
+    source: str = "synthesized"
+    objective: str = ""
+    goals: list[RubricGoal] = Field(default_factory=list)
+    criteria: list[RubricCriterion] = Field(default_factory=list)
+    claims_to_avoid: list[str] = Field(default_factory=list)
+    # The declared evaluation standard this rubric was built from / audited against.
+    provided_standard: dict[str, Any] = Field(default_factory=dict)
+    # Review of the provided standard (always present; for a synthesized rubric it
+    # reports what was missing in the task definition).
+    review: "RubricReview | None" = None
+    generator: str = "rule_engine"  # rule_engine | llm | llm+rule_engine
+    frozen: bool = True
+    integrity_hash: str = ""
+
+    def weighted_criteria(self) -> list[tuple[RubricCriterion, float]]:
+        """Criteria paired with their effective weight (priority-scaled)."""
+
+        scale = {"high": 2.0, "medium": 1.0, "low": 0.5}
+        return [(c, c.weight * scale.get(c.priority, 1.0)) for c in self.criteria]
+
+
+class RubricFinding(ContractModel):
+    """One defect found while auditing a *provided* evaluation standard."""
+
+    finding_id: str
+    dimension: str  # accuracy | completeness | scientificity
+    severity: str  # critical | important | minor
+    message: str
+    suggestion: str = ""
+    field: str = ""  # which task field the finding is about (eval_metric / gates / ...)
+
+
+class RubricReview(ContractModel):
+    """Three-dimensional audit of a task's declared evaluation standard.
+
+    * ``accuracy``      — is the standard internally consistent and machine-checkable?
+      (metric ↔ direction agreement, gate keys parseable, thresholds vs baseline/reference)
+    * ``completeness``  — does it cover generalization, comparison/ablation, statistical
+      stability, data-leakage protection, and reporting of evidence?
+    * ``scientificity`` — does it define success by *method and evidence correctness*
+      rather than by agreement with a desired result, and is it gaming-resistant?
+    """
+
+    review_id: str
+    task_id: str
+    # True when the task itself declared a usable evaluation standard (so this is a
+    # review); False when nothing usable was declared (so a rubric had to be induced).
+    standard_provided: bool = True
+    accuracy: float = Field(ge=0.0, le=1.0, default=0.0)
+    completeness: float = Field(ge=0.0, le=1.0, default=0.0)
+    scientificity: float = Field(ge=0.0, le=1.0, default=0.0)
+    overall: float = Field(ge=0.0, le=1.0, default=0.0)
+    verdict: str = "acceptable"  # sound | acceptable | needs_work | unusable
+    findings: list[RubricFinding] = Field(default_factory=list)
+    # Concrete, machine-applicable corrections (field -> suggested value).
+    suggested_fixes: dict[str, Any] = Field(default_factory=dict)
+    summary: str = ""
+
+    def blocking_findings(self) -> list[RubricFinding]:
+        return [f for f in self.findings if f.severity == "critical"]
+
+
 class ImprovementProposal(ContractModel):
     """A proposed change to the research *process* (meta-loop), not the artifact."""
 
@@ -239,4 +369,13 @@ ALL_CONTRACT_MODELS: tuple[type[ContractModel], ...] = (
     ImprovementProposal,
     HypothesisNode,
     ExperienceEntry,
+    RubricGoal,
+    RubricCriterion,
+    RubricFinding,
+    RubricReview,
+    ExecutableRubric,
 )
+
+# ``ExecutableRubric.review`` is a forward reference to ``RubricReview`` (declared
+# after it in source order); resolve it so the model is fully usable.
+ExecutableRubric.model_rebuild()
