@@ -312,3 +312,65 @@ class Repository:
                 self._persist()
                 return True
             return False
+
+    # ----- Run deletion (研究记录删除: run + 全部关联对象一并移除) -----
+    def delete_run(self, run_id: str) -> dict[str, Any]:
+        """Delete a run and every persisted object that belongs to it.
+
+        Returns ``{"counts": {...per-collection deletion counts...}, "stage_ids": [...]}``
+        so callers can also clean up on-disk scratch dirs keyed by stage. Atomic
+        under the store lock; the JSON file is persisted exactly once at the end.
+        """
+        with self._lock:
+            counts: dict[str, int] = {}
+            counts["workflow_runs"] = 1 if self.workflow_runs.pop(run_id, None) else 0
+
+            stage_ids = {
+                sid
+                for sid, s in self.stage_runs.items()
+                if getattr(s, "run_id", None) == run_id
+            }
+            for sid in stage_ids:
+                self.stage_runs.pop(sid, None)
+            counts["stage_runs"] = len(stage_ids)
+
+            before = len(self.decisions)
+            self.decisions = {
+                k: v for k, v in self.decisions.items() if getattr(v, "run_id", None) != run_id
+            }
+            counts["decisions"] = before - len(self.decisions)
+
+            allowed = stage_ids | {run_id}
+            before = len(self.artifacts)
+            self.artifacts = {
+                k: v
+                for k, v in self.artifacts.items()
+                if str(getattr(v, "producer_ref", "")) not in allowed
+            }
+            counts["artifacts"] = before - len(self.artifacts)
+
+            before = len(self.lessons)
+            self.lessons = {
+                k: v
+                for k, v in self.lessons.items()
+                if getattr(v, "source_run_id", None) != run_id
+            }
+            counts["lessons"] = before - len(self.lessons)
+
+            counts["metrics"] = len(self.metrics.pop(run_id, []))
+
+            before = len(self.events)
+            self.events = [e for e in self.events if e.get("run_id") != run_id]
+            counts["events"] = before - len(self.events)
+
+            before = len(self.research_records)
+            self.research_records = {
+                k: v
+                for k, v in self.research_records.items()
+                if v.get("run_id") != run_id
+            }
+            counts["research_records"] = before - len(self.research_records)
+
+            self.open_approvals.pop(run_id, None)
+            self._persist()
+            return {"counts": counts, "stage_ids": sorted(stage_ids)}

@@ -1,19 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getRuns, getBenchmarkTasks, BenchmarkTask, WorkflowRunSummary, STATUS_LABEL, STATUS_CLASS, CATEGORY_LABELS, setSchemaViolationHandler } from "./api/client";
+import { getRuns, getBenchmarkTasks, BenchmarkTask, WorkflowRunSummary, STATUS_LABEL, STATUS_CLASS, categoryLabel, categoryGroup, setSchemaViolationHandler } from "./api/client";
 import { ToastProvider, useToast } from "./components/Toast";
+import { ConfirmProvider } from "./components/ConfirmDialog";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NewResearch } from "./views/NewResearch";
 import { RunDashboard } from "./views/RunDashboard";
 import { BenchmarkCatalog } from "./views/BenchmarkCatalog";
+import { ResearchRecords } from "./views/ResearchRecords";
 import { Leaderboard } from "./views/Leaderboard";
 import { CompareRuns } from "./views/CompareRuns";
 import { FlywheelPanel } from "./views/FlywheelPanel";
 import { LlmPanel } from "./views/LlmPanel";
+import { SystemSettings } from "./views/SystemSettings";
+import { DatasetManager } from "./views/DatasetManager";
+import { MetricCatalogView } from "./views/MetricCatalog";
+import { ResearchSkills } from "./views/ResearchSkills";
 
 const CAT_FALLBACK = "未分类";
 
 const runCategory = (r: WorkflowRunSummary) =>
-  r.objective_snapshot?.category || CAT_FALLBACK;
+  categoryGroup(r.objective_snapshot?.category || CAT_FALLBACK);
 
 const runTime = (r: WorkflowRunSummary): number => {
   const t = r.started_at;
@@ -22,19 +28,14 @@ const runTime = (r: WorkflowRunSummary): number => {
   return Number.isNaN(ms) ? 0 : ms;
 };
 
-interface RunGroup {
-  category: string;
-  label: string;
-  runs: WorkflowRunSummary[];
-  newest: number;
-}
-
 export function App() {
   return (
     <ToastProvider>
-      <ErrorBoundary>
-        <AppBody />
-      </ErrorBoundary>
+      <ConfirmProvider>
+        <ErrorBoundary>
+          <AppBody />
+        </ErrorBoundary>
+      </ConfirmProvider>
     </ToastProvider>
   );
 }
@@ -55,23 +56,25 @@ function AppBody() {
   | "new"
   | "run"
   | "catalog"
+  | "records"
   | "leaderboard"
   | "compare"
   | "flywheel"
   | "llm"
+  | "settings"
+  | "datasets"
+  | "metrics"
+  | "skills"
 >("welcome");
   const [error, setError] = useState<string>("");
-  // Per-category collapse state for the research-records sidebar.
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   // When jumping from the catalog to "new research", pre-select this task.
   const [newInitialTaskId, setNewInitialTaskId] = useState<string | null>(null);
+  // When jumping from a run's detail page to the catalog, auto-expand this task.
+  const [catalogExpandTaskId, setCatalogExpandTaskId] = useState<string | null>(null);
   // UI1: distinguish "first load in progress" from "backend unreachable after we
   // already had data" — the latter should keep showing cached runs instead of a hard error.
   const [loading, setLoading] = useState(true);
   const [backendDown, setBackendDown] = useState(false);
-  // U3: sidebar search + status filter for the research-records list.
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
   const loadedOnceRef = useRef(false);
 
   const refreshRuns = useCallback(async () => {
@@ -116,49 +119,13 @@ function AppBody() {
     setView("run");
   };
 
-  const runName = (r: WorkflowRunSummary) =>
-    taskMap[r.target_id]?.name || r.objective_snapshot?.name || r.target_id;
-
-  // U3: apply the sidebar search + status filter before grouping, so the records
-  // list stays short and scannable as the number of runs grows.
-  const filteredRuns = useMemo<WorkflowRunSummary[]>(() => {
-    const q = search.trim().toLowerCase();
-    if (!q && statusFilter === "all") return runs;
-    return runs.filter((r) => {
-      if (statusFilter !== "all" && r.status !== statusFilter) return false;
-      if (q) {
-        const name = taskMap[r.target_id]?.name || r.objective_snapshot?.name || r.target_id;
-        if (!name.toLowerCase().includes(q)) return false;
-      }
-      return true;
-    });
-  }, [runs, search, statusFilter, taskMap]);
-
-  // Group runs by category, sort each group by start time (newest first), and order the
-  // groups by their most-recent run so active categories float to the top.
-  const groups = useMemo<RunGroup[]>(() => {
-    const m = new Map<string, WorkflowRunSummary[]>();
-    for (const r of filteredRuns) {
-      const c = runCategory(r);
-      if (!m.has(c)) m.set(c, []);
-      m.get(c)!.push(r);
-    }
-    const out: RunGroup[] = [];
-    for (const [category, list] of m.entries()) {
-      const sorted = [...list].sort((a, b) => runTime(b) - runTime(a));
-      out.push({
-        category,
-        label: CATEGORY_LABELS[category] || category,
-        runs: sorted,
-        newest: sorted.length ? runTime(sorted[0]) : 0,
-      });
-    }
-    out.sort((a, b) => b.newest - a.newest || a.label.localeCompare(b.label));
-    return out;
-  }, [runs]);
-
-  const toggle = (cat: string) =>
-    setCollapsed((prev) => ({ ...prev, [cat]: !prev[cat] }));
+  const runName = (r: WorkflowRunSummary) => {
+    const known = !!taskMap[r.target_id];
+    const base =
+      taskMap[r.target_id]?.name || r.objective_snapshot?.name || r.target_id;
+    // 任务已不在任务库中（被删除/测试目标）时明确标注，避免无意义名称引起困惑。
+    return known || r.objective_snapshot?.name ? base : `${base}（未注册任务）`;
+  };
 
   return (
     <div className="app-shell">
@@ -176,6 +143,10 @@ function AppBody() {
           📚 任务库
         </button>
 
+        <button className="btn block" onClick={() => setView("records")}>
+          📋 研究记录
+        </button>
+
         <button className="btn block" onClick={() => setView("leaderboard")}>
           🏆 研究榜单
         </button>
@@ -188,66 +159,23 @@ function AppBody() {
           🔄 数据飞轮
         </button>
 
-        <div className="sidebar-label">研究记录 ({runs.length})</div>
-        <div className="sidebar-filter">
-          <input
-            className="sidebar-search"
-            placeholder="搜索研究…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            title="按任务名筛选研究记录"
-          />
-          <select
-            className="sidebar-status"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            title="按运行状态筛选"
-          >
-            <option value="all">全部状态</option>
-            {Object.keys(STATUS_LABEL).map((s) => (
-              <option key={s} value={s}>{STATUS_LABEL[s]}</option>
-            ))}
-          </select>
-        </div>
-        <div className="run-list">
-          {groups.length === 0 && (
-            <div className="muted small" style={{ padding: 6 }}>
-              {loading
-                ? "加载中…"
-                : search || statusFilter !== "all"
-                ? "无匹配记录"
-                : "暂无记录"}
-            </div>
-          )}
-          {groups.map((g) => {
-            const isCollapsed = !!collapsed[g.category];
-            return (
-              <div key={g.category} className="run-group">
-                <button
-                  className="run-group-head"
-                  onClick={() => toggle(g.category)}
-                  title={isCollapsed ? "展开" : "折叠"}
-                >
-                  <span className={`chev ${isCollapsed ? "collapsed" : ""}`}>▾</span>
-                  <span className="run-group-label">{g.label}</span>
-                  <span className="run-group-count">{g.runs.length}</span>
-                </button>
-                {!isCollapsed &&
-                  g.runs.map((r) => (
-                    <button
-                      key={r.run_id}
-                      className={`run-item ${runId === r.run_id && view === "run" ? "active" : ""}`}
-                      onClick={() => selectRun(r.run_id)}
-                    >
-                      <span className={`dot ${STATUS_CLASS[r.status] || "accent"}`} />
-                      <span className="run-item-name">{runName(r)}</span>
-                      <span className="run-item-status muted small">{STATUS_LABEL[r.status] || r.status}</span>
-                    </button>
-                  ))}
-              </div>
-            );
-          })}
-        </div>
+        <button className="btn block" onClick={() => setView("datasets")}>
+          🗂 数据集管理
+        </button>
+
+        <button className="btn block" onClick={() => setView("metrics")}>
+          📏 评估指标
+        </button>
+
+        <button className="btn block" onClick={() => setView("skills")}>
+          🧩 研究 Skill
+        </button>
+
+        <button className="btn block" onClick={() => setView("settings")}>
+          ⚙ 系统设置
+        </button>
+
+        <div className="sidebar-spacer" />
 
         <div className="sidebar-foot muted small">
           后端 :8000 · 前端 :5173
@@ -291,10 +219,22 @@ function AppBody() {
 
         {view === "catalog" && (
           <BenchmarkCatalog
+            initialExpandedTaskId={catalogExpandTaskId}
             onUseTask={(taskId) => {
               setNewInitialTaskId(taskId);
               setView("new");
             }}
+          />
+        )}
+
+        {view === "records" && (
+          <ResearchRecords
+            runs={runs}
+            nameOf={runName}
+            loading={loading}
+            onOpenRun={selectRun}
+            onNewResearch={() => setView("new")}
+            onDeleted={refreshRuns}
           />
         )}
 
@@ -322,7 +262,26 @@ function AppBody() {
 
         {view === "llm" && <LlmPanel />}
 
-        {view === "run" && runId && <RunDashboard runId={runId} />}
+        {view === "settings" && <SystemSettings />}
+
+        {view === "datasets" && <DatasetManager />}
+
+        {view === "metrics" && <MetricCatalogView />}
+
+        {view === "skills" && <ResearchSkills />}
+
+        {view === "run" && runId && (
+          <RunDashboard
+            runId={runId}
+            onBack={() => setView("records")}
+            onDeleted={refreshRuns}
+            onOpenTask={(taskId) => {
+              if (!taskId) return;
+              setCatalogExpandTaskId(taskId);
+              setView("catalog");
+            }}
+          />
+        )}
 
         {view !== "new" && !runId && (
           <div className="welcome">
@@ -359,7 +318,7 @@ function AppBody() {
                           </span>
                         </div>
                         <div className="muted mono small">
-                          {CATEGORY_LABELS[runCategory(r)] || runCategory(r)}
+                          {categoryLabel(runCategory(r))}
                         </div>
                         <div className="muted mono small">{r.run_id}</div>
                       </button>

@@ -4,13 +4,18 @@ import {
   LaunchConfig,
   InnerLoopConfig,
   CapabilityInfo,
+  MetricInfo,
+  SkillEntry,
   deleteBenchmarkTask,
   getBenchmarkTasks,
+  getMetricCatalog,
   getProtocol,
   launchBenchmarkTask,
-  CATEGORY_LABELS,
+  searchSkills,
+  categoryLabel,
 } from "../api/client";
 import { RegisterTask } from "./RegisterTask";
+import { useConfirm } from "../components/ConfirmDialog";
 
 // Inner-loop agents may NOT drive the reserved OUTER-loop capabilities (they would
 // let the inner loop judge its own work). Mirror of harness.OUTER_LOOP_RESERVED_CAPS.
@@ -161,13 +166,33 @@ function SkillTags({
   setSkills: (s: string[]) => void;
 }) {
   const [draft, setDraft] = useState("");
-  const add = () => {
-    const v = draft.trim();
-    if (v && !skills.includes(v)) setSkills([...skills, v]);
+  const [suggestions, setSuggestions] = useState<SkillEntry[]>([]);
+  const [showSug, setShowSug] = useState(false);
+  const add = (v: string) => {
+    const t = v.trim();
+    if (t && !skills.includes(t)) setSkills([...skills, t]);
     setDraft("");
+    setShowSug(false);
   };
+  // 技能库联想：输入 >= 2 字符时从 AREX-Skill 知识库检索（300ms 防抖）。
+  useEffect(() => {
+    const q = draft.trim();
+    if (q.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      searchSkills({ q, limit: 8 })
+        .then((r) => {
+          setSuggestions(r.items);
+          setShowSug(r.items.length > 0);
+        })
+        .catch(() => setSuggestions([]));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [draft]);
   return (
-    <div className="skill-tags">
+    <div className="skill-tags" style={{ position: "relative" }}>
       {skills.map((s) => (
         <span key={s} className="chip">
           {s}
@@ -179,15 +204,57 @@ function SkillTags({
       <input
         className="chip-input"
         value={draft}
-        placeholder="添加技能名后回车"
+        placeholder="添加技能名后回车（可输入关键词从研究 Skill 库检索）"
         onChange={(e) => setDraft(e.target.value)}
+        onFocus={() => suggestions.length && setShowSug(true)}
+        onBlur={() => setTimeout(() => setShowSug(false), 150)}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
-            add();
+            add(draft);
           }
         }}
       />
+      {showSug && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            zIndex: 30,
+            background: "var(--panel, #fff)",
+            border: "1px solid var(--border, #ddd)",
+            borderRadius: 8,
+            padding: 6,
+            minWidth: 320,
+            maxWidth: 520,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+          }}
+        >
+          {suggestions.map((s) => (
+            <button
+              key={s.path}
+              type="button"
+              className="btn tiny"
+              style={{ display: "block", width: "100%", textAlign: "left", justifyContent: "flex-start", padding: "5px 8px" }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                add(s.name);
+              }}
+              title={`${s.description}\n${s.path}`}
+            >
+              <b>{s.name}</b>
+              <span className="muted" style={{ marginLeft: 6, fontSize: 11 }}>
+                {s.group}
+                {s.disco_role ? ` · ${s.disco_role}` : ""}
+              </span>
+            </button>
+          ))}
+          <div className="muted" style={{ fontSize: 10, padding: "4px 8px 0" }}>
+            来自研究 Skill 知识库（AREX-Skill）——也可到「研究 Skill」页浏览详情。
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -613,6 +680,7 @@ export function NewResearch({
   onCancel: () => void;
   onLaunch: (runId: string) => void;
 }) {
+  const confirmDialog = useConfirm();
   const [tasks, setTasks] = useState<BenchmarkTask[]>([]);
   const [caps, setCaps] = useState<CapabilityInfo[]>([]);
   const [error, setError] = useState("");
@@ -640,6 +708,8 @@ export function NewResearch({
   const [autoRun, setAutoRun] = useState(true);
   const [busy, setBusy] = useState(false);
   const [registering, setRegistering] = useState(false);
+  // 评估指标目录：新建研究时可选择本 run 的优化指标（覆盖任务默认）。
+  const [metrics, setMetrics] = useState<MetricInfo[]>([]);
 
   const refreshTasks = async () => {
     try {
@@ -650,7 +720,12 @@ export function NewResearch({
   };
 
   const handleDeleteTask = async (t: BenchmarkTask) => {
-    if (!window.confirm(`确认删除自定义任务「${t.name}」？已创建的研究记录不受影响。`)) return;
+    if (!(await confirmDialog({
+      title: "删除自定义任务",
+      message: `确认删除自定义任务「${t.name}」？已创建的研究记录不受影响。`,
+      confirmLabel: "删除",
+      danger: true,
+    }))) return;
     try {
       await deleteBenchmarkTask(t.task_id);
       if (selected?.task_id === t.task_id) setSelected(null);
@@ -667,6 +742,13 @@ export function NewResearch({
         const [t, proto] = await Promise.all([getBenchmarkTasks(), getProtocol()]);
         if (!alive) return;
         setTasks(t);
+        getMetricCatalog()
+          .then((ms) => {
+            if (alive) setMetrics(ms);
+          })
+          .catch(() => {
+            /* 目录加载失败时下拉自然退化为仅任务默认指标 */
+          });
         const list = (proto?.capabilities || []) as Array<Record<string, any>>;
         setCaps(
           list.map((c) => ({
@@ -782,7 +864,7 @@ export function NewResearch({
           {[...grouped.entries()].map(([cat, items]) => (
             <div key={cat} style={{ marginTop: 14 }}>
               <h3 style={{ borderBottom: "1px solid var(--border)", paddingBottom: 4 }}>
-                {CATEGORY_LABELS[cat] || cat} <span className="muted">({items.length})</span>
+                {categoryLabel(cat)} <span className="muted">({items.length})</span>
               </h3>
               <div className="task-grid">
                 {items.map((t) => (
@@ -830,6 +912,37 @@ export function NewResearch({
               <div className="kv">
                 <span className="muted">评测指标</span>
                 <span className="mono">{selected.eval_metric} · {dirText(selected.direction)}</span>
+              </div>
+              <div className="kv" style={{ alignItems: "center" }}>
+                <span className="muted">优化指标（本 run 覆盖）</span>
+                <select
+                  className="mono"
+                  value={inner.eval_metric ?? selected.eval_metric}
+                  onChange={(e) =>
+                    setInner({
+                      ...inner,
+                      eval_metric:
+                        e.target.value === selected.eval_metric ? null : e.target.value,
+                    })
+                  }
+                  title="从评估指标目录中选择本 run 的优化指标；默认使用任务声明指标"
+                >
+                  {[
+                    // 任务默认指标若不在目录中，也作为选项（保持可用）
+                    ...(selected.eval_metric &&
+                    !metrics.some((m) => m.metric_id === selected.eval_metric)
+                      ? [selected.eval_metric]
+                      : []),
+                    ...metrics.map((m) => m.metric_id),
+                  ].map((mid) => {
+                    const m = metrics.find((x) => x.metric_id === mid);
+                    return (
+                      <option key={mid} value={mid}>
+                        {m ? `${m.name}（${mid} · ${dirText(m.direction)}）` : `${mid}（任务默认）`}
+                      </option>
+                    );
+                  })}
+                </select>
               </div>
               <div className="kv">
                 <span className="muted">baseline</span>
@@ -899,7 +1012,7 @@ export function NewResearch({
               <span className="muted small" style={{ paddingLeft: 24 }}>
                 {autoRun
                   ? "创建后自动启动双循环：内循环实验 → 外审计验证 → 递归改进，直到通过或被预算耗尽。"
-                  : "仅创建研究任务（状态：已请求）。可在仪表盘「调试」面板中先验证内/外循环，确认无误后再手动启动。"
+                  : "仅创建研究任务（状态：已创建·未启动，后台不会执行）。可在仪表盘「调试」面板中先验证内/外循环，确认无误后再手动启动。"
                 }
               </span>
             </div>

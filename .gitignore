@@ -31,11 +31,18 @@ frontend/dist/
 
 # Runtime data (generated dynamically)
 data/control_plane_store.json
+data/control_plane_store.json.lock
 data/research_state.db
 data/custom_tasks.json
 data/custom_tasks.json.lock
 data/task_state/
 data/custom_uploads/
+# 运行时状态：含 agent API key 明文，绝不入库
+data/system_settings.json
+data/datasets.json
+# 本地克隆的外部技能仓库（508MB + 嵌套 .git，按需重新克隆：
+#   git clone --depth 1 https://github.com/VectorSpaceLab/AREX-Skill.git vendor/AREX-Skill）
+vendor/AREX-Skill/
 
 # Vendored benchmarks & downloaded competition data (large, local-only)
 benchmark_tasks/suites/data/vendor/

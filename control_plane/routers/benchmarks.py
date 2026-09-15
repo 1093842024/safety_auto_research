@@ -59,6 +59,41 @@ def build_benchmarks_router(deps: ControlPlaneDeps) -> APIRouter:
     def list_benchmark_tasks() -> list[dict]:
         return [to_dict(t) for t in get_catalog()]
 
+    @router.get(
+        "/benchmark-tasks/{task_id}/data-preview",
+        summary="Sample cases + volume stats of a task's materialised train/eval data "
+                "(read-only; no task code is executed)",
+    )
+    def get_task_data_preview(task_id: str) -> dict:
+        from ...benchmark_tasks import get_task_data_preview as _preview
+
+        return _preview(task_id)
+
+    @router.get(
+        "/benchmark-metrics",
+        summary="Evaluation-metric catalog: meaning / computation / reference implementation "
+                "for every metric used by the benchmark tasks (评估指标 tab)",
+    )
+    def list_metric_catalog() -> list[dict]:
+        from ...benchmark_tasks import metric_catalog
+
+        return metric_catalog.all_metrics()
+
+    @router.get(
+        "/benchmark-metrics/{metric_id}",
+        summary="One metric's detail: meaning, computation, reference implementation",
+    )
+    def get_metric_catalog_item(metric_id: str) -> dict:
+        from ...benchmark_tasks import metric_catalog
+
+        detail = metric_catalog.get_metric_detail(metric_id)
+        if detail is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"metric {metric_id} not in catalog",
+            )
+        return detail
+
     # ----- External benchmark suites (ScienceAgentBench / MLE-bench) -----
     @router.get(
         "/benchmark-suites",
@@ -348,12 +383,30 @@ def build_benchmarks_router(deps: ControlPlaneDeps) -> APIRouter:
         is_harness_task = not task.supported_by_platform
         agent_mode = (inner.mode == "agent") or is_harness_task
 
+        # ---- Optimization-metric override (评估指标目录) ----
+        # inner_loop.eval_metric lets the researcher pick a different optimization
+        # metric for THIS run; direction follows the metric catalog's canonical
+        # entry (gates stay the task's — the threshold field overrides the gate).
+        task_eval_metric = task.eval_metric
+        task_direction = task.direction
+        if inner.eval_metric:
+            from ...benchmark_tasks import metric_catalog
+
+            if metric_catalog.get_metric_detail(inner.eval_metric) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"评估指标 {inner.eval_metric} 不在指标目录中（GET /benchmark-metrics 可查）",
+                )
+            detail = metric_catalog.get_metric_detail(inner.eval_metric)
+            task_eval_metric = inner.eval_metric
+            task_direction = detail["direction"]
+
         # Core task spec for agent execution (Task 4): keep only what an agent needs —
         # goal / definition / data / eval method / metrics — and drop docker/Arbor deps.
         eval_method = task.eval_method or _get_eval_method_desc(task)
         goal_text = (
             f"任务：{task.name}（{task.source_project}）。"
-            f"目标：优化指标 {task.eval_metric}（{('越高越好' if task.direction == 'higher' else '越低越好')}），"
+            f"目标：优化指标 {task_eval_metric}（{('越高越好' if task_direction == 'higher' else '越低越好')}），"
             f"baseline={task.baseline}，reference={task.reference}。"
             f"评估方式：{eval_method}。"
             f"任务定义与数据：{task.dataset_desc}"
@@ -368,8 +421,8 @@ def build_benchmarks_router(deps: ControlPlaneDeps) -> APIRouter:
             "data": task.dataset_desc,
             "eval_method": eval_method,
             "metrics": {
-                "eval_metric": task.eval_metric,
-                "direction": task.direction,
+                "eval_metric": task_eval_metric,
+                "direction": task_direction,
                 "baseline": task.baseline,
                 "reference": task.reference,
                 "gates": task.gates,
@@ -414,7 +467,7 @@ def build_benchmarks_router(deps: ControlPlaneDeps) -> APIRouter:
                 inner_agent_config["data_subdir"] = tc.get("data_subdir") or "text_cls_demo"
                 if tc.get("target_value") is not None:
                     inner_agent_config["threshold"] = float(tc["target_value"])
-                inner_agent_config["eval_metric"] = task.eval_metric
+                inner_agent_config["eval_metric"] = task_eval_metric
             elif task_type == "image_classification":
                 sandbox_capability = "image_cls_sandbox"
                 tc = task.type_config or {}
@@ -424,7 +477,7 @@ def build_benchmarks_router(deps: ControlPlaneDeps) -> APIRouter:
                 inner_agent_config["epochs"] = tc.get("num_epochs", 6)
                 if tc.get("target_value") is not None:
                     inner_agent_config["threshold"] = float(tc["target_value"])
-                inner_agent_config["eval_metric"] = task.eval_metric
+                inner_agent_config["eval_metric"] = task_eval_metric
             elif task_type == "audio_classification":
                 sandbox_capability = "audio_cls_sandbox"
                 tc = task.type_config or {}
@@ -434,7 +487,7 @@ def build_benchmarks_router(deps: ControlPlaneDeps) -> APIRouter:
                 inner_agent_config["epochs"] = tc.get("num_epochs", 8)
                 if tc.get("target_value") is not None:
                     inner_agent_config["threshold"] = float(tc["target_value"])
-                inner_agent_config["eval_metric"] = task.eval_metric
+                inner_agent_config["eval_metric"] = task_eval_metric
             elif task_type == "embedding_contrastive":
                 sandbox_capability = "embedding_sandbox"
                 tc = task.type_config or {}
@@ -446,11 +499,17 @@ def build_benchmarks_router(deps: ControlPlaneDeps) -> APIRouter:
                 inner_agent_config["epochs"] = tc.get("num_epochs", 30)
                 if tc.get("target_value") is not None:
                     inner_agent_config["threshold"] = float(tc["target_value"])
-                inner_agent_config["eval_metric"] = task.eval_metric
+                inner_agent_config["eval_metric"] = task_eval_metric
             else:
                 sandbox_capability = "run_research_sandbox"
                 if not task.supported_by_platform and task.run_command and task.run_command != "manual":
                     inner_agent_config["research_cmd"] = task.run_command
+                    # Mount the task's own materialised data dir (data/oss/<id>/) at
+                    # /data — the default data/kaggle mount would leave research_cmds
+                    # that expect task-local datasets (e.g. safety_router .npz) with
+                    # an empty /data and fail honestly-but-avoidably.
+                    if task.source_path and os.path.isdir(task.source_path):
+                        inner_agent_config["data_dir"] = task.source_path
             inner_agent_config["sandbox_capability"] = sandbox_capability
 
         req = CreateWorkflowRunRequest(
@@ -464,8 +523,8 @@ def build_benchmarks_router(deps: ControlPlaneDeps) -> APIRouter:
                 "goal": goal_text,
                 "source_project": task.source_project,
                 "category": task.category,
-                "eval_metric": task.eval_metric,
-                "direction": task.direction,
+                "eval_metric": task_eval_metric,
+                "direction": task_direction,
                 "baseline": task.baseline,
                 "reference": task.reference,
                 "gates": task.gates,
@@ -484,7 +543,7 @@ def build_benchmarks_router(deps: ControlPlaneDeps) -> APIRouter:
                     "inner_loop": inner.model_dump(),
                 },
             },
-            requested_outcomes=[f"Improve {task.eval_metric} vs baseline ({task.baseline})"],
+            requested_outcomes=[f"Improve {task_eval_metric} vs baseline ({task.baseline})"],
         )
         run = svc.create_workflow_run(req)
 

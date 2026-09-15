@@ -13,6 +13,7 @@ platform-native tasks) actually drive the dual loop.
 
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass
 from typing import Any
@@ -29,7 +30,9 @@ class BenchmarkTask:
     task_id: str
     name: str
     source_project: str
-    category: str  # model_dev | system_opt | puzzle | cuda | adversarial | efficiency | agent_eval | idea_eval | tooling | platform_native
+    # 主分类（任务研究什么，v2 分类体系 2026-09）：
+    # ml_modeling | perf_opt | safety_adversarial | agent_eval
+    category: str
     modality: str
     dataset_desc: str
     eval_metric: str
@@ -43,6 +46,11 @@ class BenchmarkTask:
     tags: list[str]
     supported_by_platform: bool = False  # True => dual-loop can actually execute it
     note: str = ""
+    # Research background / motivation (why this task exists as *research work* and what
+    # a researcher optimising it is actually studying). Authored centrally in
+    # ``_BACKGROUNDS`` (keyed by task_id, ``sab.*`` prefix-fallback) so curated and
+    # batch-wired entries share one place; per-instance values win when set.
+    background: str = ""
     # How the task is evaluated / scored (script or procedure). Kept as core info so an
     # agent executor (Task 4) knows the evaluation method after docker/Arbor deps are stripped.
     eval_method: str = ""
@@ -61,6 +69,8 @@ class BenchmarkTask:
     # (data/oss/<task_id>/) and a sandbox runner exists, so it is launchable /
     # experimentally validatable even though its source project is an external repo.
     data_local: bool = False
+    # 二级子类（主分类内的细分，见 SUBCATEGORY_LABELS）；空串表示无子类
+    sub_category: str = ""
 
 
 def _oss(p: str) -> str:
@@ -78,7 +88,8 @@ _TASKS: list[BenchmarkTask] = [
         task_id="autolab.safety_router",
         name="Smallest Safety Router",
         source_project="autolab",
-        category="model_dev",
+        category="perf_opt",
+        sub_category="compression",
         modality="tabular",
         dataset_desc="Fixed numeric features for a refusal router (answer=0 / refuse=1); "
         "train/val/test_public .npz splits. Architecture is a 2-layer MLP (model.py hash-pinned, read-only).",
@@ -109,7 +120,8 @@ _TASKS: list[BenchmarkTask] = [
         task_id="mlevolve.mle_bench",
         name="MLE-bench · 75 Kaggle tasks (external)",
         source_project="MLEvolve",
-        category="model_dev",
+        category="agent_eval",
+        sub_category="ml_engineering",
         modality="tabular",
         dataset_desc="75 Kaggle-style ML competitions (accuracy / ROC-AUC / F1 per task); aggregated "
         "metric = medal rate. Data lives in external openai/mle-bench (not bundled in this repo).",
@@ -130,6 +142,7 @@ _TASKS: list[BenchmarkTask] = [
         name="ScienceAgentBench · 102 data-driven discovery tasks",
         source_project="OSU-NLP-Group/ScienceAgentBench",
         category="agent_eval",
+        sub_category="scientific_discovery",
         modality="mixed",
         dataset_desc="102 tasks from 44 peer-reviewed publications in 4 disciplines "
         "(Bioinformatics 27 / Comp. Chemistry 20 / GIS 27 / Psych&CogSci 28); covers data "
@@ -156,7 +169,8 @@ _TASKS: list[BenchmarkTask] = [
         task_id="suite.mle_bench",
         name="MLE-bench · 75 offline Kaggle competitions (official suite)",
         source_project="openai/mle-bench",
-        category="model_dev",
+        category="agent_eval",
+        sub_category="ml_engineering",
         modality="mixed",
         dataset_desc="75 Kaggle ML-engineering competitions (low 22 / medium 38 / high 15; lite=low, "
         "158 GB vs full 3.3 TB). Train models, prepare data, run experiments, submit CSV to "
@@ -185,7 +199,8 @@ _TASKS: list[BenchmarkTask] = [
         task_id="platform.titanic",
         name="Kaggle · Titanic (binary classification)",
         source_project="safety_auto_research",
-        category="platform_native",
+        category="ml_modeling",
+        sub_category="tabular",
         modality="tabular",
         dataset_desc="Titanic survival classification; train.csv / test.csv. Drives the inner research "
         "loop (gbm baseline) -> outer audit -> recursive improvement.",
@@ -205,7 +220,8 @@ _TASKS: list[BenchmarkTask] = [
         task_id="platform.spaceship",
         name="Kaggle · Spaceship-Titanic (binary classification)",
         source_project="safety_auto_research",
-        category="platform_native",
+        category="ml_modeling",
+        sub_category="tabular",
         modality="tabular",
         dataset_desc="Spaceship-Titanic passenger transport classification; train.csv / test.csv. "
         "End-to-end dual-loop demo task.",
@@ -225,7 +241,8 @@ _TASKS: list[BenchmarkTask] = [
         task_id="platform.wine",
         name="Wine Quality (binary classification)",
         source_project="safety_auto_research",
-        category="platform_native",
+        category="ml_modeling",
+        sub_category="tabular",
         modality="tabular",
         dataset_desc="Wine chemical analysis → binary quality (sklearn load_wine, flavanoids threshold). 178 rows x 14 features.",
         eval_metric="f1",
@@ -244,7 +261,8 @@ _TASKS: list[BenchmarkTask] = [
         task_id="platform.iris",
         name="Iris Species (multi-class)",
         source_project="safety_auto_research",
-        category="platform_native",
+        category="ml_modeling",
+        sub_category="tabular",
         modality="tabular",
         dataset_desc="Fisher Iris flower species: 3 classes, 150 rows x 4 features. Classic ML benchmark.",
         eval_metric="accuracy",
@@ -263,7 +281,8 @@ _TASKS: list[BenchmarkTask] = [
         task_id="platform.breast_cancer",
         name="Breast Cancer Wisconsin (binary classification)",
         source_project="safety_auto_research",
-        category="platform_native",
+        category="ml_modeling",
+        sub_category="tabular",
         modality="tabular",
         dataset_desc="Breast cancer diagnosis from 30 numeric features. 569 rows, binary target. sklearn load_breast_cancer.",
         eval_metric="accuracy",
@@ -290,6 +309,7 @@ _TASKS: list[BenchmarkTask] = [
         name="SAB #92 · JNMF importance factors (agent-eval rep)",
         source_project="OSU-NLP-Group/ScienceAgentBench",
         category="agent_eval",
+        sub_category="scientific_discovery",
         modality="mixed",
         dataset_desc=(
             "ScienceAgentBench 实例 #92：由拟合的 JNMF W/H 矩阵计算 6 个重要性因子（纯 numpy）。"
@@ -360,6 +380,206 @@ def get_task(task_id: str) -> BenchmarkTask | None:
     return None
 
 
+# --------------------------------------------------------------------------- #
+# Task data preview (任务数据样本): materialised train/eval data cases + volume
+# stats for the catalog detail panel. Read-only; never executes task code.
+# --------------------------------------------------------------------------- #
+_DATA_EXTS = {".csv", ".jsonl", ".json", ".npz", ".parquet"}
+_MAX_SAMPLE_BYTES = 64 * 1024 * 1024  # sample only files <= 64 MiB
+_TRUNC = 120  # truncate long cell values for the wire
+
+
+def _truncate(v: Any) -> Any:
+    s = str(v)
+    return s if len(s) <= _TRUNC else s[: _TRUNC - 1] + "…"
+
+
+def _preview_csv(path: str, sample_rows: int) -> dict[str, Any]:
+    import pandas as pd
+
+    head = pd.read_csv(path, nrows=sample_rows)
+    # Row count: cheap newline count (CSV without embedded newlines in this catalog).
+    with open(path, "rb") as f:
+        rows = max(0, sum(1 for _ in f) - 1)
+    return {
+        "kind": "csv",
+        "columns": [str(c) for c in head.columns][:20],
+        "dtypes": [str(d) for d in head.dtypes][:20],
+        "rows": rows,
+        "samples": [[_truncate(x) for x in row] for row in head.values.tolist()],
+    }
+
+
+def _preview_jsonl(path: str, sample_rows: int) -> dict[str, Any]:
+    with open(path, encoding="utf-8", errors="replace") as f:
+        lines = f.readlines()
+    samples = []
+    for ln in lines[:sample_rows]:
+        try:
+            obj = json.loads(ln)
+        except json.JSONDecodeError:
+            obj = ln.strip()[:_TRUNC]
+        samples.append(obj if isinstance(obj, list) else [obj] if not isinstance(obj, dict) else
+                       [_truncate(f"{k}={v}") for k, v in list(obj.items())[:8]])
+    return {
+        "kind": "jsonl",
+        "columns": None,
+        "dtypes": None,
+        "rows": len(lines),
+        "samples": samples,
+    }
+
+
+def _preview_json(path: str, sample_rows: int) -> dict[str, Any]:
+    with open(path, encoding="utf-8", errors="replace") as f:
+        data = json.load(f)
+    if isinstance(data, list):
+        rows = len(data)
+        samples = [
+            [_truncate(f"{k}={v}") for k, v in list(x.items())[:8]]
+            if isinstance(x, dict) else [_truncate(x)]
+            for x in data[:sample_rows]
+        ]
+        return {"kind": "json", "columns": None, "dtypes": None, "rows": rows, "samples": samples}
+    if isinstance(data, dict):
+        # dict-of-arrays (e.g. {"train": [...], "test": [...]}) or config — show keys.
+        inner = {k: len(v) for k, v in data.items() if isinstance(v, (list, dict))}
+        return {
+            "kind": "json",
+            "columns": [str(k) for k in list(data.keys())[:20]],
+            "dtypes": None,
+            "rows": None,
+            "samples": [[_truncate(f"{k}: {v} 条" if isinstance(v, (list, dict)) else f"{k}={v}")]
+                        for k, v in list(data.items())[:sample_rows]],
+            "kv_counts": inner,
+        }
+    return {"kind": "json", "columns": None, "dtypes": None, "rows": None, "samples": [[_truncate(data)]]}
+
+
+def _preview_npz(path: str, sample_rows: int) -> dict[str, Any]:
+    import numpy as np
+
+    with np.load(path, allow_pickle=False) as z:
+        arrays = {k: z[k] for k in z.files}
+    out: dict[str, Any] = {"kind": "npz", "columns": list(arrays.keys())[:20], "dtypes": None,
+                           "rows": None, "samples": [], "arrays": []}
+    for name, arr in list(arrays.items())[:12]:
+        shape = list(arr.shape)
+        out["arrays"].append({"name": name, "shape": shape, "dtype": str(arr.dtype)})
+        if arr.ndim == 1:
+            out["samples"].append([_truncate(x) for x in arr[:sample_rows]])
+        elif arr.ndim == 2:
+            out["samples"].append(
+                [[_truncate(x) for x in row[:10]] for row in arr[:sample_rows]]
+            )
+    # A (n, f) 2-D array is the case count.
+    for name, arr in arrays.items():
+        if arr.ndim == 2:
+            out["rows"] = int(arr.shape[0])
+            break
+    return out
+
+
+def get_task_data_preview(task_id: str, max_files: int = 8, sample_rows: int = 5) -> dict[str, Any]:
+    """Sample cases + volume stats for a task's materialised train/eval data.
+
+    Looks in ``source_path`` (if a directory) and ``data/oss/<task_id>``. Only
+    small data files (<= ``_MAX_SAMPLE_BYTES``) are sampled; huge binaries are
+    listed with their size but no rows/samples.
+    """
+    t = get_task(task_id)
+    if t is None:
+        return {"task_id": task_id, "found": False, "dirs": [], "files": [], "total_bytes": 0}
+
+    def _remap(p: str) -> str:
+        """Remap a foreign-machine path (e.g. /Users/<x>/.../safety_auto_research/<rest>)
+        into this checkout: everything after the last ``safety_auto_research/`` component
+        is re-rooted at _PKG_ROOT. Custom tasks registered on another machine carry such
+        absolute dataset paths in their type_config."""
+        p = str(p or "")
+        marker = "safety_auto_research" + _os.sep
+        idx = p.rfind(marker)
+        if idx >= 0:
+            rest = p[idx + len(marker):].lstrip(_os.sep)
+            return _os.path.join(_PKG_ROOT, rest)
+        return p
+
+    raw_candidates: list[str] = []
+    if t.source_path:
+        raw_candidates.append(t.source_path)
+    oss_dir = _os.path.join(_PKG_ROOT, "data", "oss", task_id)
+    raw_candidates.append(oss_dir)
+    # Custom-registered tasks keep their dataset paths in type_config.
+    cfg = t.type_config or {}
+    for k in ("dataset_path", "data_dir", "manifest_path", "prompt_dataset"):
+        if cfg.get(k):
+            raw_candidates.append(str(cfg[k]))
+
+    candidates: list[str] = []
+    for raw in raw_candidates:
+        p = _remap(raw)
+        if not p:
+            continue
+        # A file path (e.g. .../train.csv) is scanned via its parent directory.
+        if _os.path.isfile(p):
+            p = _os.path.dirname(p)
+        if _os.path.isdir(p) and p not in candidates:
+            candidates.append(p)
+    if not candidates:
+        return {"task_id": task_id, "found": True, "dirs": [], "files": [], "total_bytes": 0,
+                "note": "该任务的数据未物化到本地（外部依赖或仅保留任务定义）。"}
+
+    files: list[str] = []
+    for d in candidates[:2]:
+        for root, dirs, names in _os.walk(d):
+            dirs[:] = [x for x in dirs if not x.startswith(".")]
+            if root[len(d):].count(_os.sep) >= 2:
+                dirs[:] = []
+            for n in sorted(names):
+                p = _os.path.join(root, n)
+                if _os.path.splitext(n)[1].lower() in _DATA_EXTS:
+                    files.append(p)
+    # Prefer the most-informative files: sort small-first so big suites don't crowd out samples.
+    files.sort(key=lambda p: _os.path.getsize(p))
+    picked = files[:max_files]
+
+    previews: list[dict[str, Any]] = []
+    total_bytes = 0
+    for p in picked:
+        size = _os.path.getsize(p)
+        total_bytes += size
+        entry: dict[str, Any] = {
+            "path": _os.path.relpath(p, candidates[0]),
+            "size_bytes": size,
+            "preview": None,
+        }
+        if size <= _MAX_SAMPLE_BYTES:
+            ext = _os.path.splitext(p)[1].lower()
+            try:
+                if ext == ".csv":
+                    entry["preview"] = _preview_csv(p, sample_rows)
+                elif ext == ".jsonl":
+                    entry["preview"] = _preview_jsonl(p, sample_rows)
+                elif ext == ".json":
+                    entry["preview"] = _preview_json(p, sample_rows)
+                elif ext == ".npz":
+                    entry["preview"] = _preview_npz(p, sample_rows)
+            except Exception as exc:  # a broken file must not kill the whole preview
+                entry["error"] = f"{type(exc).__name__}: {exc}"
+        else:
+            entry["error"] = "文件过大，仅列出规模"
+        previews.append(entry)
+
+    return {
+        "task_id": task_id,
+        "found": True,
+        "dirs": [_os.path.relpath(d, _PKG_ROOT) for d in candidates[:2]],
+        "files": previews,
+        "file_count": len(files),
+        "total_bytes": total_bytes,
+    }
+
+
 def _default_eval_method(t: BenchmarkTask) -> str:
     """Compose a concise evaluation-method description from core fields (fallback)."""
     direction = "越高越好" if t.direction == "higher" else "越低越好"
@@ -377,19 +597,28 @@ def _default_eval_method(t: BenchmarkTask) -> str:
     )
 
 
+def _docker_available() -> bool:
+    return shutil.which("docker") is not None
+
+
 def _sandbox_isolation(t: BenchmarkTask) -> str:
     """Isolation level the task will run under when launched in agent mode.
 
+    Docker 隔离现在是**默认启用**的：只要本机 Docker 可用，agent 模式任务一律在
+    一次性容器（read-only 数据/代码挂载 + 掉权 + 资源限制）内执行。显式禁用：
+    ``AGENT_SANDBOX=0`` / ``AGENT_SANDBOX_DISABLE=1``；需完全离线可设
+    ``AGENT_SANDBOX_NETWORK=none``（默认 bridge）。
+
     - "none"           platform-native (kaggle_eval / supported) dual loop; no sandbox needed
-    - "container-hard" agent mode + AGENT_SANDBOX=1 + Docker available (read-only data, no net)
-    - "container-soft" agent mode + AGENT_SANDBOX=1 but Docker unavailable (host soft isolation)
-    - "host"           agent mode but AGENT_SANDBOX not set; runs on the host with no isolation
+    - "container-hard" agent mode + Docker available（默认）
+    - "container-soft" Docker unavailable（回退宿主软隔离，结果诚实标注）
+    - "host"           agent mode + 显式禁用沙箱；runs on the host with no isolation
     """
     if t.harness == "kaggle_eval" or t.supported_by_platform:
         return "none"
-    if _os.environ.get("AGENT_SANDBOX") == "1":
-        return "container-hard" if shutil.which("docker") else "container-soft"
-    return "host"
+    if _os.environ.get("AGENT_SANDBOX") == "0" or _os.environ.get("AGENT_SANDBOX_DISABLE") == "1":
+        return "host"
+    return "container-hard" if _docker_available() else "container-soft"
 
 
 # The 1 GiB data-size policy: a task whose materialised data lower bound exceeds
@@ -462,11 +691,169 @@ def _availability(t: BenchmarkTask) -> tuple[bool, str, int | None]:
     return (True, "", t.data_size_bytes)
 
 
+# --------------------------------------------------------------------------- #
+# Research background per task (研究背景). Single place so both curated and
+# batch-wired entries carry a human-readable "what is this research actually
+# studying" description in the catalog detail panel. ``sab.*`` entries fall back
+# to the family entry; explicit per-instance ``background`` always wins.
+# --------------------------------------------------------------------------- #
+_BACKGROUNDS: dict[str, str] = {
+    "autolab.safety_router": (
+        "LLM 安全部署研究：安全路由器依据输入特征决定「直接回答 / 转交安全审查」二分类。"
+        "该任务研究的是**模型压缩与安全性的权衡**——在固定 2 层 MLP 结构（model.py 哈希钉死）下，"
+        "把参数量压到最小，同时保住整体准确率与不安全样本召回（unsafe_recall）、安全样本召回三道门限。"
+        "研究者优化的本质是：容量预算内安全分类边界的保留程度。"
+    ),
+    "autolab.grpo_multisource": (
+        "RLHF/GRPO 训练系统研究：GRPO（组相对策略优化）是多源视觉-数学对齐训练的主流算法，"
+        "其训练步由 rollout 采样、组内优势归一化与策略梯度更新组成，吞吐直接决定训练成本。"
+        "本任务以真实 NumPy 参考步测步延迟，研究训练步实现的可行性与吞吐特征（原任务需 L40S GPU 微调 7B 模型，"
+        "此处为声明的 CPU 代理）。"
+    ),
+    "autolab.flash_attention": (
+        "注意力核性能优化研究：softmax(QK^T/√d)V 是 Transformer 推理/训练的热点算子，"
+        "FlashAttention 类分块+重计算实现是其标准优化。本任务在 n=4096、d=64 的真实张量上测核延迟，"
+        "研究算子实现层面的延迟优化空间。"
+    ),
+    "autolab.aes128_ctr": (
+        "密码工程吞吐优化研究：AES-128-CTR 是对称加密的标准工作模式，生产实现依赖 AES-NI 等 "
+        "SIMD 指令集。本任务以纯 Python 真实实现对 1 MiB 缓冲计时并外推吞吐，"
+        "研究实现方式（查表/位运算/向量化）对加密吞吐的影响。"
+    ),
+    "autolab.adaptive_compression": (
+        "无损压缩的信息论研究：字节级上下文混合建模（PPM 族）是压缩率的核心。"
+        "本任务在 9 族官方可见序列上测整体 bits_per_byte，研究上下文阶数与混合策略"
+        "对压缩率的收益——每降 0.1 bpb 都是真实的建模改进。"
+    ),
+    "autolab.ntt_butterfly_cuda": (
+        "数论变换（NTT）核优化研究：NTT 是同态加密与格密码的核心运算，Goldilocks 素域上的 "
+        "bit-exact 变换尤其重要。本任务实现 radix-2 Cooley-Tukey NTT 并对 n=65536 计时，"
+        "研究素域变换的实现延迟空间（往返正确性有断言保证）。"
+    ),
+    "autolab.llm_online_serving": (
+        "LLM 推理服务系统研究：在线服务的核心杠杆是连续批处理（continuous batching）——"
+        "把并发请求动态拼批以同时提升吞吐与降低完成时间。本任务以真实本地请求处理器对比"
+        "连续批处理与串行基线，研究批处理策略对 serving_score（吞吐/完成时间复合分）的影响。"
+    ),
+    "arbor.algotune_knn": (
+        "算法效率优化研究（AlgoTune 范式）：kNN 暴力解是 O(n·d) 距离计算，存在空间划分、"
+        "向量化、部分排序等大量优化路径。研究者编辑 solution.py 搜索更快实现，"
+        "正确性门限由独立校验器在全部实例上验证（任一失败计 0 分），"
+        "研究的是**正确性约束下的真实加速比**。"
+    ),
+    "autoclaude.trigger_eval": (
+        "Agent 技能路由元评测研究：skill 化 agent 依赖「描述与用户意图的匹配」来触发正确技能，"
+        "误触发/漏触发直接决定 agent 行为质量。本任务以 (skill, query) 正负样本集评测触发判定，"
+        "研究技能描述工程与触发判定策略对 trigger_rate 与混淆率的影响。"
+    ),
+    "claudini.random": (
+        "LLM 对抗鲁棒性研究（GCG 范式）：随机-ASCII 目标序列攻击是衡量「模型能否被驱使生成任意固定串」"
+        "的对照实验——目标无语义，攻击成功即证明优化过程本身有效。本任务以灰盒 logprob 爬山在查询预算内"
+        "优化对抗后缀，研究攻击迁移性与查询效率（ASR 为越低越好方向的诚实度量）。"
+    ),
+    "claudini.injection": (
+        "提示注入攻击研究：注入攻击考察模型对上下文中指令与系统指令的区分能力。"
+        "本任务在 AlpacaFarm 风格提示上以对抗后缀诱导输出 'Hacked'，"
+        "并排除「复述注入指令」类假阳性，研究注入成功（robust ASR）与模型抗性边界。"
+    ),
+    "claudini.safeguard": (
+        "安全护栏绕过研究：对齐模型以拒绝机制抵御有害查询，绕过攻击测量该机制的鲁棒性。"
+        "本任务在 ClearHarm 风格有害查询上优化后缀以诱导 compliance opener（'Sure'），"
+        "研究拒绝机制的失效模式——对齐良好的受害者 ASR≈0 即攻击未果（诚实指标）。"
+    ),
+    "ara.understanding": (
+        "科研产物理解评测研究：一个科研 agent 能否读懂已有研究产物（论文/代码/实验）"
+        "决定其复现与扩展能力。本任务以论文级问题集（理解/复现/扩展三类）评测 LLM 的闭卷理解正确率，"
+        "研究 agent 的科研产物理解边界。"
+    ),
+    "autoresearchclaw.arc_bench": (
+        "开放式科研智能体评测研究：给定真实研究课题（55 主题跨 ML/HEP/量子/生物/统计），"
+        "评测 agent 能否产出结构化研究结果（分条件指标 + 假设裁决 + 报告）。"
+        "本任务在 ML01 主题上以 rubric 加权分（指标/条件/假设覆盖 + 合理性）度量研究智能体的开环研究能力。"
+    ),
+    "sab.h_importances_92": (
+        "科学发现智能体评测研究（ScienceAgentBench）：真实科研中的数据分析任务（此处为由 JNMF 矩阵"
+        "计算重要性因子）要求 agent 产出可执行且与 gold 供程序一致的 Python 程序，"
+        "研究 agent 在数值科学工作流上的正确性边界（max_abs_error≤1e-4）。"
+    ),
+    "sab.*": (
+        "科学发现智能体评测研究（ScienceAgentBench 轻量实例）：SAB 从 44 篇同行评审论文中提炼 "
+        "102 个数据驱动的科学发现任务（生物信息/计算化学/GIS/心理认知），要求 agent 产出能通过"
+        "官方 eval 脚本的自包含 Python 程序。本条目为其中已物化到本地的轻量实例，"
+        "研究 agent 在具体科学计算工作流上的程序合成正确性（详见评估方式与 manifest）。"
+    ),
+    "platform.titanic": (
+        "平台原生端到端研究基线：泰坦尼克生存预测是 Kaggle 入门竞赛，"
+        "作为双循环（内循环训练优化 → 外循环审计 → 递归改进）的**可复现最小研究闭环**样例，"
+        "用于验证平台的研究-审计-改进机制本身，而非追求榜单名次。"
+    ),
+    "platform.spaceship": (
+        "平台原生端到端研究基线：Spaceship-Titanic 是 Kaggle 二分类竞赛（传送门乘客是否被送入另一维度），"
+        "特征含缺失与类别变量，比 Titanic 略复杂，作为双循环机制验证的第二个实跑任务。"
+    ),
+    "platform.wine": (
+        "平台原生端到端研究基线：葡萄酒理化指标 → 品质二分类（sklearn load_wine，按 flavanoids 中位数切分），"
+        "小样本（178 行）高维场景，验证双循环在小数据上的评测与审计行为。"
+    ),
+    "platform.iris": (
+        "平台原生端到端研究基线：Fisher 鸢尾花三分类，经典 ML 基准（150 行 × 4 特征），"
+        "用于验证双循环在多分类指标（accuracy）下的执行与审计。"
+    ),
+    "platform.breast_cancer": (
+        "平台原生端到端研究基线：威斯康星乳腺癌诊断（569 行 × 30 特征二分类），"
+        "医疗类强基线任务（GBM>0.95），验证双循环在高基线任务上的门限与审计判定。"
+    ),
+    "mlevolve.mle_bench": (
+        "ML 工程智能体评测研究：MLE-bench 覆盖 75 个真实 Kaggle 竞赛，以奖牌率衡量 agent 的"
+        "端到端 ML 工程能力（读数据/建模/训练/提交）。本平台仅集成其 harness，数据外部依赖。"
+    ),
+    "suite.science_agent_bench": (
+        "科学发现智能体评测研究（套件级）：SAB 102 任务覆盖四大自然与社会科学学科，"
+        "以成功率（SR）/可执行率（VER）/代码质量/成本多维评测 agent 的科学工作流能力。"
+        "套件 manifest 与论文基线已内置，原始数据集需外部获取。"
+    ),
+    "suite.mle_bench": (
+        "ML 工程智能体评测研究（套件级）：openai/mle-bench 官方 75 竞赛套件，"
+        "以 any_medal_percentage（≥铜牌占比，≥3 seeds）为主指标，含官方数据泄漏标注剔除。"
+        "原始竞赛数据经 Kaggle API 外部获取。"
+    ),
+}
+
+
+def _background_for(t: BenchmarkTask) -> str:
+    if t.background:
+        return t.background
+    if t.task_id in _BACKGROUNDS:
+        return _BACKGROUNDS[t.task_id]
+    if t.task_id.startswith("sab."):
+        return _BACKGROUNDS.get("sab.*", "")
+    return ""
+
+
+def _metric_detail_for(metric_id: str) -> dict[str, Any] | None:
+    """指标详解（含义 / 计算方式 / 参考实现），来自评估指标目录。"""
+    try:
+        from .metric_catalog import get_metric_detail
+
+        return get_metric_detail(metric_id)
+    except Exception:
+        return None
+
+
 def to_dict(t: BenchmarkTask) -> dict[str, Any]:
     eval_method = t.eval_method or _default_eval_method(t)
     execution_mode = "platform" if (t.harness == "kaggle_eval" or t.supported_by_platform) else "agent"
     sandbox_isolation = _sandbox_isolation(t)
     enabled, unavailable_reason, data_size_bytes = _availability(t)
+    # source_path 回退：在原机器上注册的任务其 source_path 指向外部兄弟仓库
+    # （_OSS_ROOT 下的 autolab/... 等），本机不存在；只要任务数据已物化到本仓
+    # data/oss/<task_id>/，就回退到该目录——launch 的沙箱挂载、数据预览、桥接
+    # 推荐调用都依赖它。
+    source_path = t.source_path
+    if not source_path or not _os.path.exists(source_path):
+        oss_dir = _os.path.join(_PKG_ROOT, "data", "oss", t.task_id)
+        if _os.path.isdir(oss_dir):
+            source_path = oss_dir
     direction = "越高越好" if t.direction == "higher" else "越低越好"
     goal = (
         f"优化指标 {t.eval_metric}（{direction}），baseline={t.baseline}"
@@ -478,9 +865,11 @@ def to_dict(t: BenchmarkTask) -> dict[str, Any]:
         "name": t.name,
         "source_project": t.source_project,
         "category": t.category,
+        "sub_category": t.sub_category,
         "modality": t.modality,
         "dataset_desc": t.dataset_desc,
         "eval_metric": t.eval_metric,
+        "metric_detail": _metric_detail_for(t.eval_metric),
         "direction": t.direction,
         "baseline": t.baseline,
         "reference": t.reference,
@@ -491,10 +880,11 @@ def to_dict(t: BenchmarkTask) -> dict[str, Any]:
         "eval_method": eval_method,
         "goal": goal,
         "run_command": t.run_command,
-        "source_path": t.source_path,
+        "source_path": source_path,
         "tags": t.tags,
         "supported_by_platform": t.supported_by_platform,
         "note": t.note,
+        "background": _background_for(t),
         "task_type": t.task_type,
         "type_config": t.type_config,
         # ---- gray-out policy (data-size > 1 GiB / external / LLM weights) ----
@@ -505,15 +895,28 @@ def to_dict(t: BenchmarkTask) -> dict[str, Any]:
 
 
 CATEGORY_LABELS = {
-    "model_dev": "模型开发",
-    "system_opt": "系统优化",
-    "puzzle": "谜题/挑战",
-    "cuda": "CUDA 内核",
-    "adversarial": "对抗/越狱",
-    "efficiency": "效率基准",
-    "agent_eval": "科研 Agent 评测",
-    "idea_eval": "想法质量评测",
-    "tooling": "工具型元评测",
-    "platform_native": "平台原生(可实跑)",
-    "custom": "自定义注册任务",
+    # v2 分类体系（2026-09）：主分类只描述「任务研究什么」，执行方式/来源等
+    # 正交属性不再混入 category（见 doc 中的分类规范与 SUBCATEGORY_LABELS）。
+    "ml_modeling": "机器学习建模",
+    "perf_opt": "性能与效率优化",
+    "safety_adversarial": "安全与对抗",
+    "agent_eval": "智能体能力评测",
+}
+
+SUBCATEGORY_LABELS = {
+    # ml_modeling
+    "tabular": "表格建模",
+    "sandbox": "沙箱建模",
+    # perf_opt
+    "kernel": "算子与内核",
+    "algo": "算法加速",
+    "compression": "模型/编码压缩",
+    "llm_systems": "LLM 训练与服务",
+    # safety_adversarial
+    "attack": "攻击与越狱",
+    # agent_eval
+    "scientific_discovery": "科学发现",
+    "ml_engineering": "ML 工程",
+    "open_research": "开放式科研",
+    "meta_eval": "元评测",
 }

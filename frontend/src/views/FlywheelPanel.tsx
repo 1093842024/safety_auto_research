@@ -3,6 +3,8 @@ import {
   createWorkflowRun,
   runFlywheel,
   getFlywheelIterations,
+  getResearchRecords,
+  ResearchRecord,
   FlywheelIteration,
   FlywheelResult,
   startFlywheelScheduler,
@@ -31,13 +33,26 @@ const METRICS = [
   { value: "f1_macro", label: "f1_macro" },
 ];
 
-/** B 飞轮型控制台：冻结方案 → badcase 回流 → 回放重训 → 回归门（不退化护栏）。 */
+// 研究记录 task_id → 飞轮 preset（记录可作为基线的平台原生任务）。
+const TASK_PRESET: Record<string, string> = {
+  "platform.titanic": "titanic",
+  "platform.spaceship": "spaceship",
+  "platform.iris": "iris",
+  "platform.wine": "wine",
+  "platform.breast_cancer": "breast_cancer",
+};
+
+/** B 飞轮型控制台：选定已研究过的记录作为基线版本 → badcase 回流 → 回放重训 → 回归门。 */
 export function FlywheelPanel() {
   const [preset, setPreset] = useState("titanic");
   const [model, setModel] = useState("gbm");
   const [evalMetric, setEvalMetric] = useState("accuracy");
   const [badcaseRatio, setBadcaseRatio] = useState(0.3);
   const [regressionTol, setRegressionTol] = useState(0.0);
+
+  // 基线版本：从历史研究记录中选取（其配置快照即冻结的基础算法/模型方案）。
+  const [baselineRecords, setBaselineRecords] = useState<ResearchRecord[]>([]);
+  const [baselineId, setBaselineId] = useState<string>("");
 
   const [runId, setRunId] = useState<string>("");
   const [iterations, setIterations] = useState<FlywheelIteration[]>([]);
@@ -58,6 +73,32 @@ export function FlywheelPanel() {
     const iters = await getFlywheelIterations(rid);
     setIterations(iters);
   }, []);
+
+  // 基线候选：有配置快照且任务映射到飞轮支持的数据集的历史研究记录。
+  useEffect(() => {
+    getResearchRecords()
+      .then((recs) => {
+        setBaselineRecords(
+          recs.filter((r) => TASK_PRESET[r.task_id] && r.config_snapshot),
+        );
+      })
+      .catch(() => {
+        /* 无记录时选择器自然为空，手动配置仍可用 */
+      });
+  }, []);
+
+  const applyBaseline = (recordId: string) => {
+    setBaselineId(recordId);
+    const rec = baselineRecords.find((r) => r.record_id === recordId);
+    if (!rec) return;
+    // 记录的配置快照 = 冻结的基础算法/模型版本。
+    const p = TASK_PRESET[rec.task_id];
+    if (p) setPreset(p);
+    const inner = rec.config_snapshot?.inner_loop || rec.config_snapshot || {};
+    if (MODELS.some((m) => m.value === inner.model)) setModel(inner.model);
+    if (String(rec.metric_name).includes("f1")) setEvalMetric("f1_macro");
+    else if (String(rec.metric_name).includes("acc")) setEvalMetric("accuracy");
+  };
 
   const refreshScheduler = useCallback(async (rid: string) => {
     try {
@@ -195,9 +236,30 @@ export function FlywheelPanel() {
       <div className="card">
         <h2>🔄 数据飞轮（B 飞轮型）</h2>
         <p className="muted">
-          方案冻结、数据飞轮：每轮自动采集坏例 → 按 <code>badcase:original</code> 配比回放重训 →
+          选择一个已研究过的研究记录作为<b>基础算法/模型版本</b>（其配置快照即冻结方案）→
+          每轮自动采集坏例 → 按 <code>badcase:original</code> 配比回放重训 →
           在冻结的原始评测集上做<b>回归门</b>（不退化护栏）。坏例召回提升是收益，回归不退化是硬约束。
         </p>
+
+        {/* ---- 基线版本选择：以历史研究记录为起点 ---- */}
+        <div className="row" style={{ marginTop: 12, gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div className="field" style={{ minWidth: 340, flex: 1 }}>
+            <label>基线版本（从已研究过的记录中选择）</label>
+            <select value={baselineId} onChange={(e) => applyBaseline(e.target.value)}>
+              <option value="">手动配置（不使用历史记录）</option>
+              {baselineRecords.map((r) => (
+                <option key={r.record_id} value={r.record_id}>
+                  {r.task_id} · {r.metric_name}={r.score} · {r.created_at?.slice(0, 16).replace("T", " ")}
+                </option>
+              ))}
+            </select>
+          </div>
+          {baselineId && (
+            <span className="pill ok" style={{ marginBottom: 6 }}>
+              已选定基线：{TASK_PRESET[baselineRecords.find((r) => r.record_id === baselineId)?.task_id || ""]}
+            </span>
+          )}
+        </div>
 
         <div className="row" style={{ marginTop: 12, gap: 14, alignItems: "flex-end" }}>
           <div className="field">

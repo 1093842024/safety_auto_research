@@ -25,6 +25,7 @@ from safety_auto_research.control_plane.deps import ControlPlaneDeps
 from safety_auto_research.control_plane.deps import build_deps
 from safety_auto_research.control_plane.store import Repository
 from safety_auto_research.control_plane.routers import build_benchmarks_router
+from safety_auto_research.control_plane.routers import build_datasets_router
 from safety_auto_research.control_plane.routers import build_evolution_router
 from safety_auto_research.control_plane.routers import build_experiments_router
 from safety_auto_research.control_plane.routers import build_flywheel_router
@@ -33,6 +34,7 @@ from safety_auto_research.control_plane.routers import build_llm_router
 from safety_auto_research.control_plane.routers import build_loops_router
 from safety_auto_research.control_plane.routers import build_observability_router
 from safety_auto_research.control_plane.routers import build_research_records_router
+from safety_auto_research.control_plane.routers import build_settings_router
 from safety_auto_research.control_plane.routers import build_workflow_runs_router
 from safety_auto_research.control_plane.service import ControlPlaneService
 
@@ -53,6 +55,8 @@ ROUTER_BUILDERS = (
     build_flywheel_router,
     build_llm_router,
     build_integrity_router,
+    build_settings_router,
+    build_datasets_router,
 )
 
 # Frozen HTTP surface, captured from the pre-refactor monolith.
@@ -84,6 +88,20 @@ EXPECTED_ROUTES: dict[str, tuple[str, ...]] = {
     "/benchmark-tasks/{task_id}/launch": ("POST",),
     # The executable rubric a run of this task would be graded against.
     "/benchmark-tasks/{task_id}/rubric": ("GET",),
+    "/benchmark-tasks/{task_id}/data-preview": ("GET",),
+    "/settings/agent": ("GET", "PUT"),
+    "/settings/agent/models": ("GET",),
+    "/datasets": ("GET", "POST"),
+    "/datasets/{dataset_id}": ("DELETE", "GET"),
+    "/benchmark-metrics": ("GET",),
+    "/benchmark-metrics/{metric_id}": ("GET",),
+    "/workflow-runs/{run_id}": ("DELETE", "GET"),
+    "/workflow-runs/liveness": ("GET",),
+    "/settings/environment": ("GET",),
+    "/settings/agent/apikeys": ("POST",),
+    "/settings/agent/apikeys/activate": ("POST",),
+    "/settings/agent/apikeys/delete": ("POST",),
+    "/settings/agent/apikeys/validate": ("POST",),
     "/decisions/{decision_id}": ("GET",),
     "/events": ("GET",),
     "/experiences": ("GET",),
@@ -97,7 +115,6 @@ EXPECTED_ROUTES: dict[str, tuple[str, ...]] = {
     "/stages/{stage_run_id}/status": ("POST",),
     "/strategies": ("GET",),
     "/workflow-runs": ("GET", "POST"),
-    "/workflow-runs/{run_id}": ("GET",),
     "/workflow-runs/{run_id}/agent-trace": ("GET",),
     "/workflow-runs/{run_id}/audit": ("GET",),
     "/workflow-runs/{run_id}/audits/{audit_id}/followup": ("POST",),
@@ -130,6 +147,8 @@ EXPECTED_ROUTES: dict[str, tuple[str, ...]] = {
     "/workflow-runs/{run_id}/stages": ("GET", "POST"),
     "/workflow-runs/{run_id}/start": ("POST",),
     "/workflow-runs/{run_id}/stream": ("GET",),
+    "/workflow-runs/{run_id}/artifacts": ("GET",),
+    "/workflow-runs/{run_id}/export": ("GET",),
 }
 
 

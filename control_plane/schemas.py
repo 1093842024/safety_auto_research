@@ -111,6 +111,9 @@ class InnerLoopConfig(BaseModel):
     threshold: float | None = None  # target-metric gate; None => task's default gate
     drop_cols: list[str] = Field(default_factory=list)
     data_dir: str | None = None  # override the dataset directory
+    # Optimization-metric override (评估指标目录中的 metric_id)。None => 任务声明的默认指标。
+    # 覆盖后 objective_snapshot 的 eval_metric/direction 按指标目录同步（direction 取目录值）。
+    eval_metric: str | None = None
     # --- agent-mode only (forwarded to a RemoteAgentHarness when configured) ---
     system_prompt: str = ""
     skills: list[str] = Field(default_factory=list)

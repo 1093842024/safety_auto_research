@@ -11,12 +11,36 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getRuns,
   getBenchmarkTasks,
+  getResearchRecords,
+  ResearchRecord,
   WorkflowRunSummary,
   BenchmarkTask,
   STATUS_LABEL,
   STATUS_CLASS,
   compareRuns,
 } from "../api/client";
+
+/** Compact "MM-DD HH:mm" formatting for the run cards / table. */
+const fmtTime = (iso?: string | null): string => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+/** Human-readable wall-clock duration between two ISO timestamps. */
+const fmtDuration = (startIso?: string | null, endIso?: string | null): string => {
+  if (!startIso || !endIso) return "";
+  const ms = Date.parse(endIso) - Date.parse(startIso);
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m${s % 60 ? ` ${s % 60}s` : ""}`;
+  const h = Math.floor(m / 60);
+  return `${h}h${m % 60 ? ` ${m % 60}m` : ""}`;
+};
 
 interface CompareRow {
   run_id: string;
@@ -68,6 +92,8 @@ export function CompareRuns({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const [recordByRun, setRecordByRun] = useState<Record<string, ResearchRecord>>({});
+
   useEffect(() => {
     getRuns().then(setAllRuns).catch((e) => console.warn("[CompareRuns] Failed to load runs:", e));
     getBenchmarkTasks()
@@ -77,17 +103,62 @@ export function CompareRuns({
         setTaskMap(m);
       })
       .catch((e) => console.warn("[CompareRuns] Failed to load benchmark tasks:", e));
+    // 研究记录带每个 run 的最终指标（metric_name + score + 最优 3 标记）。
+    getResearchRecords()
+      .then((rs) => {
+        const m: Record<string, ResearchRecord> = {};
+        for (const r of rs) if (r.run_id) m[r.run_id] = r;
+        setRecordByRun(m);
+      })
+      .catch((e) => console.warn("[CompareRuns] Failed to load research records:", e));
   }, []);
 
   const taskName = (tid: string) => taskMap[tid]?.name || tid;
   const runLabel = (r: WorkflowRunSummary) =>
     `${taskName(r.target_id)} · ${STATUS_LABEL[r.status] || r.status}`;
 
-  const toggle = (rid: string) => {
+  const runById = useMemo(() => {
+    const m: Record<string, WorkflowRunSummary> = {};
+    for (const r of allRuns) m[r.run_id] = r;
+    return m;
+  }, [allRuns]);
+
+  /** 时间信息：起 → 止（耗时）；未结束的显示「进行中」。 */
+  const timeText = (rid: string, started_at?: string | null): string => {
+    const r = runById[rid];
+    const start = r?.started_at || started_at || null;
+    const end = r?.ended_at || null;
+    const endText = end
+      ? fmtTime(end)
+      : ["running", "waiting_approval"].includes(r?.status || "")
+      ? "进行中"
+      : "—";
+    const dur = fmtDuration(start, end);
+    return `${fmtTime(start)} → ${endText}${dur ? `（${dur}）` : ""}`;
+  };
+
+  /** 最终性能：研究记录中的最终指标 + 最优 3 标记。 */
+  const perfOf = (rid: string): ResearchRecord | undefined => recordByRun[rid];
+
+  // 当前已选 run 所属的任务名（同任务不同优化版本才能对比；空 = 未定）。
+  const selectedTaskName = useMemo(() => {
+    const names = new Set<string>();
+    for (const r of allRuns) {
+      if (selected.has(r.run_id)) names.add(taskName(r.target_id));
+    }
+    return names.size === 1 ? [...names][0] : "";
+  }, [allRuns, selected, taskMap]);
+
+  const toggle = (rid: string, name: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(rid)) next.delete(rid);
-      else if (next.size < 8) next.add(rid); // max 8 comparison
+      if (next.has(rid)) {
+        next.delete(rid);
+        return next;
+      }
+      // 约束：只能对比同一任务（同名任务）的不同 run。
+      if (selectedTaskName && name !== selectedTaskName) return prev;
+      if (next.size < 8) next.add(rid); // max 8 comparison
       return next;
     });
   };
@@ -148,34 +219,90 @@ export function CompareRuns({
     [allRuns]
   );
 
+  // 按任务名称聚合（同名任务 = 同一任务的不同优化版本）。
+  const taskGroups = useMemo(() => {
+    const m = new Map<string, WorkflowRunSummary[]>();
+    for (const r of recentRuns) {
+      const name = taskName(r.target_id);
+      const arr = m.get(name);
+      if (arr) arr.push(r);
+      else m.set(name, [r]);
+    }
+    return [...m.entries()];
+  }, [recentRuns, taskMap]);
+
   return (
     <div className="card">
       <h2>📊 实验对比</h2>
       <p className="muted">
-        选择最多 8 个已完成的研究 run，对比其指标、模型、配置。
+        任务按名称聚合；<b>只有同一任务（同名）的不同优化版本 run 才能选择对比</b>，
+        最多 8 个。当前对比目标：
+        {selectedTaskName ? (
+          <b> {selectedTaskName}</b>
+        ) : (
+          <span className="muted"> 未选择（点击任一 run 后，同任务的其他版本可选）</span>
+        )}
+        {selected.size > 0 && (
+          <button className="btn tiny" style={{ marginLeft: 10 }} onClick={() => setSelected(new Set())}>
+            清空选择
+          </button>
+        )}
       </p>
 
       {error && <div className="card error" style={{ marginTop: 8 }}>{error}</div>}
 
-      {/* ---- Run picker ---- */}
+      {/* ---- Run picker（按任务名称分组）---- */}
       <div style={{ marginTop: 12 }}>
-        <div className="task-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
-          {recentRuns.map((r) => (
-            <button
-              key={r.run_id}
-              type="button"
-              className={`task-card ${selected.has(r.run_id) ? "selected" : ""}`}
-              onClick={() => toggle(r.run_id)}
-            >
-              <div className="row">
-                <span className={`pill ${STATUS_CLASS[r.status] || "accent"}`}>{STATUS_LABEL[r.status] || r.status}</span>
-                <strong>{taskName(r.target_id)}</strong>
+        {taskGroups.map(([name, runs]) => {
+          const locked = !!selectedTaskName && name !== selectedTaskName;
+          return (
+            <div key={name} style={{ marginTop: 12 }}>
+              <h3 style={{ borderBottom: "1px solid var(--border)", paddingBottom: 4, opacity: locked ? 0.55 : 1 }}>
+                {name} <span className="muted">({runs.length} 个版本)</span>
+                {locked && <span className="muted small" style={{ marginLeft: 8 }}>(已锁定其他任务，清空选择后可选)</span>}
+              </h3>
+              <div className="task-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
+                {runs.map((r) => {
+                  const disabled = locked;
+                  return (
+                    <button
+                      key={r.run_id}
+                      type="button"
+                      className={`task-card ${selected.has(r.run_id) ? "selected" : ""}`}
+                      disabled={disabled}
+                      title={disabled ? `已选择「${selectedTaskName}」的 run；只有同一任务的不同版本才能对比` : undefined}
+                      style={disabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+                      onClick={() => toggle(r.run_id, name)}
+                    >
+                      <div className="row">
+                        <span className={`pill ${STATUS_CLASS[r.status] || "accent"}`}>{STATUS_LABEL[r.status] || r.status}</span>
+                        <strong>{name}</strong>
+                      </div>
+                      <div className="muted small" style={{ marginTop: 4 }}>
+                        🕐 {timeText(r.run_id, r.started_at)}
+                      </div>
+                      <div className="small" style={{ marginTop: 2 }}>
+                        {(() => {
+                          const rec = perfOf(r.run_id);
+                          if (!rec) return <span className="muted">最终性能 —（无研究记录）</span>;
+                          return (
+                            <>
+                              最终 <b>{rec.metric_name}</b> ={" "}
+                              <span className="mono">{rec.score?.toFixed?.(4) ?? rec.score}</span>
+                              {rec.is_top3 && <span title="该任务最优 3 条记录之一"> 🏅</span>}
+                            </>
+                          );
+                        })()}
+                      </div>
+                      <div className="muted mono small">{r.run_id}</div>
+                    </button>
+                  );
+                })}
               </div>
-              <div className="muted mono small">{r.run_id}</div>
-            </button>
-          ))}
-        </div>
-        {recentRuns.length === 0 && <div className="muted">暂无已完成的 run。</div>}
+            </div>
+          );
+        })}
+        {taskGroups.length === 0 && <div className="muted">暂无已完成的 run。</div>}
       </div>
 
       {selected.size > 0 && (
@@ -224,6 +351,8 @@ export function CompareRuns({
           <thead>
             <tr>
               <th>Run</th>
+              <th>起止时间（耗时）</th>
+              <th>最终性能</th>
               <th>模型</th>
               <th>FE</th>
               <th>CV</th>
@@ -234,11 +363,24 @@ export function CompareRuns({
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map((r) => (
+            {sortedRows.map((r) => {
+              const rec = perfOf(r.run_id);
+              return (
               <tr key={r.run_id}>
                 <td>
                   <div className="mono small">{taskName(r.task_id)}</div>
                   <div className="muted mono" style={{ fontSize: 10 }}>{r.run_id}</div>
+                </td>
+                <td className="muted small">{timeText(r.run_id, r.started_at)}</td>
+                <td>
+                  {rec ? (
+                    <span className="mono">
+                      {rec.metric_name} = <strong>{rec.score?.toFixed?.(4) ?? rec.score}</strong>
+                      {rec.is_top3 && <span title="该任务最优 3 条记录之一"> 🏅</span>}
+                    </span>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
                 </td>
                 <td><code>{r.model}</code></td>
                 <td><span className="pill accent">{r.fe}</span></td>
@@ -250,7 +392,8 @@ export function CompareRuns({
                   <button className="btn tiny" onClick={() => onOpenRun(r.run_id)}>查看</button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}

@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from fastapi import status
 from fastapi.responses import StreamingResponse
 
+from ...platform_contracts.events import utc_now
 from ...platform_contracts.objects import DecisionRecord
 from ...platform_contracts.objects import StageRun
 from ...platform_contracts.objects import WorkflowRun
@@ -93,6 +94,81 @@ def build_workflow_runs_router(deps: ControlPlaneDeps) -> APIRouter:
         except Exception as exc:
             raise _translate(exc)
 
+    @router.delete(
+        "/workflow-runs/{run_id}",
+        summary="Delete a TERMINAL run: removes the run + all persisted objects "
+                "(stages/decisions/artifacts/lessons/metrics/events/research records) "
+                "AND the on-disk sandbox scratch files; datasets are never touched",
+    )
+    def delete_workflow_run(run_id: str) -> dict:
+        try:
+            result = svc.delete_run(run_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+            )
+        except Exception as exc:
+            raise _translate(exc)
+        # research-state DB (hypotheses / strategies / experiences / candidates)
+        state_db = 0
+        try:
+            state_db = sum(deps.state_store.forget_run(run_id).values())
+        except Exception:
+            pass
+        result["deleted"]["state_db"] = state_db
+        return result
+
+    @router.get(
+        "/workflow-runs/{run_id}/artifacts",
+        summary="Artifacts published by this run (交付物清单)",
+    )
+    def list_run_artifacts(run_id: str) -> list[dict]:
+        try:
+            svc._require_workflow_run(run_id)
+        except Exception as exc:
+            raise _translate(exc)
+        return [
+            a.model_dump(mode="json") for a in deps.svc._repo.list_artifacts(run_id)
+        ]
+
+    @router.get(
+        "/workflow-runs/{run_id}/export",
+        summary="Export a self-contained research bundle (JSON): run config + task spec + "
+                "metrics + events + artifacts + decisions — for analysis / migration",
+        response_class=StreamingResponse,
+    )
+    def export_run(run_id: str) -> StreamingResponse:
+        import json as _json
+        from fastapi.responses import Response
+
+        try:
+            run = svc._require_workflow_run(run_id)
+        except Exception as exc:
+            raise _translate(exc)
+        repo = svc._repo
+        bundle = {
+            "exported_at": utc_now().isoformat(),
+            "run": run.model_dump(mode="json"),
+            "stage_runs": [s.model_dump(mode="json") for s in repo.list_stage_runs(run_id)],
+            "decisions": [d.model_dump(mode="json") for d in repo.list_decisions(run_id)],
+            "artifacts": [
+                a.model_dump(mode="json") for a in repo.list_artifacts(run_id)
+            ],
+            "metrics": repo.list_metrics(run_id),
+            "events": repo.list_events(run_id),
+            "research_records": [
+                r for r in repo.list_research_records() if r.get("run_id") == run_id
+            ],
+        }
+        content = _json.dumps(bundle, ensure_ascii=False, indent=2)
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{run_id}_research_bundle.json"'
+            },
+        )
+
     # ------------------------------------------------------------------ #
     # Server-Sent Events: live progress stream for the frontend           #
     # ------------------------------------------------------------------ #
@@ -126,6 +202,17 @@ def build_workflow_runs_router(deps: ControlPlaneDeps) -> APIRouter:
     )
     def list_workflow_runs() -> list[WorkflowRun]:
         return svc.list_workflow_runs()
+
+    @router.get(
+        "/workflow-runs/liveness",
+        summary="Liveness of non-terminal runs: 真在运行 / 疑似卡死 / 僵尸（状态未感知的异常终止）",
+    )
+    def list_runs_liveness() -> dict:
+        # NOTE: must stay registered before "/workflow-runs/{run_id}" so the
+        # literal path is not captured as a run_id.
+        from .. import liveness
+
+        return liveness.liveness_snapshot(svc, _run_cancel_events)
 
     @router.get(
         "/workflow-runs/{run_id}",

@@ -464,7 +464,8 @@ class CodexTransport(CLIAgentTransport):
             cmd += ["--model", self.model]
         cmd += self.extra_args
         proc = subprocess.run(
-            cmd, input=prompt, capture_output=True, text=True, timeout=self.timeout
+            cmd, input=prompt, capture_output=True, text=True, timeout=self.timeout,
+            env=_cli_env(),
         )
         return proc.stdout
 
@@ -511,13 +512,54 @@ class ClaudeCodeTransport(CLIAgentTransport):
 
     def _call_cli(self, prompt: str) -> str:
         cmd = [self.claude_cmd, "-p", prompt]
-        if self.model:
-            cmd += ["--model", self.model]
+        # Explicit per-call model wins; otherwise fall back to the 系统设置
+        # effective model (fixes agent-research runs silently using the CLI's
+        # Opus/Haiku default pair instead of the configured model).
+        model = self.model or _settings_model()
+        if model:
+            cmd += ["--model", model]
         cmd += self.extra_args
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=self.timeout
+            cmd, capture_output=True, text=True, timeout=self.timeout,
+            env=_cli_env(),
         )
         return proc.stdout
+
+
+def _settings_model() -> str:
+    """The 系统设置 effective agent model ("" = CLI default applies).
+
+    Lazily reads ``control_plane.agent_settings`` so *every* Claude-CLI call site
+    honours the model chosen on the 系统设置 page — even ones constructed without
+    an explicit ``model`` (e.g. ``deps._make_agent_orchestrator``). An explicitly
+    passed model always wins over this fallback.
+    """
+    try:
+        from ...control_plane import agent_settings
+
+        return (agent_settings.get_settings().get("agent_model") or "").strip()
+    except Exception:
+        return ""
+
+
+def _cli_env() -> dict[str, str] | None:
+    """Env overrides for the active API key (系统设置启用的 agent 账号).
+
+    Reads the settings store via ``control_plane.agent_settings`` when available
+    (execution_plane must not hard-depend on control_plane, hence the lazy import
+    and graceful fallback). ``None`` => inherit the parent environment unchanged.
+    """
+    try:
+        from ...control_plane import agent_settings
+
+        overrides = agent_settings.cli_env_overrides()
+    except Exception:
+        return None
+    if not overrides:
+        return None
+    env = dict(os.environ)
+    env.update(overrides)
+    return env
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:

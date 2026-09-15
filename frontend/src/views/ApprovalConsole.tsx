@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { getEvents, resolveApproval } from "../api/client";
+import { useConfirm } from "../components/ConfirmDialog";
 
 /** HITL approval console: resolve open approval gates (risk-tiered). */
 export function ApprovalConsole({ runId }: { runId: string }) {
+  const confirmDialog = useConfirm();
   const [approvals, setApprovals] = useState<Array<Record<string, any>>>([]);
   const [busy, setBusy] = useState<string>("");
   const aliveRef = useRef(true);
@@ -66,8 +68,13 @@ export function ApprovalConsole({ runId }: { runId: string }) {
             <button
               className="btn"
               disabled={busy === a.approval_id}
-              onClick={() => {
-                if (!window.confirm("确认拒绝该审批请求？此操作不可撤销。")) return;
+              onClick={async () => {
+                if (!(await confirmDialog({
+                  title: "拒绝审批请求",
+                  message: "确认拒绝该审批请求？此操作不可撤销。",
+                  confirmLabel: "拒绝",
+                  danger: true,
+                }))) return;
                 resolve(a.approval_id, "rejected");
               }}
             >

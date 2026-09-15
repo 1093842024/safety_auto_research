@@ -111,6 +111,37 @@ for _model in ALL_EVENT_MODELS:
     _EVENT_MODEL_BY_TYPE[_default] = _model
 
 
+def _json_safe(value: Any) -> Any:
+    """Coerce an SDK tool result into a JSON-serializable value.
+
+    The line transports (``SubprocessTransport`` / ``HttpTransport``) write every
+    ``platform.tool_result`` with ``json.dumps``. SDK methods may return pydantic
+    models (e.g. ``load_object`` -> ``Artifact``), enums or datetimes; without this
+    coercion the *platform* crashes after the agent's tool call and the whole run
+    dies mid-loop. Best-effort: pydantic ``model_dump`` -> ``to_dict`` -> ``str``.
+    """
+
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            return _json_safe(model_dump(mode="json"))
+        except Exception:
+            pass
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        try:
+            return _json_safe(to_dict())
+        except Exception:
+            pass
+    return str(value)
+
+
 def _rebuild_event(data: dict[str, Any]) -> BasePlatformEvent | None:
     """Best-effort rebuild of a platform event from an agent-returned dict."""
 
@@ -255,14 +286,14 @@ class RemoteAgentHarness(AgentHarness):
                     "orchestrator with mode='agent' so it wires one."
                 )
             stage, result = self._capability_runner(**args)
-            return {
+            return _json_safe({
                 "stage_run_id": stage.stage_run_id,
                 "layer_code": stage.stage_code,
                 "event_type": result.event.event_type if result.event else None,
                 "gate_result": result.gate_result.value,
                 "output_refs": list(result.output_refs),
                 "detail": result.detail,
-            }
+            })
         # M2 fix: explicit whitelist BEFORE getattr — any public SDK method outside
         # AGENT_TOOL_NAMES (e.g. mark_pruned/mark_merged) must not be agent-callable.
         if tool not in AGENT_TOOL_NAMES:
@@ -270,7 +301,7 @@ class RemoteAgentHarness(AgentHarness):
         method = getattr(self.sdk, tool, None)
         if method is None:
             raise ValueError(f"unknown agent tool: {tool!r} (available: {AGENT_TOOL_NAMES})")
-        return method(**args)
+        return _json_safe(method(**args))
 
     # ------------------------------------------------------------------ decide
     def decide(

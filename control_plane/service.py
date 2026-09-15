@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import math
+import os
+import shutil
 from datetime import datetime
 from datetime import timezone
 from typing import Any
@@ -763,6 +765,54 @@ class ControlPlaneService:
         if run is None:
             raise NotFoundError(f"workflow run {run_id} not found")
         return run
+
+    # ------------------------------------------------------------- run deletion
+    def delete_run(self, run_id: str) -> dict[str, Any]:
+        """Delete a TERMINAL run and every persisted object / on-disk file it owns.
+
+        * Only already-finished runs may be deleted (running / requested runs are
+          rejected with 409 at the router).
+        * Cleanup: control-plane store (run + stages + decisions + artifacts +
+          lessons + metrics + events + research records + open approvals),
+          research-state DB (hypotheses / strategies / experiences / evolution
+          candidates for this run), and sandbox scratch dirs / marker files
+          keyed by this run's stage ids. Task datasets are NEVER touched.
+        """
+        run = self._require_workflow_run(run_id)
+        if run.status not in _TERMINAL_STATUSES:
+            raise ValueError(
+                f"run {run_id} 状态为 {run.status.value}（非终态），仅已完成/失败/取消的研究可删除"
+            )
+
+        result = self._repo.delete_run(run_id)
+        counts: dict[str, int] = result["counts"]
+        stage_ids: list[str] = result["stage_ids"]
+
+        # on-disk cleanup: sandbox scratch dirs + marker files keyed by stage id
+        home = os.environ.get("HOME", "/tmp")
+        removed_files = 0
+        scratch_base = os.path.join(home, ".cache", "agent_sandbox_scratch")
+        marker_base = os.path.join(home, ".cache", "agent_sandbox_marker")
+        for base, keys in (
+            (scratch_base, [*stage_ids, run_id]),
+            (marker_base, stage_ids),
+        ):
+            if not os.path.isdir(base):
+                continue
+            for entry in os.listdir(base):
+                if any(k and k in entry for k in keys):
+                    p = os.path.join(base, entry)
+                    try:
+                        if os.path.isdir(p):
+                            shutil.rmtree(p, ignore_errors=True)
+                        else:
+                            os.remove(p)
+                        removed_files += 1
+                    except OSError:
+                        pass
+        counts["files_removed"] = removed_files
+        counts["total"] = sum(v for k, v in counts.items() if k != "total" and v > 0)
+        return {"run_id": run_id, "deleted": counts}
 
     def _require_stage_run(self, stage_run_id: str) -> StageRun:
         stage = self._repo.get_stage_run(stage_run_id)

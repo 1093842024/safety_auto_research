@@ -184,11 +184,11 @@ safety_auto_research/
 ## 4. 功能特性
 
 - **研究记录持久化**：控制平面与双循环状态均落盘（JSON + SQLite），**重启服务后研究记录自动加载**，不再随进程消失。
-- **研究记录分类组织**：控制面板侧边栏按任务类别分组（谜题挑战 / 对抗越狱 / 效率基准 / 平台原生 / 模型开发 / 系统优化 / …），组头可折叠/展开，组内与组间均按时间排序。
+- **研究记录分类组织**：控制面板按任务类别组织记录。**v2 分类体系（2026-09）**：主分类只描述「任务研究什么」，共 4 类——机器学习建模（`ml_modeling`）/ 性能与效率优化（`perf_opt`）/ 安全与对抗（`safety_adversarial`）/ 智能体能力评测（`agent_eval`），主分类下另有二级子类（表格/沙箱建模、算子内核、算法加速、压缩、LLM 系统、攻击越狱、科学发现、ML 工程、开放式科研、元评测）。执行方式（可实跑 / agent 模式）与来源（精选移植 / 外部套件 / 自定义注册）作为正交维度，不再混入分类。旧版分类的历史记录统一归入「归档（旧分类）」组。
 - **内循环参数深度可配（InnerLoopConfig）**：
   - *数据与方法*（脚本化与 agent 共用）：`preset` / `model`(gbm·gbm-strong·rf·logreg) / `fe`(基础·增强) / `cv_folds` / `threshold` / `drop_cols` / `data_dir`。
   - *自主 Agent 模式*：`mode` 切换脚本化↔agent；agent 模式额外可配 `system_prompt`、技能标签、工具多选（自动剔除护栏能力）、有序步骤编排。
-- **Benchmark 任务目录**：从 9 个上游项目扫描出 18 个「明确数据集 + 评测」任务，覆盖 11 个类别，作为新建研究的起点。
+- **Benchmark 任务目录**：从上游项目挖掘并批量接线出 40 个「明确数据集 + 评测」任务，按 v2 分类体系（4 个主分类 + 二级子类）组织，作为新建研究的起点。
 - **双循环审计与可观测**：每个 run 的假设树（hypo-tree）、外部审计结论（audit）、改进项（improvements）均可实时查看；「进化观察」子 Tab 展示 Playbook 条目、策略补丁生命周期与进化种群。
 - **研究榜单与一键复现**：每次研究自动沉淀记录，按指标方向取每任务最优 3 条高亮；支持「复现并启动」（按配置快照即刻重跑完整研究）。
 - **任务专属评分标准（2026-09-09）**：
@@ -205,20 +205,25 @@ safety_auto_research/
 
 ## 5. 内置研究任务总览
 
-平台内置 **18 个研究任务**（`benchmark_tasks/` 目录），覆盖 11 个类别、来自 8 个上游项目；控制面板「新建研究」向导 Step 1 即从该目录渲染任务卡片。每个任务的完整细节（任务定义、目标、训练/测试数据、模型方案、评价指标与脚本、基线、性能）见 **[`doc/benchmark_tasks.md`](doc/benchmark_tasks.md)**。
+平台内置 **40 个研究任务**（`benchmark_tasks/` 目录），按 **v2 分类体系**（主分类 = 任务研究什么；执行方式 / 来源为正交维度）组织；控制面板「新建研究」向导 Step 1 即从该目录渲染任务卡片。每个任务的完整细节（任务定义、目标、训练/测试数据、模型方案、评价指标与脚本、基线、性能）见 **[`doc/benchmark_tasks.md`](doc/benchmark_tasks.md)**。
 
-| 来源 | 任务数 | 类别 | 可双循环直接执行 |
-|------|--------|------|------------------|
-| 平台原生 | 2 | 平台原生（Titanic / Spaceship-Titanic） | ✅ 是 |
-| AutoLab | 7 | 谜题 / 模型开发 / 系统优化 / CUDA | ❌ 需 Harbor 沙箱 |
-| Claudini | 3 | 对抗 / 越狱 | ❌ 需上游运行环境 |
-| Arbor | 1 | 效率基准（kNN speedup） | ❌ 需 Arbor |
-| AutoResearchClaw | 1 | 科研 Agent 评测（ARC-Bench 55 主题） | ❌ |
-| ARA | 1 | 科研 Agent 评测（制品理解） | ❌ |
-| Auto-claude | 1 | 工具型元评测（skill 触发率） | ❌ |
-| MLEvolve | 1 | 模型开发（MLE-bench 75 任务，外部数据） | ❌ 外部依赖 |
+| 主分类 | 子类 | 任务数 | 代表任务 | 可双循环直接执行 |
+|--------|------|--------|----------|------------------|
+| 机器学习建模 `ml_modeling` | 表格建模 | 5 | Kaggle Titanic / Spaceship / Wine / Iris / Breast-Cancer | ✅ 是 |
+| 机器学习建模 `ml_modeling` | 沙箱建模（自定义注册） | 4 | 文本/图像/音频分类、Embedding 对比学习 | ✅ 是 |
+| 性能与效率优化 `perf_opt` | 算子与内核 | 2 | Flash Attention、NTT Butterfly | ❌ 需沙箱 |
+| 性能与效率优化 `perf_opt` | 算法加速 | 2 | AlgoTune kNN speedup、AES-128-CTR 吞吐 | ❌ 需沙箱 |
+| 性能与效率优化 `perf_opt` | 模型/编码压缩 | 2 | Smallest Safety Router、Adaptive Compression | ❌ 需沙箱 |
+| 性能与效率优化 `perf_opt` | LLM 训练与服务 | 2 | GRPO 训练步延迟、LLM Online Serving | ❌ 需沙箱 |
+| 安全与对抗 `safety_adversarial` | 攻击与越狱 | 3 | Claudini 后缀攻击 / 提示注入 / 护栏绕过 | ✅ 是（tmeoa 端口） |
+| 智能体能力评测 `agent_eval` | 科学发现 | 15 | ScienceAgentBench（套件 + 14 个本地实例） | ❌ |
+| 智能体能力评测 `agent_eval` | ML 工程 | 2 | MLE-bench（本地 harness + 官方套件） | ❌ 外部依赖 |
+| 智能体能力评测 `agent_eval` | 开放式科研 | 2 | ARA 制品理解、ARC-Bench 55 主题 | ❌ |
+| 智能体能力评测 `agent_eval` | 元评测 | 1 | ARIS skill 触发率 | ❌ |
 
-> **要点**：两个**平台原生**任务（Kaggle Titanic / Spaceship-Titanic）可由双循环端到端执行（脚本化 `kaggle_eval`，实测 GBM CV 0.83+ / 0.80 级）；其余 15 个任务（autolab / claudini / Arbor / ARA / AutoResearchClaw / Auto-claude / MLEvolve 等）**已统一改为 agent 模式执行**——平台仅保留任务目标 / 定义 / 数据 / 评估方式 / 指标等核心信息，docker / Arbor / Harbor 依赖被剥离。agent 模式需接入远程 Agent（设置 `AGENT_COMMAND`），未接入时启动会**明确失败并终止**（不再静默回退）。
+> **要点**：表格建模类任务（Kaggle Titanic / Spaceship-Titanic 等）可由双循环端到端执行（脚本化 `kaggle_eval`，实测 GBM CV 0.83+ / 0.80 级）；其余任务**已统一改为 agent 模式执行**——平台仅保留任务目标 / 定义 / 数据 / 评估方式 / 指标等核心信息，docker / Arbor / Harbor 依赖被剥离。agent 模式需接入远程 Agent（设置 `AGENT_COMMAND`），未接入时启动会**明确失败并终止**（不再静默回退）。
+>
+> **v2 分类变更（2026-09）**：旧 11 类（模型开发 / 系统优化 / 谜题 / CUDA 内核 / 对抗越狱 / 效率基准 / 科研 Agent 评测 / 想法质量评测 / 工具型元评测 / 平台原生 / 自定义）退役——其中「平台原生」「自定义」是执行方式 / 来源属性，「CUDA」是实现技术属性，均不再作为分类；原各类任务按研究对象重新归入上表 4 个主分类。历史研究记录中的旧分类值不做映射，前端统一显示为「归档（旧分类）」。
 
 ## 6. 快速开始
 

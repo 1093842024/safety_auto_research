@@ -135,7 +135,8 @@ class RegistrationRoundtripTest(_TmpStoreMixin):
         task = get_task(rec["task_id"])
         self.assertIsNotNone(task)
         assert task is not None
-        self.assertEqual(task.category, "custom")
+        self.assertEqual(task.category, "ml_modeling")  # v2 taxonomy (2026-09)
+        self.assertEqual(task.sub_category, "sandbox")
         self.assertEqual(task.task_type, "llm_opd")
         self.assertFalse(task.supported_by_platform)
         self.assertIn("gkd", task.run_command)

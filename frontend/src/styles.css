@@ -124,6 +124,7 @@ html, body, #root { height: 100%; }
 .btn.block { width: 100%; padding: 9px 12px; font-size: 13px; }
 .sidebar-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-top: 4px; }
 .run-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; flex: 1; }
+.sidebar-spacer { flex: 1; }
 .run-item {
   text-align: left; background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px;
   padding: 8px 10px; cursor: pointer; color: var(--text); display: flex; flex-direction: column; gap: 3px;
@@ -305,6 +306,24 @@ html, body, #root { height: 100%; }
 .lb-table .medal { font-size: 16px; }
 .lb-table code { background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; font-size: 12px; }
 .lb-table .small { font-size: 12px; }
+
+/* ===== Research records view (one row per historical run) ===== */
+.rec-table .rec-row { cursor: pointer; }
+.rec-table .rec-row:hover { background: var(--accent-soft); }
+.rec-table .pill { font-size: 11px; }
+
+/* ===== In-app confirm dialog (替代 window.confirm，内嵌 WebView 不吞弹窗) ===== */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 18px 20px; max-width: 440px; width: calc(100% - 48px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.modal-card h3 { font-size: 15px; margin-bottom: 6px; }
+.tab-sep { width: 1px; height: 18px; background: var(--border); display: inline-block; margin: 0 4px; }
 
 /* Realtime validation hint (RegisterTask) */
 .ok-text { color: var(--ok); font-size: 12px; }

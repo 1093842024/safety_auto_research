@@ -259,6 +259,18 @@ class ClaudeCodeAdapter(TransportExecutorAdapter):
     ) -> None:
         from ...execution_plane.agent.transport import ClaudeCodeTransport
 
+        # Role-config ``model: auto`` (or empty) resolves to the SYSTEM-SETTING model
+        # chosen on the 系统设置 page (control_plane/agent_settings.py) — so the model
+        # picked in the UI applies to MEA role agents too. An explicit per-role model
+        # still wins.
+        if not model or model == "auto":
+            try:
+                from ...control_plane import agent_settings
+
+                model = agent_settings.get_settings()["agent_model"] or None
+            except Exception:
+                model = None
+
         transport = ClaudeCodeTransport(
             capability_runner=capability_runner or _noop_runner,
             tool_handler=tool_handler,

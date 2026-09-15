@@ -4,6 +4,10 @@ import {
   getEvents,
   getRun,
   cancelRun,
+  deleteRun,
+  exportRunBundle,
+  getRunArtifacts,
+  ArtifactInfo,
   debugRun,
   runExperiment,
   resolveCollaboration,
@@ -19,6 +23,7 @@ import {
 } from "../api/client";
 import { useSSE } from "../api/useSSE";
 import { useToast } from "../components/Toast";
+import { useConfirm } from "../components/ConfirmDialog";
 import { DualLoopLive } from "./DualLoopLive";
 import { AuditBoard } from "./AuditBoard";
 import { HypothesisTree } from "./HypothesisTree";
@@ -27,21 +32,55 @@ import { ApprovalConsole } from "./ApprovalConsole";
 import { EventStream } from "./EventStream";
 import { EvolutionPanel } from "./EvolutionPanel";
 
-type Sub = "live" | "debug" | "audit" | "tree" | "improve" | "approval" | "events" | "agent" | "evolution";
+type Sub = "live" | "deliverables" | "debug" | "audit" | "tree" | "improve" | "approval" | "events" | "agent" | "evolution";
 
-const SUBS: Array<{ id: Sub; label: string }> = [
-  { id: "live", label: "总览" },
-  { id: "debug", label: "调试" },
-  { id: "audit", label: "审计结论" },
-  { id: "tree", label: "假设树" },
-  { id: "improve", label: "改进时间线" },
-  { id: "evolution", label: "进化观察" },
-  { id: "approval", label: "审批台" },
-  { id: "agent", label: "Agent 执行流水" },
-  { id: "events", label: "事件" },
+/** 子 tab 按研究阶段分组：运行与交付 → 分析 → 治理 → 调试。 */
+const SUB_GROUPS: Array<{ group: string; items: Array<{ id: Sub; label: string }> }> = [
+  {
+    group: "运行与交付",
+    items: [
+      { id: "live", label: "总览" },
+      { id: "deliverables", label: "交付物" },
+    ],
+  },
+  {
+    group: "研究分析",
+    items: [
+      { id: "audit", label: "审计结论" },
+      { id: "tree", label: "假设树" },
+      { id: "improve", label: "改进时间线" },
+      { id: "agent", label: "Agent 执行流水" },
+    ],
+  },
+  {
+    group: "治理与观测",
+    items: [
+      { id: "approval", label: "审批台" },
+      { id: "evolution", label: "进化观察" },
+      { id: "events", label: "事件" },
+    ],
+  },
+  {
+    group: "调试",
+    items: [{ id: "debug", label: "调试" }],
+  },
 ];
 
-export function RunDashboard({ runId }: { runId: string }) {
+const SUBS: Array<{ id: Sub; label: string }> = SUB_GROUPS.flatMap((g) => g.items);
+
+export function RunDashboard({
+  runId,
+  onBack,
+  onOpenTask,
+  onDeleted,
+}: {
+  runId: string;
+  onBack?: () => void;
+  /** Click the task name in the header to jump to the task's catalog detail page. */
+  onOpenTask?: (taskId: string) => void;
+  /** Called after the run is deleted so the parent can refresh its run list. */
+  onDeleted?: () => void;
+}) {
   const [run, setRun] = useState<RunDetail | null>(null);
   const [events, setEvents] = useState<Array<Record<string, any>>>([]);
   const [sub, setSub] = useState<Sub>("live");
@@ -49,7 +88,9 @@ export function RunDashboard({ runId }: { runId: string }) {
   const [traceLoading, setTraceLoading] = useState(false);
   const [pollError, setPollError] = useState("");
   const { push } = useToast();
+  const confirmDialog = useConfirm();
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -254,14 +295,55 @@ export function RunDashboard({ runId }: { runId: string }) {
       )}
       <div className="card status-header">
         <div className="row" style={{ gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+          {onBack && (
+            <button className="btn small" onClick={onBack} title="返回研究记录列表">
+              ← 返回
+            </button>
+          )}
           <span className={`pill ${STATUS_CLASS[runStatus] || "accent"}`}>
             {STATUS_LABEL[runStatus] || runStatus}
           </span>
-          <strong>{obj.name || run?.target_id || runId}</strong>
+          <strong
+            className="linklike"
+            title="点击查看该任务的详细说明（任务库详情）"
+            style={{ cursor: "pointer" }}
+            onClick={() => onOpenTask?.(run?.target_id || "")}
+          >
+            {obj.name || run?.target_id || runId}
+          </strong>
           <span className="muted mono small">{runId}</span>
           <span className={`dot ${sseConnected ? "ok" : "bad"}`} title={sseConnected ? "实时推送已连接" : "实时推送断开，使用轮询"} style={{ width: 7, height: 7, marginLeft: -6 }} />
+          {TERMINAL_RUN_STATUSES.has(runStatus) && (
+            <button
+              className="btn"
+              disabled={deleteBusy}
+              style={{ marginLeft: "auto" }}
+              title="删除该研究及其全部持久化对象与沙箱临时文件（不影响任务数据集）"
+              onClick={async () => {
+                if (!(await confirmDialog({
+                  title: "删除研究",
+                  message: `确认删除研究 ${runId}？将同时清理其 stages / 事件 / 产物 / 沙箱临时文件等底层记录，且不可恢复（不影响任务数据集）。`,
+                  confirmLabel: "删除",
+                  danger: true,
+                }))) return;
+                setDeleteBusy(true);
+                try {
+                  await deleteRun(runId);
+                  push("研究记录已删除（含底层文件清理）", "ok");
+                  onDeleted?.();
+                  onBack?.();
+                } catch (e: any) {
+                  push(`删除失败：${e?.message || e}`, "error");
+                } finally {
+                  setDeleteBusy(false);
+                }
+              }}
+            >
+              {deleteBusy ? "删除中…" : "🗑 删除研究"}
+            </button>
+          )}
           {runStatus === "running" && (
-            <button className="btn" disabled={cancelBusy} onClick={handleCancel} style={{ marginLeft: "auto" }}>
+            <button className="btn" disabled={cancelBusy} onClick={handleCancel} style={TERMINAL_RUN_STATUSES.has(runStatus) ? {} : { marginLeft: "auto" }}>
               {cancelBusy ? "取消中…" : "✕ 取消运行"}
             </button>
           )}
@@ -373,18 +455,27 @@ export function RunDashboard({ runId }: { runId: string }) {
       </div>
 
       <div className="tabs sub">
-        {SUBS.map((s) => (
-          <button
-            key={s.id}
-            className={`tab ${sub === s.id ? "active" : ""}`}
-            onClick={() => setSub(s.id)}
-          >
-            {s.label}
-          </button>
+        {SUB_GROUPS.map((g, gi) => (
+          <React.Fragment key={g.group}>
+            {gi > 0 && <span className="tab-sep" />}
+            {g.items.map((s) => (
+              <button
+                key={s.id}
+                className={`tab ${sub === s.id ? "active" : ""}`}
+                onClick={() => setSub(s.id)}
+                title={g.group}
+              >
+                {s.label}
+              </button>
+            ))}
+          </React.Fragment>
         ))}
       </div>
 
       {sub === "live" && <DualLoopLive runId={runId} />}
+      {sub === "deliverables" && (
+        <DeliverablesPanel runId={runId} metrics={events.filter((e) => e.event_type === "eval_completed")} />
+      )}
       {sub === "debug" && (
         <DebugPanel
           runStatus={runStatus}
@@ -422,6 +513,146 @@ export function RunDashboard({ runId }: { runId: string }) {
         <AgentTracePanel steps={trace} loading={traceLoading} runStatus={runStatus} />
       )}
       {sub === "events" && <EventStream runId={runId} />}
+    </div>
+  );
+}
+
+/** 交付物页：评测数据详情 + 产物清单 + 研究包导出（分析 / 验证 / 迁移的入口）。 */
+function DeliverablesPanel({
+  runId,
+  metrics,
+}: {
+  runId: string;
+  metrics: Array<Record<string, any>>;
+}) {
+  const [artifacts, setArtifacts] = useState<ArtifactInfo[] | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const { push } = useToast();
+
+  useEffect(() => {
+    let alive = true;
+    getRunArtifacts(runId)
+      .then((a) => {
+        if (alive) setArtifacts(a);
+      })
+      .catch(() => {
+        if (alive) setArtifacts([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [runId]);
+
+  const evals = metrics.filter((e) => e.metrics && Object.keys(e.metrics).length);
+  const doExport = async () => {
+    setExporting(true);
+    try {
+      await exportRunBundle(runId);
+      push("研究包已下载（含 run 配置 / 指标 / 事件 / 产物 / 决策）", "ok");
+    } catch (e: any) {
+      push(`导出失败：${e?.message || e}`, "error");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="card">
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ margin: 0 }}>评测数据详情（每轮内循环产出的真实指标）</h3>
+          <button className="btn primary small" disabled={exporting} onClick={doExport}>
+            {exporting ? "打包中…" : "⬇ 导出研究包（JSON）"}
+          </button>
+        </div>
+        {evals.length === 0 ? (
+          <div className="muted" style={{ padding: 14, textAlign: "center" }}>
+            暂无评测数据。内循环完成真实评测后，每轮的完整指标会在此展示。
+          </div>
+        ) : (
+          evals.map((e, i) => (
+            <div key={e.event_id || i} style={{ marginTop: 10 }}>
+              <div className="muted small">
+                第 {i + 1} 轮评测 · {e.occurred_at?.replace("T", " ").slice(0, 19)}
+              </div>
+              <table className="lb-table" style={{ marginTop: 4 }}>
+                <thead>
+                  <tr>
+                    <th>指标</th>
+                    <th>数值</th>
+                    <th>说明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(e.metrics).map(([k, v]) => (
+                    <tr key={k}>
+                      <td><code>{k}</code></td>
+                      <td className="mono"><b>{typeof v === "number" ? (v as number).toFixed(4) : String(v)}</b></td>
+                      <td className="muted small">
+                        {k === "accuracy" && "验证折准确率"}
+                        {k === "accuracy_std" && "折间标准差"}
+                        {k === "f1_macro" && "宏平均 F1"}
+                        {k === "cv_folds" && "交叉验证折数"}
+                        {k === "heldout_accuracy" && "留出集准确率（15% held-out）"}
+                        {k === "heldout_f1_macro" && "留出集宏 F1"}
+                        {k === "generalization_gap" && "泛化差距（CV − 留出，|gap|≤0.05 健康）"}
+                        {k === "heldout_frac" && "留出集比例"}
+                        {k === "primary" && "主优化指标"}
+                        {k === "primary_std" && "主指标标准差"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <h3 style={{ marginTop: 0 }}>产物清单（模型 / 代码 / 评测报告）</h3>
+        {!artifacts ? (
+          <div className="muted">加载中…</div>
+        ) : artifacts.length === 0 ? (
+          <div className="muted">该 run 未发布产物。</div>
+        ) : (
+          <table className="lb-table">
+            <thead>
+              <tr>
+                <th>类型</th>
+                <th>产物 ID</th>
+                <th>位置（URI）</th>
+                <th>完整性哈希</th>
+              </tr>
+            </thead>
+            <tbody>
+              {artifacts.map((a) => (
+                <tr key={a.artifact_id}>
+                  <td>
+                    <span className="pill ok small">
+                      {a.artifact_type === "eval_report"
+                        ? "评测报告"
+                        : a.artifact_type === "model_checkpoint"
+                        ? "模型"
+                        : a.artifact_type}
+                    </span>
+                  </td>
+                  <td className="mono small">{a.artifact_id}</td>
+                  <td className="mono small" style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {a.uri}
+                  </td>
+                  <td className="mono muted small">{a.integrity_hash}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p className="muted small" style={{ marginBottom: 0 }}>
+          说明：评测报告的完整指标见上表与「导出研究包」；沙箱内训练/代码产物位于一次性 scratch
+          目录（执行后默认清理，设置 <code>AGENT_SANDBOX_KEEP_SCRATCH=1</code> 可保留用于迁移）。
+          研究包 JSON 含可复现所需的全部配置快照，可用「复现并启动」直接重跑。
+        </p>
+      </div>
     </div>
   );
 }
@@ -525,6 +756,8 @@ function DebugPanel({
 }) {
   const innerLatest = debugResults.filter((r) => r.stage === "inner").slice(-1)[0];
   const outerLatest = debugResults.filter((r) => r.stage === "outer").slice(-1)[0];
+  // 终态 / 非运行中的 run 不能再调试或启动实验（否则后端 409 报错）。
+  const debugAllowed = runStatus === "running" || runStatus === "requested";
 
   return (
     <div className="card debug-panel" style={{ marginTop: 12 }}>
@@ -538,6 +771,11 @@ function DebugPanel({
         在启动完整实验前，可对双循环的关键环节进行<b>单独调试</b>：验证数据加载、模型训练、审计阈值是否合理。
         调试结果不会污染研究记录与榜单。
       </p>
+      {!debugAllowed && (
+        <div className="card warn-banner" style={{ marginBottom: 16 }}>
+          该研究的当前状态（{runStatus}）不支持调试 / 启动实验——仅进行中（running）或已创建未启动（requested）的研究可以调试。
+        </div>
+      )}
       {debugBusy && (
         <p className="muted small" style={{ color: "var(--accent)", marginTop: -8, marginBottom: 16 }}>
           ● 调试运行中… 结果将随事件流自动出现，无需刷新。
@@ -551,7 +789,7 @@ function DebugPanel({
           <p className="muted small">运行一次 kaggle_eval（或 agent 内循环），验证数据、模型与指标。</p>
           <button
             className="btn primary"
-            disabled={debugBusy !== null}
+            disabled={!debugAllowed || debugBusy !== null}
             onClick={() => onDebug("inner")}
           >
             {debugBusy === "inner" ? "运行中…" : "▶ 运行内循环调试"}
@@ -565,7 +803,7 @@ function DebugPanel({
           <p className="muted small">对最近一次内循环结果运行外审计（layer_11），验证审计阈值与结论。</p>
           <button
             className="btn"
-            disabled={debugBusy !== null || !innerLatest}
+            disabled={!debugAllowed || debugBusy !== null || !innerLatest}
             onClick={() => onDebug("outer")}
           >
             {debugBusy === "outer" ? "运行中…" : "▶ 运行外循环调试"}
@@ -575,7 +813,7 @@ function DebugPanel({
         </div>
       </div>
 
-      {runStatus === "requested" && (
+      {runStatus === "requested" && debugAllowed && (
         <div className="card note" style={{ marginTop: 16 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
             <div>

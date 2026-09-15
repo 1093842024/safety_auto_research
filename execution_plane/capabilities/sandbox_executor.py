@@ -100,17 +100,28 @@ def hard_isolation_required(params: dict[str, Any] | None) -> bool:
 def sandbox_requested(capability_id: str, params: dict[str, Any] | None) -> bool:
     """Whether a capability invocation should execute inside the sandbox.
 
-    True when the caller explicitly opts in (``params["sandbox"] is True``), or when
-    the operator enables sandboxing globally (``AGENT_SANDBOX=1``) for a
-    sandbox-eligible capability.
+    Docker 隔离**默认启用**：caller 显式 opt-in（``params["sandbox"] is True``）、或
+    sandbox-eligible 能力 + Docker 可用即路由进容器。显式关闭：``AGENT_SANDBOX=0``
+    或 ``AGENT_SANDBOX_DISABLE=1``（此时仅显式 opt-in 才走沙箱）。
     """
 
     params = params or {}
     if params.get("sandbox") is True:
         return True
-    if os.environ.get("AGENT_SANDBOX") == "1" and capability_id in SANDBOX_CAPABILITY_IDS:
+    if params.get("sandbox") is False:
+        return False
+    if capability_id not in SANDBOX_CAPABILITY_IDS:
+        return False
+    disabled = (
+        os.environ.get("AGENT_SANDBOX") == "0"
+        or os.environ.get("AGENT_SANDBOX_DISABLE") == "1"
+    )
+    if disabled:
+        return False
+    if os.environ.get("AGENT_SANDBOX") == "1":
         return True
-    return False
+    # Default ON: route into the sandbox whenever Docker is available.
+    return shutil.which("docker") is not None
 
 
 class SandboxResearchExecutor(StageExecutor):
@@ -421,7 +432,10 @@ class SandboxResearchExecutor(StageExecutor):
         eval_meta: dict[str, Any],
     ) -> ExecResult:
         """Original execute() body; scratch lifetime is owned by execute()."""
-        network = str(params.get("network") or "none")
+        # Default to the most permissive sandbox network (bridge): the hard boundary
+        # stays (read-only mounts, cap-drop, resource limits); operators who need a
+        # fully offline run pass params["network"]="none" or AGENT_SANDBOX_NETWORK=none.
+        network = str(params.get("network") or "bridge")
 
         if not _BUILD_SCRIPT.exists():
             return ExecResult(

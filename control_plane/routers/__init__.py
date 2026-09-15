@@ -12,6 +12,9 @@ from .experiments import build_experiments_router
 from .integrity import build_integrity_router
 from .flywheel import build_flywheel_router
 from .llm import build_llm_router
+from .settings import build_settings_router
+from .datasets import build_datasets_router
+from .research_skills import build_research_skills_router
 
 __all__ = [
     "build_workflow_runs_router",
@@ -24,4 +27,7 @@ __all__ = [
     "build_integrity_router",
     "build_flywheel_router",
     "build_llm_router",
+    "build_settings_router",
+    "build_datasets_router",
+    "build_research_skills_router",
 ]

@@ -422,3 +422,28 @@ class ResearchStateStore:
         self.strategy_archive = StrategyArchive(db_path)
         self.playbook = PlaybookStore(db_path)
         self.evolution = EvolutionArchive(db_path)
+
+    def forget_run(self, run_id: str) -> dict[str, int]:
+        """Delete every state row belonging to ``run_id`` (run-record deletion).
+
+        The stores persist the run association differently: ``evolution_candidates``
+        has a dedicated run_id column, while hypo_nodes / strategies / experiences
+        embed it inside their JSON ``data`` column — use ``json_extract`` there.
+        """
+        if not self.db_path:
+            return {}
+        counts: dict[str, int] = {}
+        with sqlite3.connect(self.db_path) as conn:
+            cur = conn.execute(
+                "DELETE FROM evolution_candidates WHERE run_id = ?", (run_id,)
+            )
+            counts["evolution_candidates"] = cur.rowcount
+            for table in ("hypo_nodes", "strategies", "experiences"):
+                cur = conn.execute(
+                    f"DELETE FROM {table} "
+                    "WHERE json_extract(data, '$.run_id') = ?",
+                    (run_id,),
+                )
+                counts[table] = cur.rowcount
+            conn.commit()
+        return counts

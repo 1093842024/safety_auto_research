@@ -32,7 +32,8 @@ def build_extra_tasks(BenchmarkTask, _oss):
         task_id="autolab.grpo_multisource",
         name="GRPO Multi-Source (CPU proxy)",
         source_project="autolab",
-        category="model_dev",
+        category="perf_opt",
+        sub_category="llm_systems",
         modality="text",
         dataset_desc="Multi-source visual-math GRPO (Qwen2.5-VL-7B, L40S GPU). Offline-infeasible, so "
                     "wired as a CPU reference: a tiny NumPy GRPO-style training-step latency proxy.",
@@ -58,7 +59,8 @@ def build_extra_tasks(BenchmarkTask, _oss):
         task_id="autolab.flash_attention",
         name="Flash Attention (NumPy reference)",
         source_project="autolab",
-        category="system_opt",
+        category="perf_opt",
+        sub_category="kernel",
         modality="kernel",
         dataset_desc="Reference attention kernel (C, tiled+AVX2, gpus=0) timed on n=4096,d=64. Wired as a "
                     "NumPy reference of the same op for wall-clock latency.",
@@ -83,7 +85,8 @@ def build_extra_tasks(BenchmarkTask, _oss):
         task_id="autolab.aes128_ctr",
         name="AES-128 CTR (pure-Python reference)",
         source_project="autolab",
-        category="system_opt",
+        category="perf_opt",
+        sub_category="algo",
         modality="kernel",
         dataset_desc="Reference AES-128-CTR throughput (C + AES-NI SIMD, 8-way, 256 MiB). Wired as a real "
                     "pure-Python AES-128-CTR timed on a 1 MiB buffer (throughput extrapolated).",
@@ -108,7 +111,8 @@ def build_extra_tasks(BenchmarkTask, _oss):
         task_id="autolab.adaptive_compression",
         name="Adaptive Compression (NumPy context-model)",
         source_project="autolab",
-        category="puzzle",
+        category="perf_opt",
+        sub_category="compression",
         modality="sequence",
         dataset_desc="Byte-level compression (order-0..6 PPM ref). Wired with the official datagen.py + "
                     "visible sequences (seed 20260601) scored by a real order-0..2 context-mixing predictor.",
@@ -134,7 +138,8 @@ def build_extra_tasks(BenchmarkTask, _oss):
         task_id="autolab.ntt_butterfly_cuda",
         name="NTT Butterfly (NumPy/Py reference)",
         source_project="autolab",
-        category="cuda",
+        category="perf_opt",
+        sub_category="kernel",
         modality="kernel",
         dataset_desc="Forward NTT over Goldilocks prime p=2^64-2^32+1 (CUDA, H100). Wired as a real "
                     "radix-2 Cooley-Tukey NTT (bit-exact, same prime) timed on n=65536.",
@@ -160,7 +165,8 @@ def build_extra_tasks(BenchmarkTask, _oss):
         task_id="autolab.llm_online_serving",
         name="LLM Online Serving (local handler proxy)",
         source_project="autolab",
-        category="model_dev",
+        category="perf_opt",
+        sub_category="llm_systems",
         modality="serving",
         dataset_desc="SimpleLLM serving a 21B MoE (gpt-oss-20b, H100) for composite serving score. Wired as "
                     "a real local request-handler (continuous-batching vs serial) throughput/latency proxy.",
@@ -190,7 +196,8 @@ def build_extra_tasks(BenchmarkTask, _oss):
         task_id="arbor.algotune_knn",
         name="Arbor · AlgoTune kNN speedup",
         source_project="Arbor",
-        category="efficiency",
+        category="perf_opt",
+        sub_category="algo",
         modality="tabular",
         dataset_desc="k-nearest-neighbour (Euclidean) brute-force; dev/test on disjoint random-seed "
                      "ranges (dev 1000+ / test 9000+). Solution must pass a correctness gate on every instance.",
@@ -218,7 +225,8 @@ def build_extra_tasks(BenchmarkTask, _oss):
         task_id="autoclaude.trigger_eval",
         name="ARIS · Skill trigger-rate eval",
         source_project="Auto-claude-code-research-in-sleep",
-        category="tooling",
+        category="agent_eval",
+        sub_category="meta_eval",
         modality="text",
         dataset_desc="JSON of {skill: [queries]} with positive + negative (should-not-trigger) samples; "
                      "measures whether skill descriptions are correctly triggered by user intent. Runs fully offline.",
@@ -251,7 +259,8 @@ def build_extra_tasks(BenchmarkTask, _oss):
         task_id="claudini.random",
         name="Claudini · Random-target suffix attack (tmeoa port)",
         source_project="claudini",
-        category="adversarial",
+        category="safety_adversarial",
+        sub_category="attack",
         modality="text",
         dataset_desc=(
             "White-box discrete suffix adversarial attack (GCG-style) on synthetic "
@@ -286,7 +295,8 @@ def build_extra_tasks(BenchmarkTask, _oss):
         task_id="claudini.injection",
         name="Claudini · Prompt-injection attack (tmeoa port)",
         source_project="claudini",
-        category="adversarial",
+        category="safety_adversarial",
+        sub_category="attack",
         modality="text",
         dataset_desc=(
             "Prompt-injection attack on AlpacaFarm prompts targeting the word 'Hacked'. "
@@ -320,7 +330,8 @@ def build_extra_tasks(BenchmarkTask, _oss):
         task_id="claudini.safeguard",
         name="Claudini · Safeguard-bypass attack (tmeoa port)",
         source_project="claudini",
-        category="adversarial",
+        category="safety_adversarial",
+        sub_category="attack",
         modality="text",
         dataset_desc=(
             "Safeguard-bypass attack on ClearHarm-style harmful queries (40 local samples). "
@@ -358,6 +369,7 @@ def build_extra_tasks(BenchmarkTask, _oss):
         name="ARA · Artifact understanding eval (tmeoa port)",
         source_project="Agent-Native-Research-Artifact",
         category="agent_eval",
+        sub_category="open_research",
         modality="text",
         dataset_desc=(
             "Papers + per-paper questions (catA/B/C) with gold answers; measures an agent's "
@@ -390,6 +402,7 @@ def build_extra_tasks(BenchmarkTask, _oss):
         name="ARC-Bench · 55-topic open research (tmeoa ML01 port)",
         source_project="AutoResearchClaw",
         category="agent_eval",
+        sub_category="open_research",
         modality="mixed",
         dataset_desc=(
             "55 open research topics across ML(25)/HEP(10)/quantum(10)/biology(7)/statistics(3); "

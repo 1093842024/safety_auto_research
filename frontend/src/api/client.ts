@@ -103,6 +103,7 @@ export interface WorkflowRunSummary {
   target_id: string;
   status: string;
   started_at?: string;
+  ended_at?: string | null;
   status_detail?: string | null;
   objective_snapshot?: {
     name?: string;
@@ -206,7 +207,18 @@ export interface ExperienceEntry {
   confidence: number;
 }
 
-const runSummarySchema = z.object({ run_id: z.string(), status: z.string() });
+// NOTE: zod strips fields not declared here on a SUCCESSFUL parse, so every field
+// the UI renders must be declared explicitly (missing one silently blanks the UI —
+// e.g. run names / categories once disappeared because only run_id+status were kept).
+const runSummarySchema = z.object({
+  run_id: z.string(),
+  status: z.string(),
+  target_id: z.string().optional(),
+  started_at: z.string().optional(),
+  ended_at: z.string().nullable().optional(),
+  status_detail: z.string().nullable().optional(),
+  objective_snapshot: z.any().optional(),
+});
 
 export const getRuns = async () => {
   const data = await apiGet<any[]>("/workflow-runs");
@@ -253,6 +265,7 @@ export interface BenchmarkTask {
   name: string;
   source_project: string;
   category: string;
+  sub_category?: string;
   modality: string;
   dataset_desc: string;
   eval_metric: string;
@@ -274,6 +287,10 @@ export interface BenchmarkTask {
   sandbox_isolation?: string;
   /** Concise task objective, composed from core fields. */
   goal?: string;
+  /** Research background / motivation: what studying this task actually means. */
+  background?: string;
+  /** 指标详解：含义 / 计算方式 / 参考实现（评估指标目录条目）。 */
+  metric_detail?: MetricInfo | null;
   /** custom-registered tasks only */
   task_type?: string;
   type_config?: Record<string, any> | null;
@@ -285,6 +302,28 @@ export interface BenchmarkTask {
   data_size_bytes?: number | null;
 }
 
+// ----- Evaluation-metric catalog (评估指标 tab / 任务指标详解) -----
+export interface MetricInfo {
+  metric_id: string;
+  name: string;
+  /** 指标含义：度量什么、为什么这样度量 */
+  description: string;
+  /** 计算方式：公式 / 计算流程 / 评测协议 */
+  computation: string;
+  direction: string;
+  typical_range: string;
+  applicable: string[];
+  /** metric_lib 标准参考实现的 Python 源码 */
+  implementation: string;
+  library: string;
+}
+
+export const getMetricCatalog = () =>
+  apiGet<MetricInfo[]>("/benchmark-metrics");
+
+export const getMetricDetail = (metricId: string) =>
+  apiGet<MetricInfo>(`/benchmark-metrics/${encodeURIComponent(metricId)}`);
+
 export const getBenchmarkTasks = async () => {
   const data = await apiGet<any[]>("/benchmark-tasks");
   for (const t of data) {
@@ -293,7 +332,320 @@ export const getBenchmarkTasks = async () => {
     }
   }
   return data as BenchmarkTask[];
+}
+
+// ----- Task data preview (sample cases + volume stats, read-only) -----
+export interface DataPreviewFile {
+  path: string;
+  size_bytes: number;
+  error?: string;
+  preview?: {
+    kind: "csv" | "jsonl" | "json" | "npz";
+    columns?: string[] | null;
+    dtypes?: string[] | null;
+    rows?: number | null;
+    samples?: any[][];
+    arrays?: Array<{ name: string; shape: number[]; dtype: string }>;
+    kv_counts?: Record<string, number>;
+  } | null;
+}
+
+export interface TaskDataPreview {
+  task_id: string;
+  found: boolean;
+  dirs: string[];
+  files: DataPreviewFile[];
+  file_count?: number;
+  total_bytes: number;
+  note?: string;
+}
+
+export const getTaskDataPreview = (taskId: string) =>
+  apiGet<TaskDataPreview>(
+    `/benchmark-tasks/${encodeURIComponent(taskId)}/data-preview`,
+  );
+
+// ----- System settings: agent-CLI model query / selection (系统设置) -----
+export interface AgentSettings {
+  cli: string;
+  cli_label: string;
+  /** Empty string = use the CLI's own default (Opus main + Haiku fallback). */
+  model: string;
+  model_explicit: boolean;
+  /** Active API key state (raw keys never leave the backend). */
+  api_key_set?: boolean;
+  api_key_masked?: string;
+  api_base_url?: string;
+  /** Currently enabled account resolved from the saved list ("" = CLI 登录态). */
+  active_account?: { label: string; masked: string; base_url: string };
+  saved_keys?: ApiKeyEntry[];
+  note?: string;
+}
+
+/** A saved tclaude account (API key), masked for display. */
+export interface ApiKeyEntry {
+  label: string;
+  masked: string;
+  base_url?: string;
+  active: boolean;
+}
+
+/** Result of a live API-key probe (minimal real turn through the CLI). */
+export interface ApiKeyValidateResult {
+  /** true = valid / false = invalid / null = inconclusive (e.g. timeout). */
+  valid: boolean | null;
+  detail: string;
+  latency_ms: number | null;
+}
+
+/** CLI 自身登录态检测（tclaude login 的同步结果；身份本地不可见，仅测可用性）。 */
+export interface CliLoginState {
+  logged_in: boolean | null;
+  detail: string;
+  latency_ms: number | null;
+  cached?: boolean;
+}
+
+export const getCliLoginState = (refresh = false) =>
+  apiGet<CliLoginState>(
+    `/settings/agent/cli-login${refresh ? "?refresh=true" : ""}`,
+  );
+
+export interface AgentModels {
+  models: string[];
+  /** "cli-probe" (live from the CLI) | "cache" | "fallback" */
+  source: string;
+  cli: string;
+  cli_label?: string;
+}
+
+export const getAgentSettings = () =>
+  apiGet<AgentSettings>("/settings/agent");
+
+export const updateAgentSettings = (
+  model?: string,
+  extra?: { api_key?: string; api_base_url?: string },
+) =>
+  apiPut<{ ok: boolean; model: string }>("/settings/agent", {
+    ...(model !== undefined ? { model } : {}),
+    ...extra,
+  });
+
+export const getAgentModels = () =>
+  apiGet<AgentModels>("/settings/agent/models");
+
+// ----- System settings: agent-CLI API key accounts (tclaude 多账号) -----
+export const saveApiKey = (label: string, apiKey: string, base_url?: string) =>
+  apiPost<{ ok: boolean; saved_keys: ApiKeyEntry[] }>(
+    "/settings/agent/apikeys",
+    { label, api_key: apiKey, ...(base_url ? { base_url } : {}) },
+  );
+
+export const deleteApiKey = (label: string) =>
+  apiPost<{ ok: boolean; saved_keys: ApiKeyEntry[] }>(
+    "/settings/agent/apikeys/delete",
+    { label },
+  );
+
+export const activateApiKey = (label: string) =>
+  apiPost<{ ok: boolean; saved_keys: ApiKeyEntry[] }>(
+    "/settings/agent/apikeys/activate",
+    { label },
+  );
+
+/** Validate a raw key (not yet saved), a saved account by label, or the CLI login. */
+export const validateApiKey = (params: { label?: string; api_key?: string; base_url?: string }) =>
+  apiPost<ApiKeyValidateResult>("/settings/agent/apikeys/validate", params);
+
+// ----- System settings: local machine environment detection (系统设置) -----
+export interface GpuDevice {
+  name: string;
+  driver_version: string;
+  memory_total_mb: number | null;
+  memory_used_mb: number | null;
+  utilization_pct: number | null;
+  temperature_c: number | null;
+}
+
+export interface SystemEnvironment {
+  docker: {
+    available: boolean;
+    daemon_running: boolean;
+    path?: string;
+    version?: string;
+    server_version?: string;
+    reason?: string;
+  };
+  gpu: {
+    available: boolean;
+    path?: string;
+    cuda_version?: string;
+    devices?: GpuDevice[];
+    reason?: string;
+  };
+  agent_cli: {
+    configured_cli: string;
+    configured_label: string;
+    configured_available: boolean;
+    agent_command_set: boolean;
+    clis: Array<{
+      name: string;
+      available: boolean;
+      path: string;
+      version: string;
+      version_probe_ok?: boolean;
+      configured?: boolean;
+    }>;
+  };
+  host: {
+    os: string;
+    python: string;
+    cpu_count: number | null;
+    mem_total_gb: number | null;
+  };
+}
+
+export const getSystemEnvironment = () =>
+  apiGet<SystemEnvironment>("/settings/environment");
+
+// ----- Research-skill knowledge base (研究 Skill · AREX-Skill) -----
+export interface SkillEntry {
+  name: string;
+  description: string;
+  /** repositories | task_oriented */
+  category: string;
+  /** 仓库名（repositories）或基准名（task_oriented，如 PaperBench） */
+  group: string;
+  /** 相对分组路径（sub-skills / skills/<source>/…） */
+  sub: string;
+  /** 研究大类（Computer Vision / Biomedical AI / …，来自官方 catalog） */
+  domain: string;
+  subdomain?: string;
+  disco_role?: string;
+  /** SKILL.md 的相对路径（详情查询键） */
+  path: string;
+}
+
+export interface SkillSearchResult {
+  total: number;
+  items: SkillEntry[];
+}
+
+export interface SkillTree {
+  total: number;
+  categories: Record<string, number>;
+  /** 大类 → 研究大类（domain）→ 仓库/基准 → 数量 */
+  tree: Record<string, Record<string, Record<string, number>>>;
+}
+
+export interface SkillFileEntry {
+  path: string;
+  size: number;
+}
+
+export interface SkillDetail {
+  found: boolean;
+  path: string;
+  meta: Record<string, string>;
+  body: string;
+  truncated: boolean;
+  sub_skills: string[];
+  files: SkillFileEntry[];
+}
+
+export interface SkillFileContent {
+  found: boolean;
+  binary?: boolean;
+  path?: string;
+  content?: string;
+  truncated?: boolean;
+  size?: number;
+}
+
+export const getSkillTree = () => apiGet<SkillTree>("/research-skills/tree");
+
+export const searchSkills = (params: {
+  q?: string;
+  category?: string;
+  group?: string;
+  domain?: string;
+  limit?: number;
+  offset?: number;
+}) => {
+  const usp = new URLSearchParams();
+  if (params.q) usp.set("q", params.q);
+  if (params.category) usp.set("category", params.category);
+  if (params.group) usp.set("group", params.group);
+  if (params.domain) usp.set("domain", params.domain);
+  usp.set("limit", String(params.limit ?? 50));
+  usp.set("offset", String(params.offset ?? 0));
+  return apiGet<SkillSearchResult>(`/research-skills?${usp.toString()}`);
 };
+
+export const getSkillFile = (path: string) =>
+  apiGet<SkillFileContent>(
+    `/research-skills/file?path=${encodeURIComponent(path)}`,
+  );
+
+export const getSkillDetail = (path: string) =>
+  apiGet<SkillDetail>(
+    `/research-skills/detail?path=${encodeURIComponent(path)}`,
+  );
+
+async function apiPut<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${path}`);
+  return (await res.json()) as T;
+}
+
+// ----- Dataset management (数据集管理: register / inspect local datasets) -----
+export interface DatasetRecord {
+  dataset_id: string;
+  name: string;
+  modality: string; // text | image | audio
+  task_kind: string; // classification | llm_generation
+  data_path: string;
+  label_file?: string;
+  label_field?: string;
+  content_field?: string;
+  format: string;
+  notes?: string;
+  created_at: string;
+  num_samples?: number | null;
+  size_bytes?: number;
+  columns?: string[] | null;
+  samples?: any[][];
+  label_stats?: Record<string, number> | null;
+  media_file_count?: number | null;
+  label_file_stats?: { rows: number; columns: string[] } | null;
+  notes_list?: string[];
+}
+
+export interface DatasetRegisterInput {
+  name: string;
+  modality: string;
+  task_kind: string;
+  data_path: string;
+  label_file?: string;
+  label_field?: string;
+  content_field?: string;
+  notes?: string;
+}
+
+export const getDatasets = () => apiGet<DatasetRecord[]>("/datasets");
+
+export const registerDataset = (input: DatasetRegisterInput) =>
+  apiPost<DatasetRecord>("/datasets", input as unknown as Record<string, unknown>);
+
+export const getDataset = (id: string) =>
+  apiGet<DatasetRecord>(`/datasets/${encodeURIComponent(id)}`);
+
+export const deleteDataset = (id: string) =>
+  apiDelete<{ deleted: string }>(`/datasets/${encodeURIComponent(id)}`);
 
 /** A single step in the agent's inner-loop execution trace ("Agent 执行流水"). */
 export interface AgentTraceStep {
@@ -401,6 +753,8 @@ export interface InnerLoopConfig {
   threshold?: number | null;
   drop_cols?: string[];
   data_dir?: string | null;
+  /** 优化指标覆盖（评估指标目录中的 metric_id）；null/undefined = 任务默认指标。 */
+  eval_metric?: string | null;
   // agent-mode only (forwarded to a RemoteAgentHarness when configured)
   system_prompt?: string;
   skills?: string[];
@@ -855,6 +1209,73 @@ export const cancelRun = (runId: string) =>
     `/workflow-runs/${encodeURIComponent(runId)}/cancel`,
   );
 
+// ----- Run liveness: 运行中 run 是真在跑还是僵尸（状态未感知的异常终止） -----
+export type LivenessVerdict =
+  | "active" // 执行线程存活且事件在更新
+  | "stale" // 线程在但长时间无事件（疑似卡死）
+  | "zombie" // 无执行线程（异常终止遗留）
+  | "waiting_approval"
+  | "idle";
+
+export interface RunLiveness {
+  status: string;
+  driver_alive: boolean;
+  last_activity_at: string | null;
+  stale_minutes: number | null;
+  verdict: LivenessVerdict;
+  reason: string;
+}
+
+/** Liveness snapshot for all non-terminal runs, keyed by run_id. */
+export const getRunsLiveness = () =>
+  apiGet<Record<string, RunLiveness>>("/workflow-runs/liveness");
+
+/** Delete a TERMINAL run + its persisted objects and on-disk scratch files. */
+export const deleteRun = (runId: string) =>
+  apiDelete<{ run_id: string; deleted: Record<string, number> }>(
+    `/workflow-runs/${encodeURIComponent(runId)}`,
+  );
+
+export interface ArtifactInfo {
+  artifact_id: string;
+  artifact_type: string;
+  uri: string;
+  schema_version: string;
+  producer_ref: string;
+  integrity_hash: string;
+}
+
+export const getRunArtifacts = (id: string) =>
+  apiGet<ArtifactInfo[]>(`/workflow-runs/${encodeURIComponent(id)}/artifacts`);
+
+/** 下载研究包（run 配置 + 指标 + 事件 + 产物 + 决策），用于分析 / 迁移。 */
+export async function exportRunBundle(id: string): Promise<void> {
+  const res = await fetch(`/api/workflow-runs/${encodeURIComponent(id)}/export`);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${id}_research_bundle.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function apiDelete<T>(path: string): Promise<T> {
+  const res = await fetch(`/api${path}`, { method: "DELETE" });
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = String(body.detail);
+    } catch {
+      /* keep default */
+    }
+    throw new Error(detail);
+  }
+  return (await res.json()) as T;
+}
+
 // ---------------------------------------------------------------------------
 // Human-in-the-loop collaboration: resolve a paused step
 // ---------------------------------------------------------------------------
@@ -889,7 +1310,8 @@ export const resolveCollaboration = (runId: string, payload: ResolveCollaboratio
 
 export const STATUS_LABEL: Record<string, string> = {
   running: "运行中",
-  requested: "已请求",
+  // requested = 仅创建了 run 记录（登记目标/配置），从未启动执行，后台无任何线程。
+  requested: "已创建（未启动）",
   waiting_approval: "等待审批",
   succeeded: "成功",
   failed: "失败",
@@ -942,20 +1364,58 @@ export const DECISION_CLASS: Record<string, string> = {
 // ---------------------------------------------------------------------------
 // Canonical task-category labels — single source of truth (superset of all
 // views that previously defined their own copies of this map).
+// v2 分类体系（2026-09）：主分类只描述「任务研究什么」；执行方式 / 来源等
+// 正交属性不再混入 category。旧分类（LEGACY_CATEGORIES）不做映射，
+// 历史研究记录在侧边栏统一归入「归档（旧分类）」组。
 // ---------------------------------------------------------------------------
 export const CATEGORY_LABELS: Record<string, string> = {
-  model_dev: "模型开发",
-  system_opt: "系统优化",
-  puzzle: "谜题/挑战",
-  cuda: "CUDA 内核",
-  adversarial: "对抗/越狱",
-  efficiency: "效率基准",
-  agent_eval: "科研 Agent 评测",
-  idea_eval: "想法质量评测",
-  tooling: "工具型元评测",
-  platform_native: "平台原生(可实跑)",
-  custom: "自定义注册任务",
+  ml_modeling: "机器学习建模",
+  perf_opt: "性能与效率优化",
+  safety_adversarial: "安全与对抗",
+  agent_eval: "智能体能力评测",
 };
+
+export const SUBCATEGORY_LABELS: Record<string, string> = {
+  tabular: "表格建模",
+  sandbox: "沙箱建模",
+  kernel: "算子与内核",
+  algo: "算法加速",
+  compression: "模型/编码压缩",
+  llm_systems: "LLM 训练与服务",
+  attack: "攻击与越狱",
+  scientific_discovery: "科学发现",
+  ml_engineering: "ML 工程",
+  open_research: "开放式科研",
+  meta_eval: "元评测",
+};
+
+// v1 分类（已退役）。历史 objective_snapshot 里可能仍存有这些值；
+// 按约定不做新旧映射，统一折叠为「归档」分组展示。
+export const LEGACY_CATEGORIES: ReadonlySet<string> = new Set([
+  "model_dev",
+  "system_opt",
+  "puzzle",
+  "cuda",
+  "adversarial",
+  "efficiency",
+  "idea_eval",
+  "tooling",
+  "platform_native",
+  "custom",
+]);
+
+export const ARCHIVE_CATEGORY_GROUP = "archive";
+export const ARCHIVE_CATEGORY_LABEL = "归档（旧分类）";
+
+/** Display label for a raw category id (legacy ids collapse to the archive label). */
+export const categoryLabel = (c: string): string =>
+  c === ARCHIVE_CATEGORY_GROUP || LEGACY_CATEGORIES.has(c)
+    ? ARCHIVE_CATEGORY_LABEL
+    : CATEGORY_LABELS[c] || c;
+
+/** Grouping key for a raw category id (all legacy ids share one archive group). */
+export const categoryGroup = (c: string): string =>
+  LEGACY_CATEGORIES.has(c) ? ARCHIVE_CATEGORY_GROUP : c || "未分类";
 
 // ---------------------------------------------------------------------------
 // Dev guard: every canonical WorkflowStatus must have a display label. Surfaces
